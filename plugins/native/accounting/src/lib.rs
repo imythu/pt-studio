@@ -429,6 +429,64 @@ impl AccountingService for Accounting {
     }
 }
 
+#[async_trait]
+impl pt_plugin_api::JsonService for Accounting {
+    async fn call(&self, ctx: &Ctx, method: &str, a: serde_json::Value) -> PResult<serde_json::Value> {
+        fn arg<T: serde::de::DeserializeOwned>(v: &serde_json::Value, k: &str) -> PResult<T> {
+            serde_json::from_value(v.get(k).cloned().unwrap_or(serde_json::Value::Null))
+                .map_err(|e| PluginError::validation(format!("argument `{k}`: {e}")))
+        }
+        let v = match method {
+            "user_totals" => {
+                serde_json::to_value(AccountingService::user_totals(self, ctx, arg(&a, "user")?).await?)?
+            }
+            "user_totals_many" => {
+                let ids: Vec<u64> = arg(&a, "users")?;
+                serde_json::to_value(AccountingService::user_totals_many(self, ctx, &ids).await?)?
+            }
+            "seeding_now" => {
+                serde_json::to_value(AccountingService::seeding_now(self, ctx, arg(&a, "user")?).await?)?
+            }
+            "set_rate_rule" => {
+                serde_json::to_value(AccountingService::set_rate_rule(self, ctx, arg(&a, "rule")?).await?)?
+            }
+            "remove_rate_rule" => serde_json::to_value(
+                AccountingService::remove_rate_rule(self, ctx, arg(&a, "rule_id")?).await?,
+            )?,
+            "effective_rate" => serde_json::to_value(
+                AccountingService::effective_rate(
+                    self,
+                    ctx,
+                    arg(&a, "user")?,
+                    arg(&a, "torrent_id")?,
+                    arg(&a, "at")?,
+                )
+                .await?,
+            )?,
+            "adjust" => serde_json::to_value(
+                AccountingService::adjust(
+                    self,
+                    ctx,
+                    arg(&a, "user")?,
+                    arg(&a, "d_up")?,
+                    arg(&a, "d_down")?,
+                    &arg::<String>(&a, "reason")?,
+                    &arg::<String>(&a, "idempotency_key")?,
+                )
+                .await?,
+            )?,
+            other => {
+                return Err(PluginError::new(
+                    "kernel.not_found",
+                    format!("ctx.accounting has no method `{other}`"),
+                )
+                .with_status(404));
+            }
+        };
+        Ok(v)
+    }
+}
+
 // ---------------- HTTP（03 §2.4 子集） ----------------
 
 fn ratio(up: i64, down: i64) -> Option<String> {
@@ -607,7 +665,8 @@ pub fn plugin() -> NativePlugin {
         on_event: Some(a.clone()),
         http: Some(Arc::new(Routes)),
         workers: vec![("ingest", a.clone())],
-        services: vec![(ACCOUNTING, service_object::<dyn AccountingService>(a))],
+        services: vec![(ACCOUNTING, service_object::<dyn AccountingService>(a.clone()))],
+        json_services: vec![(ACCOUNTING, a)],
         ..Default::default()
     }
 }

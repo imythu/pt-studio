@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-x-chaos"
+description = "Test plugin that misbehaves on purpose (sandbox limits)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.62"

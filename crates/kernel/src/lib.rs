@@ -10,5 +10,6 @@ pub mod limits;
 pub mod loader;
 pub mod runtime;
 pub mod storage;
+pub mod wasm;
 
 pub use kernel::{Kernel, StartError};

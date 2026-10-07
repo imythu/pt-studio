@@ -7,6 +7,7 @@ use std::{
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use serde_json::Value as Json;
 
 use crate::{
     Actor, ActorKind, InvocationInfo, PResult, PluginError, Principal, UserId,
@@ -38,6 +39,15 @@ pub trait KernelLink: Send + Sync {
     async fn exit_service(&self, callee: Ctx, ok: bool) -> PResult<()>;
     /// 经 `ctx.auth` 提供方鉴权
     async fn authenticate(&self, caller: &Ctx, credential: Credential) -> PResult<Option<Principal>>;
+    /// JSON 分派的服务调用（跨 Native / WASM 边界，见 [`JsonService`]）
+    async fn call_json(&self, caller: &Ctx, service: &str, method: &str, args: Json) -> PResult<Json>;
+}
+
+/// JSON 分派的业务服务（pt:plugin@0.1 的 `services` / `service-provider`）。
+/// WASM 插件经此调用 Native 服务；Native 插件也可经 [`Ctx::call_json`] 调用 WASM 提供的服务。
+#[async_trait]
+pub trait JsonService: Send + Sync {
+    async fn call(&self, ctx: &Ctx, method: &str, args: Json) -> PResult<Json>;
 }
 
 /// 插件上下文：每次调用由内核构造，绑定插件身份、能力与 [`InvocationInfo`]。
@@ -142,6 +152,11 @@ impl Ctx {
             list.push(p.user_id);
         }
         Ok(p)
+    }
+
+    /// JSON 分派的服务调用：`ctx.call_json("ctx.ledger", "transfer", json!({...}))`
+    pub async fn call_json(&self, service: &str, method: &str, args: Json) -> PResult<Json> {
+        self.link.call_json(self, service, method, args).await
     }
 
     /// 以已认证用户的身份继续调用（只能切换一次）。

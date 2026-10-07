@@ -641,6 +641,21 @@ world example-full {
 }
 ```
 
+### 2.0 v0.1 实现说明：业务服务的 JSON 分派（2026-10-07）
+
+§2.2 / §2.3 描述的“每个业务服务一个 WIT 包、内核动态桥接”需要 `service!` 宏为每个服务生成 Val ↔ Rust 适配层，该宏尚未实现。为不阻塞 WASM 插件，`pt:plugin@0.1.0` 增加两个接口（已写入 `crates/plugin-api/wit/plugin.wit`）：
+
+| 接口 | 方向 | 说明 |
+|---|---|---|
+| `services.call(service, method, args: json) -> result<json, plugin-error>` | import | 调用 `requires` 中声明的服务；依赖检查、调用深度、重入检测、作用域传递、独立工作单元与类型化调用完全相同 |
+| `service-provider.call(service, method, args: json)` | export | WASM 插件提供 `provides` 中的服务 |
+
+约定：方法名为服务方法的 snake_case 名；只有一个请求结构体参数的方法，`args` 即该结构体（如 `ledger.transfer` 的 `TransferRequest`）；多参数方法用具名字段（如 `{"currency": "bonus", "user": 1}`）。Native 服务通过 `JsonService` trait 提供同样的分派（`NativePlugin.json_services`），Native 插件也可用 `ctx.call_json(...)` 调用 WASM 提供的服务。
+
+类型化业务服务 WIT 包计划在 `pt:plugin@0.2` 引入，届时 JSON 分派继续保留以兼容。
+
+另：内核以 `world kernel`（不含 `metadata-provider` 导出）生成宿主绑定，原因是 wasmtime 49 bindgen 在导出接口含名为 `lookup` 的函数时生成代码有变量遮蔽错误；元数据插件接入前改为动态查找该导出或升级 wasmtime。
+
 ### 2.1 接口说明与能力映射
 
 | 接口 | 方向 | 需要的能力（`[capabilities]`） | 说明 |

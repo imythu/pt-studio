@@ -148,6 +148,33 @@ impl UsersService for Svc {
     }
 }
 
+#[async_trait]
+impl pt_plugin_api::JsonService for Svc {
+    async fn call(&self, ctx: &Ctx, method: &str, a: serde_json::Value) -> PResult<serde_json::Value> {
+        let id = |k: &str| {
+            a.get(k)
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| PluginError::validation(format!("argument `{k}` must be a user id")))
+        };
+        match method {
+            "get" => Ok(serde_json::to_value(
+                UsersService::get(self, ctx, id("id")?).await?,
+            )?),
+            "get_many" => {
+                let ids: Vec<u64> = serde_json::from_value(a.get("ids").cloned().unwrap_or_default())
+                    .map_err(|e| PluginError::validation(format!("argument `ids`: {e}")))?;
+                Ok(serde_json::to_value(
+                    UsersService::get_many(self, ctx, &ids).await?,
+                )?)
+            }
+            other => Err(
+                PluginError::new("kernel.not_found", format!("ctx.users has no method `{other}`"))
+                    .with_status(404),
+            ),
+        }
+    }
+}
+
 struct Routes(Arc<Identity>);
 
 impl HttpRoutes for Routes {
@@ -167,8 +194,9 @@ pub fn plugin() -> NativePlugin {
         services: vec![
             (AUTH, service_object::<dyn AuthService>(svc.clone())),
             (RBAC, service_object::<dyn RbacService>(svc.clone())),
-            (USERS, service_object::<dyn UsersService>(svc)),
+            (USERS, service_object::<dyn UsersService>(svc.clone())),
         ],
+        json_services: vec![(USERS, svc)],
         ..Default::default()
     }
 }

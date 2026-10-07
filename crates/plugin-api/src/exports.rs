@@ -236,6 +236,8 @@ pub struct NativePlugin {
     pub workers: Vec<(&'static str, Arc<dyn PartitionWorker>)>,
     /// 服务名 → 类型擦除的实现（[`crate::service_object`]）
     pub services: Vec<(&'static str, Arc<dyn Any + Send + Sync>)>,
+    /// 服务名 → JSON 分派实现（供 WASM 插件与 `ctx.call_json` 调用）
+    pub json_services: Vec<(&'static str, Arc<dyn crate::JsonService>)>,
 }
 
 impl std::fmt::Debug for NativePlugin {

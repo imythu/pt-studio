@@ -1,0 +1,609 @@
+package pt:plugin@0.1.0;
+
+/// 公共类型。所有 JSON 一律为 UTF-8 文本，内容须符合对应目录（事件/钩子/MCP）中登记的 JSON Schema。
+interface types {
+  /// JSON 文本（UTF-8）
+  type json = string;
+  /// 用户 ID（PostgreSQL BIGINT，保证 < 2^53）
+  type user-id = u64;
+  /// Unix 毫秒时间戳（UTC）
+  type timestamp-ms = s64;
+
+  /// 统一错误。code 必须是 catalog/error-codes.md 规则下的错误码，如 "bonus.insufficient_balance"
+  record plugin-error {
+    code: string,
+    message: string,
+    /// 可选的结构化细节（JSON 对象）
+    details: option<json>,
+    /// 调用方是否可以安全重试
+    retryable: bool,
+  }
+
+  enum actor-kind {
+    anonymous,
+    user,
+    system,
+    %plugin,
+    mcp,
+  }
+
+  /// 操作发起者
+  record actor {
+    kind: actor-kind,
+    /// kind = user / mcp 时为用户 ID
+    user-id: option<user-id>,
+    /// kind = plugin / system 时为插件 ID 或 "kernel"
+    plugin-id: option<string>,
+    /// mcp 时为 token ID；user 时为会话 ID（已脱敏）
+    credential-id: option<string>,
+  }
+
+  record trace-context {
+    /// W3C traceparent
+    traceparent: string,
+    tracestate: option<string>,
+  }
+
+  enum invocation-kind {
+    init,
+    hook,
+    event,
+    cron,
+    http,
+    mcp,
+    service,
+    search,
+    content-type,
+    metadata,
+  }
+
+  /// 当前调用的上下文（由内核注入，插件只读）
+  record invocation-info {
+    kind: invocation-kind,
+    actor: actor,
+    /// 调用方插件（服务调用时为调用者；其他情况为 "kernel"）
+    caller-plugin: string,
+    /// 调用方在本服务上被授予的作用域，如 ["currency:bonus"]
+    caller-scopes: list<string>,
+    trace: trace-context,
+    /// 请求语言，如 "zh-CN"
+    locale: string,
+    /// 本次调用的截止时间
+    deadline: timestamp-ms,
+    /// 服务调用深度（从 0 开始，内核上限 8）
+    depth: u8,
+  }
+}
+
+/// 读取调用上下文
+interface invocation {
+  use types.{invocation-info};
+  current: func() -> invocation-info;
+}
+
+/// 结构化日志（自动附带 plugin_id、trace_id）
+interface log {
+  enum level { trace, debug, info, warn, error }
+  record field { key: string, value: string }
+  emit: func(level: level, message: string, fields: list<field>);
+}
+
+/// 插件配置：site.toml 静态配置 + 后台可改设置，均已通过插件 JSON Schema 校验
+interface config {
+  use types.{json};
+  /// 整份静态配置（JSON 对象）
+  get-static: func() -> json;
+  /// 整份运行时设置（JSON 对象），每次调用都返回最新值
+  get-settings: func() -> json;
+}
+
+/// 插件私有 KV（PostgreSQL 中 kernel 管理的表，按插件隔离）
+interface kv {
+  use types.{plugin-error, timestamp-ms};
+  get: func(key: string) -> result<option<list<u8>>, plugin-error>;
+  set: func(key: string, value: list<u8>, expires-at: option<timestamp-ms>) -> result<_, plugin-error>;
+  delete: func(key: string) -> result<bool, plugin-error>;
+  /// 比较并设置：当前值等于 expected（none 表示不存在）时才写入
+  compare-and-set: func(key: string, expected: option<list<u8>>, value: list<u8>) -> result<bool, plugin-error>;
+  /// 按前缀列出键，最多 limit 个；cursor 为上次返回的最后一个键
+  list-keys: func(prefix: string, cursor: option<string>, limit: u32) -> result<list<string>, plugin-error>;
+}
+
+/// 高级 SQL 执行器：只能访问本插件 schema 与已授权的只读视图；强制参数化
+interface sql {
+  use types.{plugin-error};
+
+  variant sql-value {
+    null,
+    boolean(bool),
+    int(s64),
+    float(f64),
+    numeric(string),
+    text(string),
+    bytes(list<u8>),
+    /// JSON 文本，对应 jsonb
+    json(string),
+    /// Unix 微秒，对应 timestamptz
+    timestamp(s64),
+    /// 规范文本形式，对应 uuid
+    uuid(string),
+    int-array(list<s64>),
+    text-array(list<string>),
+  }
+
+  record column { name: string, type-name: string }
+
+  record row-set {
+    columns: list<column>,
+    rows: list<list<sql-value>>,
+    /// 结果被行数上限截断时为 true
+    truncated: bool,
+  }
+
+  /// 执行查询并返回行（SELECT 或带 RETURNING 的 DML）
+  query: func(statement: string, params: list<sql-value>) -> result<row-set, plugin-error>;
+  /// 执行 DML，返回受影响行数
+  execute: func(statement: string, params: list<sql-value>) -> result<u64, plugin-error>;
+  /// 同一语句多组参数批量执行（单次往返），返回受影响总行数
+  execute-batch: func(statement: string, param-sets: list<list<sql-value>>) -> result<u64, plugin-error>;
+  /// 仅在 manifest 声明 tx = "manual" 的入口中可用：提交当前事务（含已发布事件）并开启新事务
+  commit: func() -> result<_, plugin-error>;
+}
+
+/// Redis 直接操作：键自动改写为 p:<plugin_id>:<key>，命令受白名单限制
+interface redis {
+  use types.{plugin-error};
+
+  variant redis-scalar {
+    nil,
+    int(s64),
+    bulk(list<u8>),
+  }
+
+  variant redis-reply {
+    nil,
+    ok,
+    int(s64),
+    double(f64),
+    bulk(list<u8>),
+    simple(string),
+    /// 一层数组（HGETALL、ZRANGE、SMEMBERS 等）
+    array(list<redis-scalar>),
+    /// 嵌套结构，按 RESP3 原样编码，由 SDK 解析
+    nested(list<u8>),
+  }
+
+  record command {
+    name: string,
+    args: list<list<u8>>,
+  }
+
+  /// 执行单条命令
+  call: func(cmd: command) -> result<redis-reply, plugin-error>;
+  /// 管道执行；atomic = true 时以 MULTI/EXEC 包裹
+  pipeline: func(cmds: list<command>, atomic: bool) -> result<list<redis-reply>, plugin-error>;
+}
+
+/// 发布领域事件（写入事务内 outbox，提交后投递）
+interface events {
+  use types.{json, plugin-error};
+
+  record new-event {
+    /// 事件类型，如 "bonus.hourly_settled"；必须在 manifest publishes 中声明
+    event-type: string,
+    /// 载荷版本（正整数）
+    version: u32,
+    /// 分区与顺序键，如 "user:123"
+    key: string,
+    payload: json,
+  }
+
+  /// 返回事件 ID（UUIDv7）
+  publish: func(evt: new-event) -> result<string, plugin-error>;
+}
+
+/// 出站 HTTP，仅允许 capabilities.http_outbound 中列出的主机
+interface http-client {
+  use types.{plugin-error};
+
+  record header { name: string, value: string }
+
+  record outbound-request {
+    method: string,
+    url: string,
+    headers: list<header>,
+    body: option<list<u8>>,
+    timeout-ms: u32,
+  }
+
+  record outbound-response {
+    status: u16,
+    headers: list<header>,
+    body: list<u8>,
+  }
+
+  send: func(req: outbound-request) -> result<outbound-response, plugin-error>;
+}
+
+/// 对象存储（S3 兼容），键自动加前缀 plugins/<plugin_id>/
+interface blob {
+  use types.{plugin-error};
+  put: func(key: string, content-type: string, data: list<u8>) -> result<_, plugin-error>;
+  get: func(key: string) -> result<option<list<u8>>, plugin-error>;
+  delete: func(key: string) -> result<_, plugin-error>;
+  /// 生成限时下载地址
+  presign-get: func(key: string, ttl-secs: u32) -> result<string, plugin-error>;
+}
+
+/// 术语服务的便捷接入（实际由 ctx.terms 提供方实现）
+interface terms {
+  use types.{plugin-error};
+  record term {
+    key: string,
+    name: string,
+    short-name: option<string>,
+    unit: option<string>,
+    icon: option<string>,
+  }
+  /// locale 为空时使用当前调用上下文的 locale
+  get: func(key: string, locale: option<string>) -> option<term>;
+  get-many: func(keys: list<string>, locale: option<string>) -> list<term>;
+  /// 按 ICU MessageFormat 渲染文本，参数为 JSON 对象
+  render: func(template: string, args: string, locale: option<string>) -> result<string, plugin-error>;
+}
+
+/// 时间（可在测试中被宿主冻结）
+interface time {
+  use types.{timestamp-ms};
+  now: func() -> timestamp-ms;
+  /// 站点时区，如 "Asia/Shanghai"
+  site-timezone: func() -> string;
+}
+
+/// 随机数与 ID
+interface random {
+  bytes: func(len: u32) -> list<u8>;
+  /// 新 UUIDv7（文本形式）
+  uuid-v7: func() -> string;
+}
+
+/// 审计（内核已自动审计写操作入口；此接口用于补充业务细节）
+interface audit {
+  use types.{json, plugin-error};
+  record audit-entry {
+    /// 动作，如 "bonus.adjust"
+    action: string,
+    /// 目标，如 "user:123"
+    target: string,
+    details: json,
+  }
+  write: func(entry: audit-entry) -> result<_, plugin-error>;
+}
+
+/// 一次性延迟任务；到期后通过 on-cron.run 回调（kind = delayed）
+interface jobs {
+  use types.{json, plugin-error, timestamp-ms};
+  /// 返回任务 ID；dedupe-key 相同的未执行任务只保留一个
+  schedule-once: func(name: string, run-at: timestamp-ms, payload: json, dedupe-key: option<string>) -> result<string, plugin-error>;
+  cancel: func(job-id: string) -> result<bool, plugin-error>;
+}
+
+/// 指标（自动附带 plugin 标签）
+interface metrics {
+  record label { key: string, value: string }
+  counter-add: func(name: string, value: u64, labels: list<label>);
+  gauge-set: func(name: string, value: f64, labels: list<label>);
+  histogram-observe: func(name: string, value: f64, labels: list<label>);
+}
+
+/// 触发由本插件定义的钩子点（manifest [[hook_points]] 中声明）
+interface hook-runner {
+  use types.{json, plugin-error};
+
+  record denial {
+    code: string,
+    message: string,
+    /// 作出拒绝的插件
+    by-plugin: string,
+  }
+
+  variant hook-outcome {
+    /// 全部放行；携带合并了所有 modify 补丁后的最终输入
+    allowed(json),
+    denied(denial),
+  }
+
+  run: func(hook: string, input: json) -> result<hook-outcome, plugin-error>;
+}
+
+/// 元数据聚合（内核把调用路由到对应 metadata-* 插件的 metadata-provider 导出）
+interface metadata {
+  use types.{json, plugin-error};
+
+  record metadata-record {
+    source: string,
+    external-id: string,
+    data: json,
+    fetched-at: s64,
+  }
+
+  sources: func() -> list<string>;
+  lookup: func(source: string, external-id: string, locale: option<string>) -> result<option<metadata-record>, plugin-error>;
+  search: func(source: string, query: string, type-id: string, limit: u32) -> result<list<metadata-record>, plugin-error>;
+}
+
+
+/// 调用依赖的业务服务（v0.1：JSON 分派；清单 `requires` 中声明的服务才可调用）。
+/// method 为服务方法名（snake_case），args / 返回值为 JSON。类型化的业务服务 WIT 包在 0.2 引入。
+interface services {
+  use types.{json, plugin-error};
+  call: func(service: string, method: string, args: json) -> result<json, plugin-error>;
+}
+
+/// 提供业务服务（清单 `provides` 中的服务），与 services.call 对应
+interface service-provider {
+  use types.{json, plugin-error};
+  call: func(service: string, method: string, args: json) -> result<json, plugin-error>;
+}
+
+// ---------------------------------------------------------------------------
+// 插件导出接口
+// ---------------------------------------------------------------------------
+
+/// 生命周期：启动时按拓扑顺序调用一次
+interface lifecycle {
+  use types.{plugin-error};
+  init: func() -> result<_, plugin-error>;
+}
+
+/// 同步钩子
+interface hooks {
+  use types.{json, plugin-error};
+
+  record hook-call {
+    /// 钩子名，如 "torrent.before_upload"
+    hook: string,
+    /// 输入（JSON，结构见 catalog/hooks.md 与对应 schema）
+    input: json,
+  }
+
+  record deny-info {
+    /// 错误码，如 "invite.code_invalid"
+    code: string,
+    /// 面向用户的说明（可含术语占位，由内核渲染）
+    message: string,
+    details: option<json>,
+  }
+
+  variant hook-decision {
+    allow,
+    deny(deny-info),
+    /// JSON Merge Patch（RFC 7396），只能修改该钩子登记的可修改字段
+    modify(json),
+  }
+
+  handle: func(call: hook-call) -> result<hook-decision, plugin-error>;
+}
+
+/// 事件订阅
+interface on-event {
+  use types.{actor, json, plugin-error, timestamp-ms};
+
+  record event-envelope {
+    id: string,
+    event-type: string,
+    version: u32,
+    occurred-at: timestamp-ms,
+    actor: actor,
+    source: string,
+    key: string,
+    payload: json,
+    traceparent: string,
+  }
+
+  record delivery-info {
+    /// 订阅名（manifest [[subscriptions]].name）
+    subscription: string,
+    /// 第几次投递，从 1 开始
+    attempt: u32,
+    /// 是否来自回放
+    replay: bool,
+  }
+
+  handle: func(evt: event-envelope, delivery: delivery-info) -> result<_, plugin-error>;
+}
+
+/// 定时任务与延迟任务
+interface on-cron {
+  use types.{json, plugin-error, timestamp-ms};
+
+  enum job-kind { cron, delayed, manual }
+
+  record job-invocation {
+    /// cron 名或延迟任务名
+    name: string,
+    kind: job-kind,
+    /// 计划触发时间
+    scheduled-at: timestamp-ms,
+    /// 延迟任务的载荷；cron 为 "{}"
+    payload: json,
+    run-id: string,
+  }
+
+  run: func(job: job-invocation) -> result<_, plugin-error>;
+}
+
+/// HTTP 处理（路由在 manifest [[http.routes]] 中声明，内核已完成鉴权、权限、限流）
+interface http-handler {
+  use types.{plugin-error};
+
+  record header { name: string, value: string }
+
+  record request {
+    /// manifest 中的路由 ID
+    route-id: string,
+    method: string,
+    /// 去掉 /api/p/<plugin_id> 前缀后的路径，如 "/v1/items/42"
+    path: string,
+    /// 路径参数（按路由模板解析）
+    params: list<tuple<string, string>>,
+    query: list<tuple<string, string>>,
+    headers: list<header>,
+    body: list<u8>,
+  }
+
+  record response {
+    status: u16,
+    headers: list<header>,
+    body: list<u8>,
+  }
+
+  handle: func(req: request) -> result<response, plugin-error>;
+}
+
+/// 搜索贡献（由 ctx.search 的索引 worker 调用）
+interface search-contributor {
+  use types.{json, plugin-error};
+
+  record field-spec {
+    /// 字段名，类型插件的字段须带前缀，如 "movie_imdb_id"
+    name: string,
+    /// "string" | "int" | "float" | "bool" | "timestamp" | "string[]"
+    field-type: string,
+    searchable: bool,
+    filterable: bool,
+    sortable: bool,
+    /// 可搜索字段的权重顺序，越小越靠前
+    rank: u8,
+    /// 关闭拼写容错
+    exact: bool,
+    /// 术语键（筛选面板显示名）
+    label-term: string,
+  }
+
+  record index-schema {
+    /// 目标索引，如 "torrents"、"groups"
+    index: string,
+    fields: list<field-spec>,
+    /// 同义词组
+    synonyms: list<list<string>>,
+  }
+
+  index-schemas: func() -> list<index-schema>;
+  /// 把实体转成文档片段（JSON 对象）；返回 none 表示该实体不属于本插件
+  to-document: func(index: string, entity-id: u64) -> result<option<json>, plugin-error>;
+}
+
+/// MCP 工具实现（工具在 manifest [[mcp.tools]] 声明）
+interface mcp-tool {
+  use types.{json, plugin-error};
+  /// arguments 已通过输入 schema 校验；返回值须符合输出 schema
+  call: func(tool: string, arguments: json) -> result<json, plugin-error>;
+}
+
+/// 资源类型（ctx.content_types 的多实现提供方导出）
+interface content-type {
+  use types.{json, plugin-error};
+
+  record type-info {
+    /// 类型 ID，如 "movie"
+    type-id: string,
+    /// 术语键，如 "type-movie.name"
+    name-term: string,
+    /// 字段 JSON Schema（上传表单据此生成）
+    field-schema: json,
+    /// Group 字段 JSON Schema；不使用 Group 时为 none
+    group-schema: option<json>,
+  }
+
+  info: func() -> type-info;
+  /// 校验并规范化上传数据，返回规范化后的字段 JSON
+  normalize: func(fields: json) -> result<json, plugin-error>;
+  /// 计算分组键（同键归入同一 Group）；不分组返回 none
+  group-key: func(fields: json) -> result<option<string>, plugin-error>;
+  /// 生成规范标题
+  canonical-title: func(fields: json) -> result<string, plugin-error>;
+}
+
+/// 元数据源（ctx.metadata 的多实现提供方导出）
+interface metadata-provider {
+  use types.{json, plugin-error};
+
+  record source-info {
+    /// 来源 ID，如 "tmdb"
+    source: string,
+    /// 支持的资源类型 ID
+    type-ids: list<string>,
+    /// 外部 ID 的正则（用于识别链接/ID）
+    id-pattern: string,
+  }
+
+  record lookup-result {
+    source: string,
+    external-id: string,
+    /// 归一化字段（JSON 对象，键名见 ctx.metadata 约定）
+    data: json,
+    fetched-at: s64,
+  }
+
+  info: func() -> source-info;
+  lookup: func(external-id: string, locale: string) -> result<option<lookup-result>, plugin-error>;
+  search: func(query: string, type-id: string, limit: u32) -> result<list<lookup-result>, plugin-error>;
+}
+
+// ---------------------------------------------------------------------------
+// 世界
+// ---------------------------------------------------------------------------
+
+/// 宿主可提供的全部通用导入。插件只会被链接到它实际导入且已获授权的接口。
+world host {
+  import types;
+  import invocation;
+  import log;
+  import config;
+  import kv;
+  import sql;
+  import redis;
+  import events;
+  import http-client;
+  import blob;
+  import terms;
+  import time;
+  import random;
+  import audit;
+  import jobs;
+  import metrics;
+  import hook-runner;
+  import metadata;
+  import services;
+}
+
+/// 参考世界：插件按需 include host 并只 export 自己实现的接口
+world example-full {
+  include host;
+  export lifecycle;
+  export hooks;
+  export on-event;
+  export on-cron;
+  export http-handler;
+  export search-contributor;
+  export mcp-tool;
+  export content-type;
+  export metadata-provider;
+  export service-provider;
+}
+
+/// 内核绑定使用的世界。暂不含 metadata-provider：wasmtime 49 的 bindgen 在导出接口含名为 `lookup`
+/// 的函数时生成的代码有变量遮蔽错误；元数据插件接入前改为动态查找导出。
+world kernel {
+  include host;
+  export lifecycle;
+  export hooks;
+  export on-event;
+  export on-cron;
+  export http-handler;
+  export search-contributor;
+  export mcp-tool;
+  export content-type;
+  export service-provider;
+}

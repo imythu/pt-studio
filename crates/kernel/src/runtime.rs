@@ -70,6 +70,8 @@ pub struct HookHandlerEntry {
 }
 
 pub type ServiceObj = Arc<dyn Any + Send + Sync>;
+/// 服务名 → [(提供方, JSON 分派实现)]
+pub type JsonServices = BTreeMap<String, Vec<(String, Arc<dyn pt_plugin_api::JsonService>)>>;
 
 pub struct Shared {
     pub cfg: Arc<SiteConfig>,
@@ -81,6 +83,8 @@ pub struct Shared {
     /// 激活顺序
     pub order: Vec<String>,
     pub services: BTreeMap<String, Vec<(String, ServiceObj)>>,
+    /// JSON 分派的服务实现（WASM 提供方，以及提供了 JSON 适配的 Native 服务）
+    pub json_services: JsonServices,
     pub allowed: HashMap<String, HashSet<String>>,
     pub hook_handlers: BTreeMap<String, Vec<HookHandlerEntry>>,
     pub node_id: String,
@@ -368,6 +372,38 @@ impl KernelLink for Shared {
 
     async fn exit_service(&self, callee: Ctx, ok: bool) -> PResult<()> {
         uow_of(&callee)?.finish(ok).await
+    }
+
+    async fn call_json(&self, caller: &Ctx, service: &str, method: &str, args: Json) -> PResult<Json> {
+        let allowed = self
+            .allowed
+            .get(&*caller.plugin_id)
+            .is_some_and(|s| s.contains(service));
+        if !allowed {
+            return Err(PluginError::capability_denied(format!(
+                "plugin `{}` did not declare `{service}` in requires",
+                caller.plugin_id
+            )));
+        }
+        let (provider, imp) = self
+            .json_services
+            .get(service)
+            .and_then(|v| v.first())
+            .cloned()
+            .ok_or_else(|| {
+                PluginError::unavailable(format!("service {service} has no JSON-callable provider"))
+            })?;
+        let callee = self.enter_service(caller, &provider, service).await?;
+        let remaining = callee.invocation.deadline - now_ms();
+        let budget = std::time::Duration::from_millis(u64::try_from(remaining.max(0)).unwrap_or(0));
+        let r = match tokio::time::timeout(budget, imp.call(&callee, method, args)).await {
+            Ok(r) => r,
+            Err(_) => {
+                Err(PluginError::new("kernel.timeout", format!("service {service} timed out")).retryable())
+            }
+        };
+        uow_of(&callee)?.finish(r.is_ok()).await?;
+        r
     }
 
     async fn authenticate(&self, caller: &Ctx, credential: Credential) -> PResult<Option<Principal>> {

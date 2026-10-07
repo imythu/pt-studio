@@ -75,6 +75,37 @@ pub fn check(cfg: &SiteConfig, natives: Vec<NativePlugin>) -> Result<loader::Res
 fn enabled_specs(cfg: &SiteConfig, natives: Vec<NativePlugin>) -> Result<Vec<PluginSpec>, Vec<LoadError>> {
     let mut specs = Vec::new();
     let mut errors = Vec::new();
+    // WASM 插件包（plugins.dir）
+    let mut wasm = Vec::new();
+    if let Some(dir) = &cfg.plugins.dir {
+        if cfg.plugins.allow_unsigned && cfg.kernel.mode != crate::config::Mode::Dev {
+            errors.push(LoadError::new(
+                "E-LOAD-SIGNATURE",
+                "*",
+                "plugins.allow_unsigned is only accepted in kernel.mode = \"dev\"",
+            ));
+        }
+        match crate::wasm::WasmRuntime::new() {
+            Ok(rt) => {
+                let (ok, failed) =
+                    crate::wasm::load_dir(&rt, std::path::Path::new(dir), cfg.plugins.allow_unsigned);
+                wasm = ok;
+                errors.extend(
+                    failed
+                        .into_iter()
+                        .map(|f| LoadError::new(f.code, &f.plugin, f.message)),
+                );
+            }
+            Err(e) => errors.push(LoadError::new("E-LOAD-WORLD", "*", format!("wasm engine: {e}"))),
+        }
+    }
+    for np in wasm {
+        match PluginSpec::wasm(np) {
+            Ok(s) if cfg.plugins.disabled.iter().any(|d| d == s.id()) => {}
+            Ok(s) => specs.push(s),
+            Err(e) => errors.push(e),
+        }
+    }
     for np in natives {
         match PluginSpec::native(np) {
             Ok(s) if cfg.plugins.disabled.iter().any(|d| d == s.id()) => {}
@@ -247,6 +278,7 @@ impl Kernel {
         // 运行时表
         let mut plugins = BTreeMap::new();
         let mut services: BTreeMap<String, Vec<(String, ServiceObj)>> = BTreeMap::new();
+        let mut json_services = crate::runtime::JsonServices::new();
         let mut hook_handlers: BTreeMap<String, Vec<HookHandlerEntry>> = BTreeMap::new();
         let mut errors = Vec::new();
         for spec in &ordered {
@@ -278,6 +310,22 @@ impl Kernel {
                 }
                 if res.providers.get(*svc).is_some_and(|p| p.contains(&m.id)) {
                     services
+                        .entry((*svc).to_owned())
+                        .or_default()
+                        .push((m.id.clone(), obj.clone()));
+                }
+            }
+            for (svc, obj) in native.map(|n| n.json_services.as_slice()).unwrap_or(&[]) {
+                if !m.provides.iter().any(|p| p.split('@').next() == Some(*svc)) {
+                    errors.push(LoadError::new(
+                        "E-LOAD-WORLD",
+                        &m.id,
+                        format!("implements `{svc}` but does not declare it in provides"),
+                    ));
+                    continue;
+                }
+                if res.providers.get(*svc).is_some_and(|p| p.contains(&m.id)) {
+                    json_services
                         .entry((*svc).to_owned())
                         .or_default()
                         .push((m.id.clone(), obj.clone()));
@@ -330,7 +378,7 @@ impl Kernel {
             plugins.insert(rt.id.clone(), Arc::new(rt));
         }
         for (svc, provs) in &res.providers {
-            if !services.contains_key(svc) {
+            if !services.contains_key(svc) && !json_services.contains_key(svc) {
                 errors.push(LoadError::new(
                     "E-LOAD-WORLD",
                     &provs.join(","),
@@ -355,6 +403,7 @@ impl Kernel {
             plugins,
             order: res.order.clone(),
             services,
+            json_services,
             allowed: res.allowed.clone(),
             hook_handlers,
             node_id,

@@ -52,13 +52,22 @@ impl std::fmt::Debug for PluginSpec {
 
 impl PluginSpec {
     pub fn native(np: NativePlugin) -> Result<Self, LoadError> {
+        Self::of_kind(np, PluginKind::Native)
+    }
+
+    /// 已由 WASM 加载器包装的插件（清单须声明 kind = "wasm"）
+    pub fn wasm(np: NativePlugin) -> Result<Self, LoadError> {
+        Self::of_kind(np, PluginKind::Wasm)
+    }
+
+    fn of_kind(np: NativePlugin, kind: PluginKind) -> Result<Self, LoadError> {
         let manifest =
             Manifest::parse(np.manifest).map_err(|e| LoadError::new("E-LOAD-MANIFEST", "?", e.message))?;
-        if manifest.kind != PluginKind::Native {
+        if manifest.kind != kind {
             return Err(LoadError::new(
                 "E-LOAD-KIND",
                 &manifest.id,
-                "compiled-in plugin must declare kind = \"native\"",
+                format!("manifest kind does not match how the plugin was loaded ({kind:?})"),
             ));
         }
         let manifest_sha256 = hex::encode(Sha256::digest(np.manifest.as_bytes()));

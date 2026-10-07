@@ -11,7 +11,7 @@ pub mod manifest;
 pub mod services;
 mod types;
 
-pub use ctx::{Credential, Ctx, KernelLink, Svc, service_object};
+pub use ctx::{Credential, Ctx, JsonService, KernelLink, Svc, service_object};
 pub use error::{PResult, PluginError, suffix_status};
 pub use exports::*;
 pub use host::{AuditEntry, NewEvent, RedisCommand, RedisReply, SqlValue};

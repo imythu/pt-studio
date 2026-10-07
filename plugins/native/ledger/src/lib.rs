@@ -591,6 +591,89 @@ impl pt_plugin_api::HttpRoutes for Routes {
     }
 }
 
+// ---------------- JSON 分派（pt:plugin@0.1 services，供 WASM 插件调用） ----------------
+
+fn arg<T: serde::de::DeserializeOwned>(v: &serde_json::Value, k: &str) -> PResult<T> {
+    serde_json::from_value(v.get(k).cloned().unwrap_or(serde_json::Value::Null))
+        .map_err(|e| PluginError::validation(format!("argument `{k}`: {e}")))
+}
+
+fn whole<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> PResult<T> {
+    serde_json::from_value(v).map_err(|e| PluginError::validation(format!("arguments: {e}")))
+}
+
+fn out<T: serde::Serialize>(v: T) -> PResult<serde_json::Value> {
+    Ok(serde_json::to_value(v)?)
+}
+
+#[async_trait]
+impl pt_plugin_api::JsonService for Ledger {
+    async fn call(&self, ctx: &Ctx, method: &str, a: serde_json::Value) -> PResult<serde_json::Value> {
+        match method {
+            "register_currency" => out(LedgerService::register_currency(self, ctx, whole(a)?).await?),
+            "currencies" => out(LedgerService::currencies(self, ctx).await?),
+            "transfer" => out(LedgerService::transfer(self, ctx, whole(a)?).await?),
+            "transfer_batch" => {
+                let r = LedgerService::transfer_batch(self, ctx, arg(&a, "requests")?).await?;
+                out(r
+                    .into_iter()
+                    .map(|x| match x {
+                        Ok(v) => json!({ "ok": v }),
+                        Err(e) => json!({ "err": e }),
+                    })
+                    .collect::<Vec<_>>())
+            }
+            "balance" => {
+                out(
+                    LedgerService::balance(self, ctx, &arg::<String>(&a, "currency")?, arg(&a, "user")?)
+                        .await?,
+                )
+            }
+            "balances" => out(LedgerService::balances(self, ctx, arg(&a, "user")?).await?),
+            "history" => out(LedgerService::history(
+                self,
+                ctx,
+                arg(&a, "currency")?,
+                arg(&a, "user")?,
+                arg(&a, "cursor")?,
+                arg::<Option<u32>>(&a, "limit")?.unwrap_or(50),
+            )
+            .await?),
+            "reverse" => out(LedgerService::reverse(
+                self,
+                ctx,
+                &arg::<String>(&a, "entry_id")?,
+                &arg::<String>(&a, "reason")?,
+                &arg::<String>(&a, "idempotency_key")?,
+                arg::<Option<bool>>(&a, "allow_negative")?.unwrap_or(false),
+            )
+            .await?),
+            "hold" => out(LedgerService::hold(self, ctx, whole(a)?).await?),
+            "release_hold" => out(LedgerService::release_hold(
+                self,
+                ctx,
+                &arg::<String>(&a, "hold_id")?,
+                &arg::<String>(&a, "idempotency_key")?,
+            )
+            .await?),
+            "capture_hold" => out(LedgerService::capture_hold(self, ctx, whole(a)?).await?),
+            "lock_account" => out(LedgerService::lock_account(self, ctx, whole(a)?).await?),
+            "unlock_account" => out(LedgerService::unlock_account(
+                self,
+                ctx,
+                &arg::<String>(&a, "lock_id")?,
+                &arg::<String>(&a, "idempotency_key")?,
+            )
+            .await?),
+            "supply" => out(LedgerService::supply(self, ctx, &arg::<String>(&a, "currency")?).await?),
+            other => Err(
+                PluginError::new("kernel.not_found", format!("ctx.ledger has no method `{other}`"))
+                    .with_status(404),
+            ),
+        }
+    }
+}
+
 pub fn plugin() -> NativePlugin {
     let l = Arc::new(Ledger);
     NativePlugin {
@@ -598,7 +681,8 @@ pub fn plugin() -> NativePlugin {
         migrations: MIGRATIONS,
         on_cron: Some(l.clone()),
         http: Some(Arc::new(Routes)),
-        services: vec![(LEDGER, service_object::<dyn LedgerService>(l))],
+        services: vec![(LEDGER, service_object::<dyn LedgerService>(l.clone()))],
+        json_services: vec![(LEDGER, l)],
         ..Default::default()
     }
 }

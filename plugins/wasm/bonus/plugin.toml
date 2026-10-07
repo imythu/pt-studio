@@ -1,0 +1,42 @@
+id = "bonus"
+name = "魔力值"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "站点魔力值：币种初始化、行为奖励、ctx.bonus.award（P3 试点子集）"
+
+provides = ["ctx.bonus@0.1.0"]
+requires = ["ctx.ledger@^0.1"]
+publishes = ["bonus.awarded"]
+
+[capabilities]
+kv = true
+sql = true
+
+[capabilities.scopes]
+"ctx.ledger" = ["currency:bonus", "currency:seed_points", "read"]
+
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+
+[[http.routes]]
+id = "my_summary"
+method = "GET"
+path = "/v1/users/me/summary"
+auth = "user"
+rate_limit = "user:60/m"
+
+[database]
+migrations = "migrations"
+
+[wasm]
+memory_mb = 64
+max_concurrency = 32
+default_timeout_ms = 2000
+
+[terms]
+"bonus.currency" = { zh-CN = "魔力值", en = "Bonus Points" }
+"bonus.seed_points" = { zh-CN = "做种积分", en = "Seeding Points" }

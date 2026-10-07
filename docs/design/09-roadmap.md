@@ -13,7 +13,7 @@
 | P6 AI | ctx.llm、MCP 网关、AI 插件 |
 | P7 冻结 API | WIT 定为 v1.0，发布插件 SDK、模板仓库、文档和 `llms.txt` |
 
-> 进度（2026-10-07）：P1 内核骨架完成（identity、torrent）；P2 记账完成主体（ledger 复式记账、accounting 流量结算的恰好一次链路、分区 worker），网关限流与幂等键已接入。详见 [../dev/README.md](../dev/README.md) §4。
+> 进度（2026-10-07）：P1 内核骨架完成（identity、torrent）；P2 记账完成主体（ledger、accounting、分区 worker、网关限流与幂等键）；P3 WASM 宿主跑通（bonus 以 WASM 实现，经 JSON 分派与 Native 服务互调；截止时间、内存、陷入、隔离均有测试）。详见 [../dev/README.md](../dev/README.md) §4。
 
 ## 2. 待验证项
 
@@ -23,7 +23,7 @@
 - [ ] **记账链路压测**：Redis Streams 吞吐、窗口聚合内存占用、`COPY` + `ON CONFLICT` 落库速度。
 - [ ] **Meilisearch**：100 万～1000 万种子文档下的索引速度、查询 p99 延迟、中文和中英混排标题的检索效果、部分更新做种数的吞吐。
 - [ ] **Meilisearch 扩展**：当前版本的复制 / 分片能力及授权条款。
-- [ ] **wasmtime**：实例池下的调用开销、fuel / epoch 限制的实际效果。
+- [ ] **wasmtime**：实例池下的调用开销（epoch 截止、内存上限、陷入映射已在 P3 测试中验证）。
 - [ ] **SQL 执行器**：`SET LOCAL ROLE` + GRANT 隔离方案在连接池（含 pgbouncer 事务模式）下的正确性。
 - [ ] **SET ROLE 加固的逃逸测试**（P1 已验证：插件角色读取他插件底表被拒绝、授权视图可读；`RESET ROLE` / `set_config` / plpgsql 逃逸用例待补）（平台 Q1）：在 PG16 成员关系 `INHERIT FALSE, SET TRUE`、撤销 `set_config` 与 plpgsql 的 PUBLIC 权限、`pg_query` 语句检查三层加固下，用 TC-KRN-051/053 验证 `RESET ROLE`、`SET ROLE`、`set_config('role', …)`、plpgsql 动态 SQL 等均无法切回高权限角色；P1 内核骨架阶段实测后定稿，不达标则改用备选方案“每插件独立登录角色 + 独立小连接池”（评估连接数代价），见 [02-plugin-system.md](02-plugin-system.md) §6.1。
 - [ ] **动态 `Val` 服务桥接的开销**（平台 Q17）：Native ↔ WASM、WASM ↔ WASM 服务调用经内核以动态值转发的序列化与调用开销。
