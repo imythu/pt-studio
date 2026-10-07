@@ -149,6 +149,9 @@ dir = "{blob}"
 [plugin.identity]
 secret_key = "{key}"
 
+[plugin.invite]
+secret = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
 [plugin.torrent]
 announce_base_urls = ["https://tracker.test/announce"]
 types = ["generic", "movie"]

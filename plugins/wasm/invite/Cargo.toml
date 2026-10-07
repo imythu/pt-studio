@@ -1,0 +1,16 @@
+[package]
+name = "pt-wasm-invite"
+description = "PT Studio invite plugin (WASM): invite codes, quota lots, invite tree, inviter accountability"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wit-bindgen = "0.62"
+sha2 = { version = "0.10", default-features = false }

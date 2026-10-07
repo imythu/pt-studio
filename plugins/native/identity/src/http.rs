@@ -15,7 +15,7 @@ use serde::Deserialize;
 use crate::{
     Identity, accounts,
     accounts::{Origin, RegisterRequest},
-    auth, rbac,
+    auth, rbac, status,
 };
 
 pub fn router(id: Arc<Identity>) -> Router {
@@ -28,6 +28,14 @@ pub fn router(id: Arc<Identity>) -> Router {
         .route("/v1/users/me/passkey", get(my_passkey))
         .route("/v1/users/{id}", get(get_user))
         .route("/v1/admin/users/{id}/roles", post(grant_role))
+        .route(
+            "/v1/admin/users/{id}/restrictions",
+            get(list_restrictions).post(apply_restriction),
+        )
+        .route(
+            "/v1/admin/users/{id}/restrictions/{rid}",
+            delete(lift_restriction),
+        )
         .with_state(id)
 }
 
@@ -181,6 +189,95 @@ async fn grant_role(ctx: RequestCtx, Path(uid): Path<i64>, Json(b): Json<GrantBo
             action: "identity.roles.grant".into(),
             target: format!("user:{uid}"),
             details: json!({ "role": b.role }),
+        })
+        .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn admin_rank_ok(ctx: &RequestCtx, target: i64) -> PResult<i64> {
+    let by = i64::try_from(ctx.require_user()?).unwrap_or_default();
+    // 管理员只能限制 rank 低于自己的用户（03 §1.6），sysop 不受限
+    let rank = |roles: &std::collections::HashSet<String>| {
+        roles
+            .iter()
+            .filter_map(|r| rbac::BUILTIN.iter().find(|(n, _)| n == r).map(|(_, k)| *k))
+            .max()
+            .unwrap_or(0)
+    };
+    let (_, mine) = rbac::effective_roles(ctx, by).await?;
+    let (_, theirs) = rbac::effective_roles(ctx, target).await?;
+    if !mine.contains("sysop") && rank(&mine) <= rank(&theirs) {
+        return Err(PluginError::new(
+            "identity.insufficient_rank",
+            "cannot restrict a user at or above your own rank",
+        )
+        .with_status(403));
+    }
+    Ok(by)
+}
+
+async fn list_restrictions(ctx: RequestCtx, Path(uid): Path<i64>) -> PResult<Response> {
+    Ok(Json(status::list(&ctx, uid).await?).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct RestrictionBody {
+    kind: String,
+    reason_code: String,
+    note: Option<String>,
+    /// Unix 毫秒
+    until: Option<i64>,
+}
+
+async fn apply_restriction(
+    ctx: RequestCtx,
+    Path(uid): Path<i64>,
+    Json(b): Json<RestrictionBody>,
+) -> PResult<Response> {
+    let by = admin_rank_ok(&ctx, uid).await?;
+    let rid = status::apply(
+        &ctx,
+        &status::Apply {
+            user_id: uid,
+            kind: &b.kind,
+            source: "admin",
+            reason_code: &b.reason_code,
+            note: b.note.as_deref(),
+            until_ms: b.until,
+            by_user: Some(by),
+        },
+    )
+    .await?;
+    ctx.audit
+        .write(pt_plugin_api::AuditEntry {
+            action: "identity.restriction_apply".into(),
+            target: format!("user:{uid}"),
+            details: json!({ "restriction_id": rid, "kind": b.kind, "reason_code": b.reason_code, "until": b.until }),
+        })
+        .await?;
+    Ok((StatusCode::CREATED, Json(json!({ "id": rid }))).into_response())
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LiftQuery {
+    reason: Option<String>,
+}
+
+async fn lift_restriction(
+    ctx: RequestCtx,
+    Path((uid, rid)): Path<(i64, i64)>,
+    axum::extract::Query(q): axum::extract::Query<LiftQuery>,
+) -> PResult<Response> {
+    let by = admin_rank_ok(&ctx, uid).await?;
+    let reason = q.reason.unwrap_or_else(|| "admin".into());
+    if !status::lift_one(&ctx, uid, rid, &reason, Some(by)).await? {
+        return Err(PluginError::not_found("restriction not found or already lifted"));
+    }
+    ctx.audit
+        .write(pt_plugin_api::AuditEntry {
+            action: "identity.restriction_lift".into(),
+            target: format!("user:{uid}"),
+            details: json!({ "restriction_id": rid, "reason": reason }),
         })
         .await?;
     Ok(StatusCode::NO_CONTENT.into_response())

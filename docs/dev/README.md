@@ -55,12 +55,13 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | 内核 · WASM 宿主 | wasmtime 49 组件模型：`plugins.dir` 包加载（清单、编译、迁移、导出与清单一致性检查、未签名包仅限 dev）、每次调用新实例、epoch 截止时间（`kernel.timeout`）、内存上限（`kernel.resource_exhausted`）、陷入（`kernel.plugin_trapped`）、并发上限、WASI 无网络 / 无文件；全部宿主接口转发到 `Ctx`；导出包装为 Native 导出 trait（lifecycle、hooks、on-event、on-cron、http-handler、service-provider） | 包签名（minisign）校验、组件编译缓存、实例池、`http-client`（出站 HTTP 与 SSRF 防护）、metadata、search-contributor / mcp-tool / content-type 导出接入 |
 | 内核 · 事件与调度 | outbox 中继（租约、LISTEN/NOTIFY + 轮询）、消费者（每订阅每分区租约、专用连接、XAUTOCLAIM、inbox 去重、退避重试、死信）、延迟任务执行、分区 worker（`[[workers]]`，每分区租约 + fencing token，每次 poll 一个工作单元）、cron（5 段、站点时区、跨副本去重、禁止重叠、catch_up once、`kernel.cron_run`、`Kernel::run_job_now`） | 回放、按类型保留期清理、手动运行的 HTTP / CLI 入口 |
 | 内核 · 网关 | 声明路由校验、会话 / Bearer 鉴权、CSRF、`check_principal`、`reauth_secs`、可信代理 IP、problem+json 与目录状态码、请求级工作单元、GCRA 限流（全站默认 + 路由规则，RateLimit 头、Retry-After）、幂等键（指纹、处理中 / 冲突 / 重放、5xx 释放） | OpenAPI 聚合、前端清单、CORS |
-| identity | 注册（规范化、钩子、加密邮箱与 passkey）、密码登录、会话、登出、`ctx.auth` / `ctx.rbac` / `ctx.users`、内置角色继承、权限登记、授予角色、等级（`set_class`、`user.class_changed`）、等级绑定角色（`class_roles`，插件定义带前缀角色）、`roles_of` | 2FA、WebAuthn、token、限制、改名、找回密码、Redis 缓存、限流、UTS #39 混淆骨架 |
+| identity | 注册（规范化、钩子、加密邮箱与 passkey）、密码登录、会话、登出、`ctx.auth` / `ctx.rbac` / `ctx.users`、内置角色继承、权限登记、授予角色、等级（`set_class`、`user.class_changed`）、等级绑定角色（`class_roles`，插件定义带前缀角色）、`roles_of`、限制与有效状态（施加 / 解除 / 到期清扫、`user.status_changed`、封禁使会话失效、插件不能限制员工、管理员 rank 检查、`ctx.users.set_status` / `apply_restriction` / `lift_restriction`、`ctx.rbac.check` JSON） | 2FA、WebAuthn、token、改名、找回密码、Redis 缓存、限流、UTS #39 混淆骨架 |
 | ledger | 币种注册、发行 / 回收 / 转账（手续费、每日限额、`ledger.before_transfer`）、批量发行、幂等、冻结（到期由延迟任务释放）/ 扣款、账户锁定、冲正、流水分页、供给统计、用户转账与管理员调整 / 冲正 / 设置 HTTP | 日对账、月结余快照、归档、用户删除处理、MCP 工具 |
 | accounting | `acct:<p>` 微批消费、eid 去重、拒收记录、倍率规则（favorable / override、索引与版本号刷新）、peers、snatches、首次完成与 `traffic.snatch_completed`、用户总量与日统计、结算窗口与 `traffic.settled`、分段明细、游标 CAS（恰好一次，重启不重复计入）、peers 小时做种槽与小时快照（折叠做种时长、`traffic.seeding_snapshot_taken`）、流量调整、种子镜像、统计 HTTP | 基础信号、swarm 统计、实时计数扣减、交叉校验、重算、流修剪 |
 | bonus（WASM） | 币种初始化（经 `ctx.ledger`）、安全表达式语言（词法、Pratt 解析、白名单函数、深度 / 节点上限、非有限值归零）、规则集（表达式与分档模式、NexusPHP 预设为 v1、按小时取生效版本）、小时结算（快照 → 用户小时 → 应计，多部分合并）、批量入账（postings、`transfer_batch`、幂等键、失败重试计数）、行为奖励、`ctx.bonus.award`、`GET /v1/users/me/summary` | 规则编辑 / 发布接口、回放重算、回收、估算明细、`has_role`（等 `ctx.rbac.roles_of`）、medal_factor（等 medals） |
 | promotion（WASM） | 促销类型、单种促销（替换 / 结束）、自动规则（谓词与优先级，`torrent.created` 及手动促销结束后重新评估）、全站活动、个人促销卡（发放 / 使用、冗余检查）、同步到 accounting 倍率规则（对账重试）、到期 cron、展示状态、`ctx.promotions` | 促销申请审核、促销统计、自定义类型的前端展示 |
 | levels（WASM） | NexusPHP 预设等级（农民为降级落点，用户 0.6 / 0.5 滞回）、角色同步（`levels:class_<id>` 绑定到等级）、指标（注册天数、上传 / 下载 / 分享率、做种时长、平均做种时长、做种体积、发布数）、评估（覆盖 > 升级 one_step / highest > 保护期 > 保级 / 警告 / 到期降级）、增量评估（`traffic.settled` 标记，只升级）与每日全量评估、`invite.before_issue`、手动锁定 / 解锁、保号、`ctx.levels`、`GET /v1/me` 进度 | 等级编辑接口、模拟评估、邀请奖励、不活跃处理、VIP / 荣誉覆盖来源、等级权限默认配置 |
+| invite（WASM） | 码派生（HMAC、只存哈希、Crockford 容错）、个人 / 系统 / 活动码签发（资格检查、`invite.before_issue`、FIFO 消耗额度、`request_id` 重放）、注册钩子预留 + `user.registered` 确认（超额兑换标记、邀请树边与闭包表）、额度批次与流水（初始、晋升、周期、管理员、服务发放 / 扣减、到期落账）、撤销 / 过期（返还原批次）、预留释放、邀请树 / 上游 / 统计、发邀权暂停、连坐（封禁触发：扣额度、暂停、撤销未用、限制邀请人、复核；解封撤销）、`ctx.invites`、HTTP | 批量发放、整树操作、日统计与问题邀请人评分、对账、MCP、连坐通知（等 notify）、`anticheat.case_resolved` 触发、`user.deleted` 处理、链接再次显示 |
 | search-meilisearch | 贡献者 schema 合并（命名规则、保留 / 敏感字段、冲突记录）与设置生成、事件 → `pending_ops` → 延迟任务批量写入（文档哈希去重、删除优先、非拥有者失败降级）、发布名解析（`rel_*`）与标题规范化、swap 重建状态机（首次建索引、手动重建、双写与重放、文档数校验、取消）、查询（可见性基线、`search.before_query` 只追加且解析校验、结构化过滤、排序、facet、折叠、游标、高亮、Redis 结果缓存与代数失效）、联想、schema 视图、`ctx.search`、失败任务回收 | 语义 / 混合搜索、tenant token、多实例（replicas / network）、做种数部分更新、同义词管理与术语派生、一致性巡检、MCP、扩展索引注册、`users_admin` 等其他标准索引、熔断 |
 | torrent | 严格 bencode、v1 / v2 / hybrid 解析、规范化（private、source、白名单）、上传（钩子、重复检测）、详情、文件列表、下载（passkey 注入、钩子、下载记录）、`torrents` 索引搜索贡献（可见性映射） | 资源类型插件接入、Group、状态机、编辑与替换、签名链接、批量下载、NFO |
 
@@ -89,6 +90,8 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 - **已知限制：延迟任务串行执行**：内核在持有 `k:lock:delayed-jobs` 的单个节点上逐条执行延迟任务，search 重建步骤等待 Meilisearch 任务时会推迟同期的 flush；后续改为按插件 / 任务名并发执行。
 - **搜索结果缓存**：普通通道写入不使缓存失效（新文档最多滞后 `cache_ttl_secs`，默认 45 s），删除与优先通道写入立即失效（LLD §1.6）。
 - **种子可见性映射（搜索）**：approved → member；candidate / pending → staff（上传者本人可见，匿名发布不写 `vis_owner_id`）；rejected / disabled / deleted 不进索引。
+- **invite 实现取舍**：持有者规范化只做去空白与小写（WASM 中无 NFC 库；identity 在钩子与事件中给出同一显示形用户名，两处一致）；HMAC / HKDF / base64 在插件内用 `sha2` 自行实现（RFC 4231 / 5869 向量测试）；服务方法 `issue` 的来源记为 `api`；连坐的 `notify` 动作在 notify 插件接入前不执行。
+- **identity 限制**：本版本以“同用户同类型同来源只有一条生效限制”的 upsert 保证幂等，不建 `restriction_requests` 表；不发布 `user.restriction_changed`；到期由每分钟的 `restriction_sweep` cron 处理（不调度逐条延迟任务）。
 - **手动运行 cron**：`Kernel::run_job_now` 在任务正在运行（如启动时 catch_up）时最多等待 30 s。
 
 ## 6. 进度记录
@@ -101,3 +104,4 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | 2026-10-07 | P3：WASM 宿主、`pt:plugin@0.1` WIT、JSON 分派服务、bonus（WASM 试点）、沙箱越界测试插件 x-chaos |
 | 2026-10-07 | P4：promotion（WASM）、levels（WASM）、identity 等级与等级角色 |
 | 2026-10-07 | P4：search-meilisearch（Native）、内核搜索贡献者调用入口、torrent 搜索贡献 |
+| 2026-10-07 | P4：invite（WASM）、identity 限制与 `user.status_changed` |

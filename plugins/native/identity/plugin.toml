@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "账号、会话、鉴权（ctx.auth）、权限（ctx.rbac）、用户资料（ctx.users）"
 
 provides = ["ctx.auth@0.1.0", "ctx.rbac@0.1.0", "ctx.users@0.1.0"]
-publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed"]
+publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed"]
 
 [capabilities]
 kv = true
@@ -80,6 +80,36 @@ path = "/v1/admin/users/{id}/roles"
 auth = "admin"
 permission = "identity.roles.assign"
 rate_limit = "user:60/h"
+
+[[http.routes]]
+id = "admin_list_restrictions"
+method = "GET"
+path = "/v1/admin/users/{id}/restrictions"
+auth = "admin"
+permission = "identity.users.read"
+
+[[http.routes]]
+id = "admin_apply_restriction"
+method = "POST"
+path = "/v1/admin/users/{id}/restrictions"
+auth = "admin"
+permission = "identity.users.ban"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_lift_restriction"
+method = "DELETE"
+path = "/v1/admin/users/{id}/restrictions/{rid}"
+auth = "admin"
+permission = "identity.users.ban"
+rate_limit = "user:60/m"
+
+[[cron]]
+name = "restriction_sweep"
+schedule = "* * * * *"
+timeout_secs = 55
+tx = "manual"
 
 [[permissions]]
 name = "identity.profile.update_own"

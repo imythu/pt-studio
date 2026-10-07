@@ -1,0 +1,292 @@
+id = "invite"
+name = "邀请"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "邀请码签发与兑换（钩子预留、事件确认）、额度批次、邀请树、邀请连坐"
+
+provides = ["ctx.invites@0.1.0"]
+requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
+publishes = ["invite.issued", "invite.redeemed", "invite.revoked", "invite.quota_changed",
+             "invite.penalty_applied", "invite.penalty_reversed"]
+
+[capabilities]
+sql = true
+kv = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.users" = ["write:status"]
+
+[[subscriptions]]
+name = "on_user_registered"
+event = "user.registered"
+
+[[subscriptions]]
+name = "on_user_status_changed"
+event = "user.status_changed"
+ordered = true
+
+[[subscriptions]]
+name = "on_level_promoted"
+event = "level.promoted"
+ordered = true
+
+[[hooks]]
+hook = "user.before_register"
+priority = 10
+timeout_ms = 200
+
+[[hook_points]]
+name = "invite.before_issue"
+input_schema = "schemas/hooks/invite.before_issue.json"
+
+[[cron]]
+name = "expire_invites"
+schedule = "*/10 * * * *"
+tx = "manual"
+
+[[cron]]
+name = "expire_lots"
+schedule = "*/10 * * * *"
+tx = "manual"
+
+[[cron]]
+name = "release_reservations"
+schedule = "*/5 * * * *"
+
+[[cron]]
+name = "periodic_grants"
+schedule = "0 4 * * *"
+timeout_secs = 1800
+catch_up = "once"
+tx = "manual"
+
+[wasm]
+memory_mb = 64
+max_concurrency = 64
+[[http.routes]]
+id = "check_code"
+method = "POST"
+path = "/v1/invite-checks"
+auth = "public"
+rate_limit = "ip:10/m"
+
+[[http.routes]]
+id = "my_quota"
+method = "GET"
+path = "/v1/users/me/quota"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "my_quota_ledger"
+method = "GET"
+path = "/v1/users/me/quota/ledger"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "my_eligibility"
+method = "GET"
+path = "/v1/users/me/eligibility"
+auth = "user"
+permission = "invite.send"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "my_invites"
+method = "GET"
+path = "/v1/users/me/invites"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "issue_invite"
+method = "POST"
+path = "/v1/users/me/invites"
+auth = "user"
+permission = "invite.send"
+rate_limit = "user:10/m"
+
+[[http.routes]]
+id = "revoke_my_invite"
+method = "DELETE"
+path = "/v1/users/me/invites/{id}"
+auth = "user"
+permission = "invite.send"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "my_invitees"
+method = "GET"
+path = "/v1/users/me/invitees"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "my_stats"
+method = "GET"
+path = "/v1/users/me/stats"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "my_penalties"
+method = "GET"
+path = "/v1/users/me/penalties"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "user_tree"
+method = "GET"
+path = "/v1/users/{id}/tree"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "user_ancestors"
+method = "GET"
+path = "/v1/users/{id}/ancestors"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "user_stats"
+method = "GET"
+path = "/v1/users/{id}/stats"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_list_invites"
+method = "GET"
+path = "/v1/admin/invites"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_issue_invite"
+method = "POST"
+path = "/v1/admin/invites"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "admin_revoke_invite"
+method = "DELETE"
+path = "/v1/admin/invites/{id}"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_user_quota"
+method = "GET"
+path = "/v1/admin/users/{id}/quota"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_adjust_quota"
+method = "POST"
+path = "/v1/admin/users/{id}/quota-adjustments"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_list_penalties"
+method = "GET"
+path = "/v1/admin/penalties"
+auth = "admin"
+permission = "invite.penalties.moderate"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_review_penalty"
+method = "POST"
+path = "/v1/admin/penalties/{id}/reviews"
+auth = "admin"
+permission = "invite.penalties.moderate"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_list_suspensions"
+method = "GET"
+path = "/v1/admin/users/{id}/suspensions"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_add_suspension"
+method = "POST"
+path = "/v1/admin/users/{id}/suspensions"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_lift_suspension"
+method = "DELETE"
+path = "/v1/admin/users/{id}/suspensions/{sid}"
+auth = "admin"
+permission = "invite.manage"
+rate_limit = "user:60/m"
+
+[[permissions]]
+name = "invite.send"
+description_term = "invite.perm.send"
+default_roles = ["user"]
+
+[[permissions]]
+name = "invite.manage"
+description_term = "invite.perm.manage"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "invite.tree.read"
+description_term = "invite.perm.tree_read"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "invite.quota.bypass"
+description_term = "invite.perm.quota_bypass"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "invite.penalty.exempt"
+description_term = "invite.perm.penalty_exempt"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "invite.penalties.moderate"
+description_term = "invite.perm.penalties_moderate"
+default_roles = ["moderator"]
+
+[database]
+migrations = "migrations"
+
+[terms]
+"invite.name" = { zh-CN = "邀请", en = "Invites" }
+"invite.code" = { zh-CN = "邀请码", en = "Invite code" }
+"invite.quota" = { zh-CN = "邀请名额", en = "Invites" }
+"invite.temporary_quota" = { zh-CN = "临时邀请", en = "Temporary Invites" }
+"invite.tree" = { zh-CN = "邀请树", en = "Invite Tree" }
+"invite.penalty" = { zh-CN = "邀请连坐", en = "Inviter Accountability" }
+"invite.perm.send" = { zh-CN = "发送邀请", en = "Send invites" }
+"invite.perm.manage" = { zh-CN = "管理邀请", en = "Manage invites" }
+"invite.perm.tree_read" = { zh-CN = "查看他人邀请树", en = "View invite trees" }
+"invite.perm.quota_bypass" = { zh-CN = "不受邀请额度限制", en = "Bypass invite quota" }
+"invite.perm.penalty_exempt" = { zh-CN = "不受邀请连坐", en = "Exempt from inviter accountability" }
+"invite.perm.penalties_moderate" = { zh-CN = "复核邀请连坐", en = "Review invite penalties" }

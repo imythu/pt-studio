@@ -1,7 +1,7 @@
 //! identity 插件（docs/plugins/identity/）：账号、会话、`ctx.auth`、`ctx.rbac`、`ctx.users`。
 //!
 //! 本版本实现 P1 子集：注册、密码登录、会话、权限检查、用户摘要、passkey。
-//! 2FA、token、限制、改名等按 03 详细设计在后续迭代实现。
+//! 另有等级（`set_class`）、等级角色、限制与有效状态（`status`）。2FA、token、改名等按 03 详细设计在后续迭代实现。
 
 pub mod accounts;
 pub mod api;
@@ -9,6 +9,7 @@ pub mod auth;
 pub mod crypto;
 mod http;
 pub mod rbac;
+pub mod status;
 
 use std::sync::{Arc, OnceLock};
 
@@ -27,6 +28,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "0002_class_roles.sql",
         include_str!("../migrations/0002_class_roles.sql"),
+    ),
+    (
+        "0003_restrictions.sql",
+        include_str!("../migrations/0003_restrictions.sql"),
     ),
 ];
 
@@ -217,6 +222,61 @@ impl pt_plugin_api::JsonService for Svc {
                 rbac::set_class_roles(ctx, &ctx.invocation.caller_plugin, class, &roles).await?;
                 Ok(serde_json::json!({}))
             }
+            // ctx.users.set_status / apply_restriction / lift_restriction：作用域 write:status（03 §1.6）
+            "set_status" | "apply_restriction" | "lift_restriction" => {
+                if !ctx.invocation.has_scope("write:status") {
+                    return Err(PluginError::forbidden("scope write:status required"));
+                }
+                let uid = i64::try_from(id("user")?).map_err(|_| PluginError::bad_request("bad user id"))?;
+                let caller = ctx.invocation.caller_plugin.clone();
+                let s = |k: &str| a.get(k).and_then(serde_json::Value::as_str);
+                let reason = s("reason").or(s("reason_code")).unwrap_or("plugin").to_owned();
+                let (kind, lift) = match method {
+                    "set_status" => match s("status") {
+                        Some("active") => (None, true),
+                        Some(st) => (
+                            Some(status::kind_of(st).ok_or_else(|| {
+                                PluginError::new(
+                                    "identity.invalid_status",
+                                    format!("cannot set status `{st}`"),
+                                )
+                            })?),
+                            false,
+                        ),
+                        None => return Err(PluginError::validation("status")),
+                    },
+                    "apply_restriction" => (s("kind"), false),
+                    _ => (s("kind"), true),
+                };
+                if lift {
+                    let n = status::lift(ctx, uid, kind, &caller, &reason, None, false).await?;
+                    return Ok(serde_json::json!({ "lifted": n }));
+                }
+                let kind = kind.ok_or_else(|| PluginError::validation("kind"))?;
+                let rid = status::apply(
+                    ctx,
+                    &status::Apply {
+                        user_id: uid,
+                        kind,
+                        source: &caller,
+                        reason_code: &reason,
+                        note: s("note"),
+                        until_ms: a.get("until").and_then(serde_json::Value::as_i64),
+                        by_user: None,
+                    },
+                )
+                .await?;
+                Ok(serde_json::json!({ "restriction_id": rid }))
+            }
+            "check" => {
+                let perm = a
+                    .get("permission")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| PluginError::validation("permission"))?;
+                Ok(serde_json::json!(
+                    RbacService::check(self, ctx, id("user")?, perm).await?
+                ))
+            }
             "roles_of" => {
                 let uid = i64::try_from(id("user")?).map_err(|_| PluginError::bad_request("bad user id"))?;
                 let (_, roles) = rbac::effective_roles(ctx, uid).await?;
@@ -229,6 +289,18 @@ impl pt_plugin_api::JsonService for Svc {
                 format!("ctx.users / ctx.rbac has no method `{other}`"),
             )
             .with_status(404)),
+        }
+    }
+}
+
+struct Cron;
+
+#[async_trait]
+impl pt_plugin_api::OnCron for Cron {
+    async fn run(&self, ctx: &Ctx, job: pt_plugin_api::JobInvocation) -> PResult<()> {
+        match job.name.as_str() {
+            "restriction_sweep" => status::sweep(ctx).await.map(|_| ()),
+            other => Err(PluginError::not_found(format!("unknown job `{other}`"))),
         }
     }
 }
@@ -248,6 +320,7 @@ pub fn plugin() -> NativePlugin {
         manifest: MANIFEST,
         migrations: MIGRATIONS,
         lifecycle: Some(id.clone()),
+        on_cron: Some(Arc::new(Cron)),
         http: Some(Arc::new(Routes(id))),
         services: vec![
             (AUTH, service_object::<dyn AuthService>(svc.clone())),

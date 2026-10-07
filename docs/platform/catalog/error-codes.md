@@ -56,6 +56,22 @@
 | `identity.username_taken` | 409 | identity | 用户名已存在 |
 | `invite.code_invalid` | 422 | invite | 邀请码无效或已过期 |
 | `invite.quota_exhausted` | 403 | invite | 邀请额度不足 |
+| `invite.code_reserved` | 403 | invite | 邀请码正被其他注册占用 |
+| `invite.binding_invalid` | 422 | invite | 邮箱或用户名与邀请绑定不符 |
+| `invite.disabled` | 403 | invite | 邀请系统已关闭 |
+| `invite.account_inactive` | 403 | invite | 账号状态不允许发邀 |
+| `invite.account_too_new` | 403 | invite | 注册时间不足 |
+| `invite.privilege_suspended` | 403 | invite | 发邀权暂停中 |
+| `invite.outstanding_limit_reached` | 403 | invite | 未使用邀请数达到上限 |
+| `invite.daily_limit_reached` | 403 | invite | 今日发邀数达到上限 |
+| `invite.already_redeemed` | 409 | invite | 邀请已被使用，不能撤销 |
+| `invite.invite_reserved` | 409 | invite | 邀请正在注册中，稍后再撤销 |
+| `invite.not_owner` | 403 | invite | 不是该邀请的签发者 |
+| `invite.penalty_state_conflict` | 409 | invite | 连坐记录状态不允许该操作 |
+| `invite.scope_denied` | 403 | invite | 服务调用方缺少作用域 |
+| `identity.target_protected` | 403 | identity | 插件不能限制员工账号 |
+| `identity.insufficient_rank` | 403 | identity | 不能操作同级或更高级别的用户 |
+| `identity.invalid_status` | 422 | identity | 状态或限制类型非法 |
 | `registration-policy.closed` | 403 | registration-policy | 注册已关闭 / 名额已满 |
 | `registration-policy.email_domain_not_allowed` | 422 | registration-policy | 邮箱域名不在白名单 |
 | `torrent.not_private` | 422 | torrent | 种子不是 private（上传时强制 private=1 前的校验失败） |
