@@ -1512,6 +1512,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-plugin-accounting"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "hex",
+ "pt-plugin-api",
+ "redis",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "pt-plugin-api"
 version = "0.1.0"
 dependencies = [
@@ -1608,6 +1628,7 @@ dependencies = [
  "hex",
  "http",
  "pt-kernel",
+ "pt-plugin-accounting",
  "pt-plugin-api",
  "pt-plugin-identity",
  "pt-plugin-ledger",
@@ -2582,6 +2603,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

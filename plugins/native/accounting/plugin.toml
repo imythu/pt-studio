@@ -1,0 +1,91 @@
+id = "accounting"
+name = "流量记账"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "消费 pt-tracker 的流量流，按时间窗口聚合结算上传 / 下载 / 做种时长（ctx.accounting）"
+
+provides = ["ctx.accounting@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+publishes = ["traffic.settled", "traffic.snatch_completed", "traffic.adjusted"]
+
+[capabilities]
+kv = true
+sql = true
+redis = true
+redis_global = [
+  { role = "acct", prefix = "acct:", mode = "rw" },
+  { role = "acct", prefix = "u:", mode = "rw" },
+]
+
+[[workers]]
+name = "ingest"
+stream_prefix = "acct:"
+partitions_from = "acct:_meta"
+redis_role = "acct"
+default_partitions = 64
+
+[[subscriptions]]
+name = "mirror_torrent"
+event = "torrent.created"
+
+[[http.routes]]
+id = "my_stats"
+method = "GET"
+path = "/v1/users/me/stats"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "user_stats"
+method = "GET"
+path = "/v1/users/{id}/stats"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "user_snatches"
+method = "GET"
+path = "/v1/users/{id}/snatches"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_adjust"
+method = "POST"
+path = "/v1/admin/users/{id}/adjustments"
+auth = "admin"
+permission = "accounting.traffic.adjust"
+rate_limit = "user:30/m"
+idempotent = true
+
+[[permissions]]
+name = "accounting.stats.read"
+description_term = "accounting.perm.stats_read"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "accounting.traffic.adjust"
+description_term = "accounting.perm.traffic_adjust"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "accounting.signals.read"
+description_term = "accounting.perm.signals_read"
+default_roles = ["moderator"]
+
+[database]
+migrations = "migrations"
+views = ["v_user_totals", "v_snatch", "v_user_daily"]
+
+[[database.partitions]]
+table = "user_daily"
+by = "range_month"
+premake = 3
+
+[[database.partitions]]
+table = "traffic_segments"
+by = "range_month"
+premake = 3

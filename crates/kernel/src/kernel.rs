@@ -131,6 +131,18 @@ fn static_checks(cfg: &SiteConfig, specs: &[PluginSpec]) -> Vec<LoadError> {
                 "declares [[subscriptions]] but does not implement OnEvent",
             ));
         }
+        for w in &m.workers {
+            if s.native
+                .as_ref()
+                .is_some_and(|n| !n.workers.iter().any(|(name, _)| *name == w.name))
+            {
+                errs.push(LoadError::new(
+                    "E-LOAD-WORLD",
+                    &m.id,
+                    format!("declares worker `{}` but does not implement it", w.name),
+                ));
+            }
+        }
         let granted: HashSet<&String> = cfg
             .grants
             .get(&m.id)
@@ -303,6 +315,14 @@ impl Kernel {
                 hooks: native.and_then(|n| n.hooks.clone()),
                 on_event: native.and_then(|n| n.on_event.clone()),
                 on_cron: native.and_then(|n| n.on_cron.clone()),
+                workers: native
+                    .map(|n| {
+                        n.workers
+                            .iter()
+                            .map(|(k, w)| ((*k).to_owned(), w.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 http: native.and_then(|n| n.http.clone()),
                 redis: rg,
                 manifest: m,

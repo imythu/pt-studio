@@ -33,6 +33,17 @@ pub fn spawn_background(sh: Arc<Shared>, stop: watch::Receiver<bool>) -> Vec<tok
         tokio::spawn(delayed_jobs_loop(sh.clone(), stop.clone())),
     ];
     for (pid, rt) in &sh.plugins {
+        for decl in &rt.manifest.workers {
+            if let Some((_, w)) = rt.workers.iter().find(|(n, _)| *n == decl.name) {
+                tasks.push(tokio::spawn(worker_supervisor(
+                    sh.clone(),
+                    pid.clone(),
+                    decl.clone(),
+                    w.clone(),
+                    stop.clone(),
+                )));
+            }
+        }
         for sub in &rt.manifest.subscriptions {
             for p in 0..sh.events_cfg.partitions_for(&sub.event) {
                 tasks.push(tokio::spawn(consumer_loop(
@@ -552,6 +563,119 @@ async fn run_job(
     let r = match tokio::time::timeout(budget, handler.run(&ctx, job)).await {
         Ok(r) => r,
         Err(_) => Err(PluginError::new("kernel.timeout", "job timed out")),
+    };
+    uow.finish(r.is_ok()).await?;
+    r
+}
+
+// ---------------- 分区 worker（§9.4） ----------------
+
+/// 读取分区数（来源键的 `partitions` 字段），每 30 s 刷新一次；为每个分区启动一个租约循环。
+async fn worker_supervisor(
+    sh: Arc<Shared>,
+    plugin: String,
+    decl: pt_plugin_api::manifest::WorkerDecl,
+    worker: Arc<dyn pt_plugin_api::PartitionWorker>,
+    mut stop: watch::Receiver<bool>,
+) {
+    let Some(redis) = sh
+        .redis
+        .get(&decl.redis_role)
+        .or_else(|| sh.redis.get("main"))
+        .cloned()
+    else {
+        tracing::warn!(%plugin, worker = %decl.name, "no redis for worker; not started");
+        return;
+    };
+    let mut running: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    loop {
+        let mut c = redis.clone();
+        let n: u32 = redis::cmd("HGET")
+            .arg(&decl.partitions_from)
+            .arg("partitions")
+            .query_async::<Option<u32>>(&mut c)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(decl.default_partitions)
+            .clamp(1, 4096);
+        while u32::try_from(running.len()).unwrap_or(u32::MAX) < n {
+            let p = u32::try_from(running.len()).unwrap_or(0);
+            running.push(tokio::spawn(partition_loop(
+                sh.clone(),
+                plugin.clone(),
+                decl.name.clone(),
+                worker.clone(),
+                p,
+                stop.clone(),
+            )));
+        }
+        if sleep_or_stop(Duration::from_secs(30), &mut stop).await {
+            break;
+        }
+    }
+    for t in running {
+        let _ = t.await;
+    }
+}
+
+async fn partition_loop(
+    sh: Arc<Shared>,
+    plugin: String,
+    name: String,
+    worker: Arc<dyn pt_plugin_api::PartitionWorker>,
+    partition: u32,
+    mut stop: watch::Receiver<bool>,
+) {
+    let Some(redis) = main_redis(&sh) else { return };
+    let key = format!("k:lock:worker:{plugin}:{name}:{partition}");
+    loop {
+        let Some(lease) = Lease::try_acquire(&redis, &key, &sh.node_id, LEASE_TTL).await else {
+            if sleep_or_stop(Duration::from_secs(5), &mut stop).await {
+                return;
+            }
+            continue;
+        };
+        tracing::debug!(%plugin, worker = %name, partition, fence = lease.fence(), "partition acquired");
+        while !*stop.borrow() && !lease.is_lost() {
+            let pause = match poll_once(&sh, &plugin, &worker, partition, lease.fence()).await {
+                Ok(pt_plugin_api::PollOutcome::Busy) => Duration::ZERO,
+                Ok(pt_plugin_api::PollOutcome::Idle { sleep_ms }) => {
+                    Duration::from_millis(sleep_ms.clamp(10, 10_000))
+                }
+                Err(e) => {
+                    tracing::warn!(%plugin, worker = %name, partition, error = %e, "worker poll failed");
+                    Duration::from_secs(1)
+                }
+            };
+            if !pause.is_zero() && sleep_or_stop(pause, &mut stop).await {
+                break;
+            }
+        }
+        lease.release().await;
+        if *stop.borrow() {
+            return;
+        }
+    }
+}
+
+const WORKER_TIMEOUT_MS: i64 = 30_000;
+
+async fn poll_once(
+    sh: &Shared,
+    plugin: &str,
+    worker: &Arc<dyn pt_plugin_api::PartitionWorker>,
+    partition: u32,
+    fence: u64,
+) -> Result<pt_plugin_api::PollOutcome, PluginError> {
+    let (ctx, uow) = sh.make_ctx(
+        plugin,
+        CallSpec::new(InvocationKind::Worker, Actor::system(), WORKER_TIMEOUT_MS),
+    )?;
+    let budget = Duration::from_millis(u64::try_from(WORKER_TIMEOUT_MS).unwrap_or(30_000));
+    let r = match tokio::time::timeout(budget, worker.poll(&ctx, partition, fence)).await {
+        Ok(r) => r,
+        Err(_) => Err(PluginError::new("kernel.timeout", "worker poll timed out")),
     };
     uow.finish(r.is_ok()).await?;
     r

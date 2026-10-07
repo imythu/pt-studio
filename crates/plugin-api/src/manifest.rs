@@ -320,7 +320,21 @@ pub struct McpDecl {
 pub struct WorkerDecl {
     pub name: String,
     pub stream_prefix: String,
+    /// 分区数来源：Redis HASH 键，字段 `partitions`（如 `acct:_meta`）
     pub partitions_from: String,
+    /// 分区数所在的 Redis 实例角色（默认 main）
+    #[serde(default = "main_role")]
+    pub redis_role: String,
+    /// 来源键不存在时使用的分区数
+    #[serde(default = "default_partitions")]
+    pub default_partitions: u32,
+}
+
+fn main_role() -> String {
+    "main".into()
+}
+fn default_partitions() -> u32 {
+    64
 }
 
 /// `ctx.bonus@0.1.0` / `ctx.ledger@^0.1` / `ctx.users`

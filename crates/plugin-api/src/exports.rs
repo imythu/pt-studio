@@ -201,11 +201,21 @@ pub trait ContentType: Send + Sync {
     async fn canonical_title(&self, ctx: &Ctx, fields: &Json) -> PResult<String>;
 }
 
-/// Native 分区 worker（清单 `[[workers]]`，kernel/03 §9.4）。
+/// 分区 worker 一次轮询的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PollOutcome {
+    /// 处理了数据，立即再次轮询
+    Busy,
+    /// 没有新数据，`sleep_ms` 后再轮询
+    Idle { sleep_ms: u64 },
+}
+
+/// Native 分区 worker（清单 `[[workers]]`，kernel/03 §9.4、accounting HLD §7 N-1）。
+/// 内核持有分区租约期间循环调用 `poll`；每次调用一个工作单元（返回 Ok 时提交）。
+/// `fence` 为租约的 fencing token（单调递增），插件应与自己的游标一起检查，防止旧持有者写入。
 #[async_trait]
 pub trait PartitionWorker: Send + Sync {
-    async fn run(&self, ctx: &Ctx, partition: u32, cancel: tokio::sync::watch::Receiver<bool>)
-    -> PResult<()>;
+    async fn poll(&self, ctx: &Ctx, partition: u32, fence: u64) -> PResult<PollOutcome>;
 }
 
 /// Native 插件入口：每个 Native 插件 crate 导出 `pub fn plugin() -> NativePlugin`。

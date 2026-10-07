@@ -13,6 +13,7 @@ const RELEASE: &str =
 #[derive(Debug)]
 pub struct Lease {
     key: String,
+    fence: u64,
     token: String,
     conn: ConnectionManager,
     lost: watch::Receiver<bool>,
@@ -65,11 +66,17 @@ impl Lease {
         });
         Some(Lease {
             key: key.to_owned(),
+            fence: u64::try_from(fence).unwrap_or(0),
             token,
             conn: conn.clone(),
             lost,
             stop,
         })
+    }
+
+    /// fencing token（同一键单调递增）
+    pub fn fence(&self) -> u64 {
+        self.fence
     }
 
     pub fn lost(&self) -> watch::Receiver<bool> {

@@ -49,6 +49,7 @@ pub struct PluginRuntime {
     pub hooks: Option<Arc<dyn Hooks>>,
     pub on_event: Option<Arc<dyn OnEvent>>,
     pub on_cron: Option<Arc<dyn OnCron>>,
+    pub workers: Vec<(String, Arc<dyn pt_plugin_api::PartitionWorker>)>,
     pub http: Option<Arc<dyn HttpRoutes>>,
     pub redis: RedisGateway,
 }

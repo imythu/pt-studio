@@ -84,21 +84,25 @@ pub async fn reset() {
         "postgres://postgres@127.0.0.1:55432/pt_test",
     );
     let mut c = PgConnection::connect(&su).await.unwrap();
-    for s in [
-        "kernel", "identity", "torrent", "ledger", "x_probe", "x_coin", "ext",
-    ] {
-        c.execute(format!("DROP SCHEMA IF EXISTS {s} CASCADE").as_str())
+    // 删除测试库中全部非系统 schema 与插件角色
+    let schemas: Vec<String> = sqlx::query_scalar(
+        "SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' AND nspname NOT IN ('public', 'information_schema')",
+    )
+    .fetch_all(&mut c)
+    .await
+    .unwrap();
+    for s in schemas {
+        c.execute(format!("DROP SCHEMA IF EXISTS \"{s}\" CASCADE").as_str())
             .await
             .unwrap();
     }
-    for r in [
-        "pt_plugin_identity",
-        "pt_plugin_torrent",
-        "pt_plugin_ledger",
-        "pt_plugin_x_probe",
-        "pt_plugin_x_coin",
-    ] {
-        c.execute(format!("DROP ROLE IF EXISTS {r}").as_str())
+    let roles: Vec<String> =
+        sqlx::query_scalar("SELECT rolname FROM pg_roles WHERE rolname LIKE 'pt\\_plugin\\_%'")
+            .fetch_all(&mut c)
+            .await
+            .unwrap();
+    for r in roles {
+        c.execute(format!("DROP ROLE IF EXISTS \"{r}\"").as_str())
             .await
             .unwrap();
     }
@@ -109,7 +113,11 @@ pub async fn reset() {
 }
 
 pub fn config() -> SiteConfig {
-    let text = format!(
+    SiteConfig::parse(&config_text()).unwrap()
+}
+
+pub fn config_text() -> String {
+    format!(
         r#"
 [site]
 name = "test"
@@ -154,6 +162,5 @@ types = ["generic", "movie"]
         ),
         redis = env("PT_TEST_REDIS_URL", "redis://127.0.0.1:56379/15"),
         key = "11".repeat(32),
-    );
-    SiteConfig::parse(&text).unwrap()
+    )
 }

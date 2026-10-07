@@ -1,0 +1,26 @@
+[package]
+name = "pt-plugin-accounting"
+description = "PT Studio accounting plugin: windowed traffic settlement from the tracker stream (ctx.accounting)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pt-plugin-api.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
+hex.workspace = true
+redis.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+xxhash-rust.workspace = true
+
+[lints]
+workspace = true
