@@ -6,6 +6,7 @@
 pub mod bencode;
 pub mod fixtures;
 pub mod meta;
+pub mod search;
 
 use std::sync::{Arc, OnceLock};
 
@@ -657,6 +658,7 @@ pub fn plugin() -> NativePlugin {
         migrations: MIGRATIONS,
         lifecycle: Some(t.clone()),
         http: Some(Arc::new(Routes(t))),
+        search_contributor: Some(Arc::new(search::Contributor)),
         ..Default::default()
     }
 }

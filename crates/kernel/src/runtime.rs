@@ -8,8 +8,9 @@ use std::{
 
 use async_trait::async_trait;
 use pt_plugin_api::{
-    Actor, Credential, Ctx, HookCall, HookDecision, Hooks, HttpRoutes, InvocationInfo, InvocationKind, Json,
-    KernelLink, Lifecycle, OnCron, OnEvent, PResult, PluginError, Principal,
+    Actor, Credential, Ctx, HookCall, HookDecision, Hooks, HttpRoutes, IndexSchema, InvocationInfo,
+    InvocationKind, Json, KernelLink, Lifecycle, OnCron, OnEvent, PResult, PluginError, Principal,
+    SearchContributor,
     host::{Config, HookOutcome, HookRunner, HttpClient, Metrics, Random, Term, Terms, Time},
     manifest::Manifest,
     services::{AUTH, AuthService},
@@ -50,6 +51,7 @@ pub struct PluginRuntime {
     pub on_cron: Option<Arc<dyn OnCron>>,
     pub workers: Vec<(String, Arc<dyn pt_plugin_api::PartitionWorker>)>,
     pub http: Option<Arc<dyn HttpRoutes>>,
+    pub search_contributor: Option<Arc<dyn SearchContributor>>,
     pub redis: RedisGateway,
 }
 
@@ -340,6 +342,55 @@ impl Shared {
     }
 }
 
+/// 贡献者导出调用的超时（search-meilisearch LLD §1.6.1）
+const CONTRIBUTOR_SCHEMA_TIMEOUT_MS: i64 = 2_000;
+const CONTRIBUTOR_DOCS_TIMEOUT_MS: i64 = 5_000;
+
+impl Shared {
+    /// 贡献者接口只对 `ctx.search` 提供方开放
+    fn contributor(&self, caller: &Ctx, plugin: Option<&str>) -> PResult<Option<Arc<dyn SearchContributor>>> {
+        let is_search = self.plugins.get(&*caller.plugin_id).is_some_and(|rt| {
+            rt.manifest
+                .provides
+                .iter()
+                .any(|p| p.split('@').next() == Some("ctx.search"))
+        });
+        if !is_search {
+            return Err(PluginError::capability_denied(format!(
+                "plugin `{}` does not provide ctx.search",
+                caller.plugin_id
+            )));
+        }
+        let Some(plugin) = plugin else { return Ok(None) };
+        self.plugins
+            .get(plugin)
+            .and_then(|rt| rt.search_contributor.clone())
+            .map(Some)
+            .ok_or_else(|| PluginError::not_found(format!("plugin `{plugin}` is not a search contributor")))
+    }
+
+    async fn run_contributor<T, F>(&self, caller: &Ctx, plugin: &str, timeout_ms: i64, f: F) -> PResult<T>
+    where
+        T: Send,
+        F: for<'a> FnOnce(&'a Ctx) -> futures::future::BoxFuture<'a, PResult<T>> + Send,
+    {
+        let spec = self.child_spec(caller, InvocationKind::Search, plugin, timeout_ms)?;
+        let (ctx, uow) = self.make_ctx(plugin, spec)?;
+        let remaining = ctx.invocation.deadline - now_ms();
+        let budget = std::time::Duration::from_millis(u64::try_from(remaining.max(0)).unwrap_or(0));
+        let r = match tokio::time::timeout(budget, f(&ctx)).await {
+            Ok(r) => r,
+            Err(_) => Err(PluginError::new(
+                "kernel.timeout",
+                format!("search contributor `{plugin}` timed out"),
+            )
+            .retryable()),
+        };
+        uow.finish(r.is_ok()).await?;
+        r
+    }
+}
+
 fn uow_of(ctx: &Ctx) -> PResult<Arc<Uow>> {
     ctx.unit
         .clone()
@@ -413,6 +464,47 @@ impl KernelLink for Shared {
         };
         uow_of(&callee)?.finish(r.is_ok()).await?;
         r
+    }
+
+    fn search_contributors(&self, caller: &Ctx) -> PResult<Vec<String>> {
+        self.contributor(caller, None)?;
+        Ok(self
+            .order
+            .iter()
+            .filter(|id| {
+                self.plugins
+                    .get(*id)
+                    .is_some_and(|rt| rt.search_contributor.is_some())
+            })
+            .cloned()
+            .collect())
+    }
+
+    async fn contributor_schemas(&self, caller: &Ctx, plugin: &str) -> PResult<Vec<IndexSchema>> {
+        let imp = self
+            .contributor(caller, Some(plugin))?
+            .ok_or_else(|| PluginError::internal("no contributor"))?;
+        self.run_contributor(caller, plugin, CONTRIBUTOR_SCHEMA_TIMEOUT_MS, |c| {
+            Box::pin(async move { Ok(imp.index_schemas(c).await) })
+        })
+        .await
+    }
+
+    async fn contributor_documents(
+        &self,
+        caller: &Ctx,
+        plugin: &str,
+        index: &str,
+        entity_ids: &[u64],
+    ) -> PResult<Vec<(u64, Option<Json>)>> {
+        let imp = self
+            .contributor(caller, Some(plugin))?
+            .ok_or_else(|| PluginError::internal("no contributor"))?;
+        let (index, ids) = (index.to_owned(), entity_ids.to_vec());
+        self.run_contributor(caller, plugin, CONTRIBUTOR_DOCS_TIMEOUT_MS, |c| {
+            Box::pin(async move { imp.to_documents(c, &index, &ids).await })
+        })
+        .await
     }
 
     async fn authenticate(&self, caller: &Ctx, credential: Credential) -> PResult<Option<Principal>> {

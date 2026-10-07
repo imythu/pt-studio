@@ -656,6 +656,18 @@ world example-full {
 
 另：内核以 `world kernel`（不含 `metadata-provider` 导出）生成宿主绑定，原因是 wasmtime 49 bindgen 在导出接口含名为 `lookup` 的函数时生成代码有变量遮蔽错误；元数据插件接入前改为动态查找该导出或升级 wasmtime。
 
+### 2.0.1 v0.1 实现说明：搜索贡献者的调用入口（2026-10-07）
+
+services.md 中 `ctx.plugins.search_contributors()` 只返回插件 ID，没有调用贡献者的入口。v0.1 在 `Ctx` 上提供三个方法，仅对 `provides` 含 `ctx.search` 的插件开放（否则 `kernel.capability_denied`）：
+
+| 方法 | 说明 |
+|---|---|
+| `ctx.search_contributors() -> Vec<plugin_id>` | 实现了 `search-contributor` 的插件，按激活顺序 |
+| `ctx.contributor_schemas(plugin) -> Vec<IndexSchema>` | 调用其 `index-schemas`，超时 2 s |
+| `ctx.contributor_documents(plugin, index, ids) -> Vec<(id, Option<json>)>` | 调用其 `to-documents`，超时 5 s；WASM 贡献者逐条调用 WIT 的 `to-document` |
+
+每次调用为贡献者构造独立工作单元（`InvocationKind::Search`，沿用调用方的 actor、截止时间与调用链）。加载时检查清单 `capabilities.search_contributor` 与导出一致（`E-LOAD-WORLD`）。WIT 的批量 `to-documents`、`list-ids` 与 `index-schema.owner` 等字段（search-meilisearch HLD §7）留待 0.2；在此之前拥有者由搜索插件的标准索引登记表决定，重建用拥有者的只读视图枚举。
+
 ### 2.1 接口说明与能力映射
 
 | 接口 | 方向 | 需要的能力（`[capabilities]`） | 说明 |

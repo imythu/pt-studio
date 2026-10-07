@@ -11,11 +11,12 @@ name = "pt-server"
 path = "src/main.rs"
 
 [features]
-default = ["identity", "torrent", "ledger", "accounting"]
+default = ["identity", "torrent", "ledger", "accounting", "search"]
 identity = ["dep:pt-plugin-identity"]
 torrent = ["identity", "dep:pt-plugin-torrent"]
 ledger = ["identity", "dep:pt-plugin-ledger"]
 accounting = ["identity", "dep:pt-plugin-accounting"]
+search = ["identity", "dep:pt-plugin-search-meilisearch"]
 
 [dependencies]
 pt-kernel.workspace = true
@@ -24,6 +25,7 @@ pt-plugin-identity = { path = "../../plugins/native/identity", optional = true }
 pt-plugin-torrent = { path = "../../plugins/native/torrent", optional = true }
 pt-plugin-ledger = { path = "../../plugins/native/ledger", optional = true }
 pt-plugin-accounting = { path = "../../plugins/native/accounting", optional = true }
+pt-plugin-search-meilisearch = { path = "../../plugins/native/search-meilisearch", optional = true }
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true

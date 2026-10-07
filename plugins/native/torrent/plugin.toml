@@ -14,6 +14,7 @@ publishes = ["torrent.created", "torrent.downloaded"]
 kv = true
 sql = true
 blob = true
+search_contributor = true
 
 [capabilities.scopes]
 "ctx.users" = ["read:passkey"]

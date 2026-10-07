@@ -299,6 +299,13 @@ impl Kernel {
             }
             let rg = RedisGateway::new(&m.id, m.capabilities.redis, redis.get("main").cloned(), globals);
             let native = spec.native.as_ref();
+            if m.capabilities.search_contributor != native.is_some_and(|n| n.search_contributor.is_some()) {
+                errors.push(LoadError::new(
+                    "E-LOAD-WORLD",
+                    &m.id,
+                    "capabilities.search_contributor must match the search-contributor export",
+                ));
+            }
             for (svc, obj) in native.map(|n| n.services.as_slice()).unwrap_or(&[]) {
                 if !m.provides.iter().any(|p| p.split('@').next() == Some(*svc)) {
                     errors.push(LoadError::new(
@@ -372,6 +379,7 @@ impl Kernel {
                     })
                     .unwrap_or_default(),
                 http: native.and_then(|n| n.http.clone()),
+                search_contributor: native.and_then(|n| n.search_contributor.clone()),
                 redis: rg,
                 manifest: m,
             };

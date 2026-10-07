@@ -24,8 +24,9 @@ use axum::{
     routing::on,
 };
 use pt_plugin_api::{
-    Ctx, DeliveryInfo, EventEnvelope, HookCall, HookDecision, Hooks, HttpRoutes, JobInvocation, JobKind,
-    JsonService, Lifecycle, NativePlugin, OnCron, OnEvent, PResult, PluginError, RequestCtx,
+    Ctx, DeliveryInfo, EventEnvelope, FieldSpec, HookCall, HookDecision, Hooks, HttpRoutes, IndexSchema,
+    JobInvocation, JobKind, JsonService, Lifecycle, NativePlugin, OnCron, OnEvent, PResult, PluginError,
+    RequestCtx, SearchContributor,
     manifest::{Manifest, PluginKind},
 };
 use wasmtime::{
@@ -91,6 +92,7 @@ pub struct WasmPlugin {
     on_cron: Option<ex::on_cron::GuestIndices>,
     http: Option<ex::http_handler::GuestIndices>,
     service: Option<ex::service_provider::GuestIndices>,
+    search: Option<ex::search_contributor::GuestIndices>,
 }
 
 impl std::fmt::Debug for WasmPlugin {
@@ -262,6 +264,76 @@ impl OnCron for Adapter {
             run_id: job.run_id,
         };
         call_export!(self.0, ctx, on_cron, |g, store| g.call_run(&mut store, &j).await)
+    }
+}
+
+impl Adapter {
+    async fn wit_index_schemas(&self, ctx: &Ctx) -> PResult<Vec<ex::search_contributor::IndexSchema>> {
+        let p = &self.0;
+        let idx = p
+            .search
+            .as_ref()
+            .ok_or_else(|| PluginError::internal("search-contributor not exported"))?;
+        let (mut store, inst, _permit) = p.instantiate(ctx).await?;
+        let g = idx.load(&mut store, &inst).map_err(|e| trap_error(&p.id, &e))?;
+        g.call_index_schemas(&mut store)
+            .await
+            .map_err(|e| trap_error(&p.id, &e))
+    }
+}
+
+#[async_trait]
+impl SearchContributor for Adapter {
+    async fn index_schemas(&self, ctx: &Ctx) -> Vec<IndexSchema> {
+        let r = self.wit_index_schemas(ctx).await;
+        match r {
+            Ok(list) => list
+                .into_iter()
+                .map(|s| IndexSchema {
+                    index: s.index,
+                    fields: s
+                        .fields
+                        .into_iter()
+                        .map(|f| FieldSpec {
+                            name: f.name,
+                            field_type: f.field_type,
+                            searchable: f.searchable,
+                            filterable: f.filterable,
+                            sortable: f.sortable,
+                            rank: f.rank,
+                            exact: f.exact,
+                            label_term: f.label_term,
+                        })
+                        .collect(),
+                    synonyms: s.synonyms,
+                })
+                .collect(),
+            Err(e) => {
+                tracing::warn!(plugin = %self.0.id, error = %e, "index-schemas failed");
+                vec![]
+            }
+        }
+    }
+
+    /// WIT 0.1 只有单条 `to-document`：逐条调用（每次一个新实例）
+    async fn to_documents(
+        &self,
+        ctx: &Ctx,
+        index: &str,
+        entity_ids: &[u64],
+    ) -> PResult<Vec<(u64, Option<serde_json::Value>)>> {
+        let mut out = Vec::with_capacity(entity_ids.len());
+        for id in entity_ids {
+            let doc = call_export!(self.0, ctx, search, |g, store| g
+                .call_to_document(&mut store, index, *id)
+                .await)?;
+            let doc = doc
+                .map(|d| serde_json::from_str(&d))
+                .transpose()
+                .map_err(|_| PluginError::internal("to-document returned invalid JSON"))?;
+            out.push((*id, doc));
+        }
+        Ok(out)
     }
 }
 
@@ -566,6 +638,7 @@ fn load_one(
         on_cron: ex::on_cron::GuestIndices::new(&pre).ok(),
         http: ex::http_handler::GuestIndices::new(&pre).ok(),
         service: ex::service_provider::GuestIndices::new(&pre).ok(),
+        search: ex::search_contributor::GuestIndices::new(&pre).ok(),
         pre,
     });
     // 导出与清单一致（plugin-api.md §2.1）
@@ -589,6 +662,11 @@ fn load_one(
         ),
         ("http-handler", wp.http.is_some(), !routes.is_empty()),
         ("service-provider", wp.service.is_some(), !m.provides.is_empty()),
+        (
+            "search-contributor",
+            wp.search.is_some(),
+            m.capabilities.search_contributor,
+        ),
     ];
     for (iface, exported, declared) in checks {
         if exported != declared {
@@ -629,6 +707,10 @@ fn load_one(
                 routes,
             }) as Arc<dyn HttpRoutes>
         }),
+        search_contributor: wp
+            .search
+            .is_some()
+            .then(|| adapter.clone() as Arc<dyn SearchContributor>),
         json_services,
         ..Default::default()
     })

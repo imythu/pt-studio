@@ -41,6 +41,18 @@ pub trait KernelLink: Send + Sync {
     async fn authenticate(&self, caller: &Ctx, credential: Credential) -> PResult<Option<Principal>>;
     /// JSON 分派的服务调用（跨 Native / WASM 边界，见 [`JsonService`]）
     async fn call_json(&self, caller: &Ctx, service: &str, method: &str, args: Json) -> PResult<Json>;
+    /// 实现了 `search-contributor` 的插件（按激活顺序）；仅 `ctx.search` 提供方可调用
+    fn search_contributors(&self, caller: &Ctx) -> PResult<Vec<String>>;
+    /// 调用贡献者的 `index-schemas`
+    async fn contributor_schemas(&self, caller: &Ctx, plugin: &str) -> PResult<Vec<crate::IndexSchema>>;
+    /// 调用贡献者的 `to-documents`（WASM 贡献者逐条调用 `to-document`）
+    async fn contributor_documents(
+        &self,
+        caller: &Ctx,
+        plugin: &str,
+        index: &str,
+        entity_ids: &[u64],
+    ) -> PResult<Vec<(u64, Option<Json>)>>;
 }
 
 /// JSON 分派的业务服务（pt:plugin@0.1 的 `services` / `service-provider`）。
@@ -157,6 +169,28 @@ impl Ctx {
     /// JSON 分派的服务调用：`ctx.call_json("ctx.ledger", "transfer", json!({...}))`
     pub async fn call_json(&self, service: &str, method: &str, args: Json) -> PResult<Json> {
         self.link.call_json(self, service, method, args).await
+    }
+
+    /// 搜索贡献者列表（`ctx.plugins.search_contributors`，仅 `ctx.search` 提供方可用）。
+    pub fn search_contributors(&self) -> PResult<Vec<String>> {
+        self.link.search_contributors(self)
+    }
+
+    /// 取贡献者声明的索引字段。
+    pub async fn contributor_schemas(&self, plugin: &str) -> PResult<Vec<crate::IndexSchema>> {
+        self.link.contributor_schemas(self, plugin).await
+    }
+
+    /// 让贡献者为一批实体生成文档片段（每个贡献者调用一个独立工作单元）。
+    pub async fn contributor_documents(
+        &self,
+        plugin: &str,
+        index: &str,
+        entity_ids: &[u64],
+    ) -> PResult<Vec<(u64, Option<Json>)>> {
+        self.link
+            .contributor_documents(self, plugin, index, entity_ids)
+            .await
     }
 
     /// 以已认证用户的身份继续调用（只能切换一次）。

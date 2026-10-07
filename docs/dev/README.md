@@ -7,6 +7,7 @@
 | Rust | stable（当前 1.98.1） | `rust-toolchain.toml`，需 clippy、rustfmt |
 | PostgreSQL | ≥ 16（开发用 17） | 需要 `GRANT … WITH INHERIT FALSE, SET TRUE`（PG16+） |
 | Redis | ≥ 7.4（开发用 8.0） | 需要 `HEXPIRE` 等命令；消费者使用 Streams |
+| Meilisearch | ≥ 1.13（CE） | search-meilisearch；只监听内网 |
 
 ### 1.1 初始化数据库（一次）
 
@@ -19,6 +20,9 @@
 su postgres -c "/usr/lib/postgresql/17/bin/pg_ctl -D .dev/pg -o '-p 55432 -k /tmp' -l .dev/pg.log start"
 # Redis（端口 56379，不落盘）
 redis-server --port 56379 --daemonize yes --save '' --appendonly no
+# Meilisearch（端口 57700，二进制放在 .dev/bin，数据目录 .dev/meili）
+.dev/bin/meilisearch --http-addr 127.0.0.1:57700 --master-key pt-test-master-key-0123456789 \
+    --db-path .dev/meili/data.ms --dump-dir .dev/meili/dumps --no-analytics > .dev/meili.log 2>&1 &
 ```
 
 ## 2. 运行
@@ -38,7 +42,7 @@ cargo clippy --workspace --all-targets      # 0 警告
 cargo test --workspace                      # 单元测试 + 端到端测试
 ```
 
-端到端测试（`crates/server/tests/`）连接真实 PostgreSQL 与 Redis，默认地址对应 §1.2；可用环境变量 `PT_TEST_SUPERUSER_URL`、`PT_TEST_ADMIN_URL`、`PT_TEST_GATEWAY_URL`、`PT_TEST_REDIS_URL`（建议用独立 DB 号，测试会 `FLUSHDB`）、`PT_TEST_BLOB_DIR` 覆盖。测试会删除并重建测试库中的 `kernel`、`identity`、`torrent` 等 schema。
+端到端测试（`crates/server/tests/`）连接真实 PostgreSQL 与 Redis，默认地址对应 §1.2；可用环境变量 `PT_TEST_SUPERUSER_URL`、`PT_TEST_ADMIN_URL`、`PT_TEST_GATEWAY_URL`、`PT_TEST_REDIS_URL`（建议用独立 DB 号，测试会 `FLUSHDB`）、`PT_TEST_BLOB_DIR`、`PT_TEST_MEILI_URL` / `PT_TEST_MEILI_KEY` 覆盖。Meilisearch 不可达时 `e2e_search` 跳过（输出 `SKIPPED`）。测试会删除并重建测试库中的 `kernel`、`identity`、`torrent` 等 schema。
 
 ## 4. 实现状态（P1 内核骨架 + P2 记账 + P3 WASM 宿主 + P4 部分插件，2026-10-07）
 
@@ -57,7 +61,8 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | bonus（WASM） | 币种初始化（经 `ctx.ledger`）、安全表达式语言（词法、Pratt 解析、白名单函数、深度 / 节点上限、非有限值归零）、规则集（表达式与分档模式、NexusPHP 预设为 v1、按小时取生效版本）、小时结算（快照 → 用户小时 → 应计，多部分合并）、批量入账（postings、`transfer_batch`、幂等键、失败重试计数）、行为奖励、`ctx.bonus.award`、`GET /v1/users/me/summary` | 规则编辑 / 发布接口、回放重算、回收、估算明细、`has_role`（等 `ctx.rbac.roles_of`）、medal_factor（等 medals） |
 | promotion（WASM） | 促销类型、单种促销（替换 / 结束）、自动规则（谓词与优先级，`torrent.created` 及手动促销结束后重新评估）、全站活动、个人促销卡（发放 / 使用、冗余检查）、同步到 accounting 倍率规则（对账重试）、到期 cron、展示状态、`ctx.promotions` | 促销申请审核、促销统计、自定义类型的前端展示 |
 | levels（WASM） | NexusPHP 预设等级（农民为降级落点，用户 0.6 / 0.5 滞回）、角色同步（`levels:class_<id>` 绑定到等级）、指标（注册天数、上传 / 下载 / 分享率、做种时长、平均做种时长、做种体积、发布数）、评估（覆盖 > 升级 one_step / highest > 保护期 > 保级 / 警告 / 到期降级）、增量评估（`traffic.settled` 标记，只升级）与每日全量评估、`invite.before_issue`、手动锁定 / 解锁、保号、`ctx.levels`、`GET /v1/me` 进度 | 等级编辑接口、模拟评估、邀请奖励、不活跃处理、VIP / 荣誉覆盖来源、等级权限默认配置 |
-| torrent | 严格 bencode、v1 / v2 / hybrid 解析、规范化（private、source、白名单）、上传（钩子、重复检测）、详情、文件列表、下载（passkey 注入、钩子、下载记录） | 资源类型插件接入、Group、状态机、编辑与替换、签名链接、批量下载、NFO |
+| search-meilisearch | 贡献者 schema 合并（命名规则、保留 / 敏感字段、冲突记录）与设置生成、事件 → `pending_ops` → 延迟任务批量写入（文档哈希去重、删除优先、非拥有者失败降级）、发布名解析（`rel_*`）与标题规范化、swap 重建状态机（首次建索引、手动重建、双写与重放、文档数校验、取消）、查询（可见性基线、`search.before_query` 只追加且解析校验、结构化过滤、排序、facet、折叠、游标、高亮、Redis 结果缓存与代数失效）、联想、schema 视图、`ctx.search`、失败任务回收 | 语义 / 混合搜索、tenant token、多实例（replicas / network）、做种数部分更新、同义词管理与术语派生、一致性巡检、MCP、扩展索引注册、`users_admin` 等其他标准索引、熔断 |
+| torrent | 严格 bencode、v1 / v2 / hybrid 解析、规范化（private、source、白名单）、上传（钩子、重复检测）、详情、文件列表、下载（passkey 注入、钩子、下载记录）、`torrents` 索引搜索贡献（可见性映射） | 资源类型插件接入、Group、状态机、编辑与替换、签名链接、批量下载、NFO |
 
 ## 5. 与设计文档的差异（实现时的决定）
 
@@ -79,6 +84,11 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 - **bonus 审核通过奖励**：torrent 状态机接入前，以 `torrent.created` 且初始状态为 approved 视为审核通过。
 - **levels 等级表**：`classes` 增加 `is_default` 列明确默认等级（设计中由 rank 推断）；NexusPHP 预设中“农民 → 用户”滞回写成用户 promote = ratio ≥ 0.6、keep = ratio ≥ 0.5。
 - **levels 角色同步**：identity 新增 `class_roles`（等级 → 角色），等级角色并入有效角色；插件只能绑定自身前缀角色或 rank ≤ 2 的内置角色。
+- **搜索贡献者调用**：内核在 `Ctx` 上提供 `search_contributors` / `contributor_schemas` / `contributor_documents`（plugin-api.md §2.0.1），仅 `ctx.search` 提供方可用；WASM 贡献者逐条调用 `to-document`。
+- **search-meilisearch 实现取舍**：运行时设置项（窗口、批量、缓存 TTL 等）暂放在静态配置；哈希以十六进制文本保存；索引拥有者与重建枚举视图由插件内的标准索引登记表决定（WIT 的 `owner`、`list-ids` 待 0.2）；flush 依赖 `FOR UPDATE SKIP LOCKED` 行锁而不另加 Redis 锁（同一实体只有一行待写，顺序由行锁保证）；`filterableAttributes` 用字段名列表（兼容所有 1.x）。
+- **已知限制：延迟任务串行执行**：内核在持有 `k:lock:delayed-jobs` 的单个节点上逐条执行延迟任务，search 重建步骤等待 Meilisearch 任务时会推迟同期的 flush；后续改为按插件 / 任务名并发执行。
+- **搜索结果缓存**：普通通道写入不使缓存失效（新文档最多滞后 `cache_ttl_secs`，默认 45 s），删除与优先通道写入立即失效（LLD §1.6）。
+- **种子可见性映射（搜索）**：approved → member；candidate / pending → staff（上传者本人可见，匿名发布不写 `vis_owner_id`）；rejected / disabled / deleted 不进索引。
 - **手动运行 cron**：`Kernel::run_job_now` 在任务正在运行（如启动时 catch_up）时最多等待 30 s。
 
 ## 6. 进度记录
@@ -90,3 +100,4 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | 2026-10-07 | cron、accounting 小时快照、bonus 小时结算与批量入账（WASM） |
 | 2026-10-07 | P3：WASM 宿主、`pt:plugin@0.1` WIT、JSON 分派服务、bonus（WASM 试点）、沙箱越界测试插件 x-chaos |
 | 2026-10-07 | P4：promotion（WASM）、levels（WASM）、identity 等级与等级角色 |
+| 2026-10-07 | P4：search-meilisearch（Native）、内核搜索贡献者调用入口、torrent 搜索贡献 |

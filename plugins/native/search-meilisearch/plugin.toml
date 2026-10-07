@@ -1,0 +1,183 @@
+id = "search-meilisearch"
+name = "搜索（Meilisearch）"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "基于 Meilisearch 的站内搜索：贡献者 schema 合并、增量同步、可见性强制、swap 重建（ctx.search）"
+
+provides = ["ctx.search@0.1.0"]
+requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
+publishes = ["search.index_rebuilt"]
+
+[capabilities]
+kv = true
+sql = true
+redis = true
+views = ["torrent.v_torrent_public"]
+
+
+[[hook_points]]
+name = "search.before_query"
+input_schema = "schemas/hooks/search.before_query.json"
+
+[[subscriptions]]
+name = "torrent_created"
+event = "torrent.created"
+
+[[subscriptions]]
+name = "torrent_updated"
+event = "torrent.updated"
+
+[[subscriptions]]
+name = "torrent_tags_changed"
+event = "torrent.tags_changed"
+
+[[subscriptions]]
+name = "torrent_status_changed"
+event = "torrent.status_changed"
+
+[[subscriptions]]
+name = "torrent_deleted"
+event = "torrent.deleted"
+
+[[subscriptions]]
+name = "promotion_started"
+event = "promotion.started"
+
+[[subscriptions]]
+name = "promotion_ended"
+event = "promotion.ended"
+
+[[cron]]
+name = "flush_sweeper"
+schedule = "* * * * *"
+timeout_secs = 55
+tx = "manual"
+
+[[cron]]
+name = "task_reaper"
+schedule = "*/2 * * * *"
+timeout_secs = 100
+tx = "manual"
+
+[[jobs]]
+name = "flush"
+timeout_secs = 60
+
+[[jobs]]
+name = "settings_apply"
+timeout_secs = 120
+
+[[jobs]]
+name = "rebuild_step"
+timeout_secs = 300
+
+[[http.routes]]
+id = "search"
+method = "POST"
+path = "/v1/search"
+auth = "user"
+permission = "search-meilisearch.use"
+rate_limit = "user:60/m"
+max_body_kb = 64
+
+[[http.routes]]
+id = "search_get"
+method = "GET"
+path = "/v1/search"
+auth = "user"
+permission = "search-meilisearch.use"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "suggest"
+method = "GET"
+path = "/v1/suggest"
+auth = "user"
+permission = "search-meilisearch.use"
+rate_limit = "user:300/m"
+
+[[http.routes]]
+id = "list_indexes"
+method = "GET"
+path = "/v1/indexes"
+auth = "user"
+permission = "search-meilisearch.use"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "get_schema"
+method = "GET"
+path = "/v1/indexes/{index}/schema"
+auth = "user"
+permission = "search-meilisearch.use"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_indexes"
+method = "GET"
+path = "/v1/admin/indexes"
+auth = "admin"
+permission = "search-meilisearch.manage"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_create_rebuild"
+method = "POST"
+path = "/v1/admin/indexes/{index}/rebuilds"
+auth = "admin"
+permission = "search-meilisearch.manage"
+rate_limit = "user:6/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_get_rebuild"
+method = "GET"
+path = "/v1/admin/rebuilds/{id}"
+auth = "admin"
+permission = "search-meilisearch.manage"
+
+[[http.routes]]
+id = "admin_cancel_rebuild"
+method = "POST"
+path = "/v1/admin/rebuilds/{id}/cancellations"
+auth = "admin"
+permission = "search-meilisearch.manage"
+
+[[permissions]]
+name = "search-meilisearch.use"
+description_term = "search-meilisearch.perm.use"
+default_roles = ["user"]
+
+[[permissions]]
+name = "search-meilisearch.admin_index.read"
+description_term = "search-meilisearch.perm.admin_index_read"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "search-meilisearch.manage"
+description_term = "search-meilisearch.perm.manage"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "search-meilisearch.restricted.read"
+description_term = "search-meilisearch.perm.restricted_read"
+default_roles = ["moderator"]
+
+[database]
+migrations = "migrations"
+
+[terms]
+"search-meilisearch.perm.use" = { zh-CN = "使用搜索", en = "Use search" }
+"search-meilisearch.perm.admin_index_read" = { zh-CN = "搜索用户管理索引", en = "Search the user admin index" }
+"search-meilisearch.perm.manage" = { zh-CN = "管理搜索索引", en = "Manage search indexes" }
+"search-meilisearch.perm.restricted_read" = { zh-CN = "搜索待审 / 受限内容", en = "Search restricted content" }
+"search-meilisearch.field.rel_resolution" = { zh-CN = "分辨率", en = "Resolution" }
+"search-meilisearch.field.rel_source" = { zh-CN = "来源", en = "Source" }
+"search-meilisearch.field.rel_video_codec" = { zh-CN = "视频编码", en = "Video codec" }
+"search-meilisearch.field.rel_audio_codec" = { zh-CN = "音频编码", en = "Audio codec" }
+"search-meilisearch.field.rel_hdr" = { zh-CN = "HDR", en = "HDR" }
+"search-meilisearch.field.rel_group" = { zh-CN = "发布组", en = "Release group" }
+"search-meilisearch.field.rel_year" = { zh-CN = "年份", en = "Year" }
