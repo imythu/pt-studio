@@ -464,16 +464,24 @@ impl Kernel {
             .find(|c| c.name == name)
             .cloned()
             .ok_or_else(|| PluginError::not_found(format!("plugin `{plugin}` has no cron job `{name}`")))?;
-        crate::scheduler::fire(
-            &self.shared,
-            plugin,
-            &decl,
-            chrono::Utc::now(),
-            pt_plugin_api::JobKind::Manual,
-            payload,
-        )
-        .await
-        .unwrap_or_else(|| Err(PluginError::new("kernel.conflict", "job is already running").retryable()))
+        // 正在运行（如启动时的 catch_up）时等待其结束，最多 30 s
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let r = crate::scheduler::fire(
+                &self.shared,
+                plugin,
+                &decl,
+                chrono::Utc::now(),
+                pt_plugin_api::JobKind::Manual,
+                payload.clone(),
+            )
+            .await;
+            match r {
+                Some(r) => return r,
+                None if tokio::time::Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(200)).await,
+                None => return Err(PluginError::new("kernel.conflict", "job is already running").retryable()),
+            }
+        }
     }
 
     pub fn router(&self) -> axum::Router {

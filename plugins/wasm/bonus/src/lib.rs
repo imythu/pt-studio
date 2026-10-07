@@ -14,7 +14,11 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use exports::pt::plugin::{http_handler, lifecycle, on_event, service_provider};
+pub mod expr;
+pub mod hourly;
+pub mod rules;
+
+use exports::pt::plugin::{http_handler, lifecycle, on_cron, on_event, service_provider};
 use pt::plugin::{
     events, invocation, log, services,
     sql::{self, SqlValue},
@@ -85,6 +89,21 @@ impl lifecycle::Guest for Bonus {
              ON CONFLICT (code) DO NOTHING",
             &[],
         )?;
+        // 首次初始化：发布 NexusPHP 预设为 v1（effective_from = 1970-01-01，03 §1.2）
+        let has = sql::query("SELECT 1 FROM rule_versions LIMIT 1", &[])?;
+        if has.rows.is_empty() {
+            let def: Value = serde_json::from_str(rules::PRESET_NEXUSPHP)
+                .map_err(|_| err("bonus.rules_invalid", "preset"))?;
+            let id = int(&sql::query(
+                "INSERT INTO rule_sets (name, preset, draft) VALUES ('NexusPHP', 'nexusphp', $1) RETURNING id",
+                &[SqlValue::Json(def.to_string())],
+            )?
+            .rows[0][0]);
+            sql::execute(
+                "INSERT INTO rule_versions (rule_set_id, definition, effective_from, note) VALUES ($1, $2, 'epoch', 'preset nexusphp')",
+                &[SqlValue::Int(id), SqlValue::Json(def.to_string())],
+            )?;
+        }
         log::emit(log::Level::Info, "bonus initialised", &[]);
         Ok(())
     }
@@ -170,13 +189,30 @@ impl on_event::Guest for Bonus {
     fn handle(evt: on_event::EventEnvelope, _d: on_event::DeliveryInfo) -> R<()> {
         let p: Value =
             serde_json::from_str(&evt.payload).map_err(|_| err("bonus.bad_event", "invalid payload"))?;
-        if evt.event_type == "torrent.created"
-            && p["status"] == "approved"
-            && let (Some(uid), Some(tid)) = (p["uploader_id"].as_i64(), p["torrent_id"].as_i64())
-        {
-            on_action(&evt.id, "torrent_approved", uid, &format!("torrent:{tid}"))?;
+        match evt.event_type.as_str() {
+            "traffic.seeding_snapshot_taken" => hourly::on_snapshot(&evt.id, &p),
+            "torrent.created" => {
+                // 种子镜像（03 §1.3）
+                sql::execute(
+                    "INSERT INTO torrent_facts (torrent_id, size, type_id, uploader_id, is_anonymous, source_created_at, status)
+                     VALUES ($1, $2, $3, $4, $5, to_timestamp($6::float8 / 1000), $7)
+                     ON CONFLICT (torrent_id) DO UPDATE SET size = EXCLUDED.size, status = EXCLUDED.status, updated_at = now()",
+                    &[SqlValue::Int(p["torrent_id"].as_i64().unwrap_or(0)), SqlValue::Int(p["size"].as_i64().unwrap_or(0)),
+                      p["type_id"].as_str().map_or(SqlValue::Null, |t| SqlValue::Text(t.into())),
+                      p["uploader_id"].as_i64().map_or(SqlValue::Null, SqlValue::Int),
+                      SqlValue::Boolean(p["anonymous"].as_bool().unwrap_or(false)),
+                      SqlValue::Int(p["created_at"].as_i64().unwrap_or(evt.occurred_at)),
+                      p["status"].as_str().map_or(SqlValue::Null, |t| SqlValue::Text(t.into()))],
+                )?;
+                if p["status"] == "approved"
+                    && let (Some(uid), Some(tid)) = (p["uploader_id"].as_i64(), p["torrent_id"].as_i64())
+                {
+                    on_action(&evt.id, "torrent_approved", uid, &format!("torrent:{tid}"))?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
-        Ok(())
     }
 }
 
@@ -308,6 +344,18 @@ fn award(args: &Value) -> R<Value> {
         payload: json!({ "user_id": user, "currency": currency, "amount": amount, "reason": reason, "source": "service" }).to_string(),
     })?;
     Ok(json!({ "entry_id": entry, "duplicate": res["duplicate"].as_bool().unwrap_or(false) }))
+}
+
+impl on_cron::Guest for Bonus {
+    fn run(job: on_cron::JobInvocation) -> R<()> {
+        match job.name.as_str() {
+            "post_accruals" => {
+                let p: Value = serde_json::from_str(&job.payload).unwrap_or(Value::Null);
+                hourly::post_accruals(p["cutoff"].as_str().map(str::to_owned))
+            }
+            _ => Err(err("kernel.not_found", "unknown job")),
+        }
+    }
 }
 
 impl service_provider::Guest for Bonus {

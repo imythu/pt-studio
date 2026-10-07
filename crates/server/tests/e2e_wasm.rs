@@ -261,6 +261,135 @@ async fn wasm_bonus_end_to_end() {
             .unwrap();
     assert_eq!(caller, "bonus");
 
+    // 小时结算：tracker 流 → accounting 快照 → bonus 用户小时 → post_accruals → ledger
+    let tid = up.body["id"].as_i64().unwrap();
+    let mut rc = redis::Client::open(env("PT_TEST_REDIS_URL", "redis://127.0.0.1:56379/15"))
+        .unwrap()
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+    let part = uid % 2;
+    for (i, (ev, dseed)) in [("started", "0"), ("none", "1800")].into_iter().enumerate() {
+        let _: String = redis::cmd("XADD")
+            .arg(format!("acct:{part}"))
+            .arg("*")
+            .arg(&[
+                ("v", "1".to_owned()),
+                ("eid", format!("w1:1:{i}")),
+                ("ts", chrono::Utc::now().timestamp().to_string()),
+                ("uid", uid.to_string()),
+                ("tid", tid.to_string()),
+                ("ih", "ab".repeat(20)),
+                ("pid", "2d71423436333030".to_owned() + &"22".repeat(12)),
+                ("ip", "203.0.113.1".into()),
+                ("port", "1".into()),
+                ("ev", ev.into()),
+                ("up", "0".into()),
+                ("down", "0".into()),
+                ("left", "0".into()),
+                ("dup", "0".into()),
+                ("ddown", "0".into()),
+                ("dseed", dseed.into()),
+                ("dleech", "0".into()),
+                ("flags", "0".into()),
+                ("ua", "x".into()),
+            ])
+            .query_async(&mut rc)
+            .await
+            .unwrap();
+    }
+    let su = env(
+        "PT_TEST_SUPERUSER_URL",
+        "postgres://postgres@127.0.0.1:55432/pt_test",
+    );
+    let mut db = PgConnection::connect(&su).await.unwrap();
+    let mut slotted = false;
+    for _ in 0..100 {
+        let n: i64 = sqlx::query_scalar("SELECT coalesce(sum(slot0_secs + slot1_secs), 0)::bigint FROM accounting.peers WHERE user_id = $1")
+            .bind(i64::try_from(uid).unwrap()).fetch_one(&mut db).await.unwrap();
+        if n == 1800 {
+            slotted = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(slotted, "accounting did not record the seeding slot");
+    // 新种子在 NexusPHP 公式中权重为 0：把种子事实的创建时间提前 4 周
+    sqlx::query(
+        "UPDATE bonus.torrent_facts SET source_created_at = now() - interval '28 days' WHERE torrent_id = $1",
+    )
+    .bind(tid)
+    .execute(&mut db)
+    .await
+    .unwrap();
+    let hour = chrono::Utc::now().timestamp().div_euclid(3600);
+    kernel
+        .run_job_now(
+            "accounting",
+            "seeding_snapshot",
+            json!({"hour": hour, "force": true}),
+        )
+        .await
+        .unwrap();
+    let mut amounts = Value::Null;
+    for _ in 0..100 {
+        if let Some(a) =
+            sqlx::query_scalar::<_, Value>("SELECT amounts FROM bonus.user_hours WHERE user_id = $1")
+                .bind(i64::try_from(uid).unwrap())
+                .fetch_optional(&mut db)
+                .await
+                .unwrap()
+        {
+            amounts = a;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        amounts,
+        json!({"bonus": 5, "seed_points": 5}),
+        "user hour amounts"
+    );
+    let next_hour = chrono::DateTime::from_timestamp((hour + 1) * 3600, 0)
+        .unwrap()
+        .to_rfc3339();
+    kernel
+        .run_job_now("bonus", "post_accruals", json!({"cutoff": next_hour}))
+        .await
+        .unwrap();
+    kernel
+        .run_job_now("bonus", "post_accruals", json!({"cutoff": next_hour}))
+        .await
+        .unwrap(); // 重复运行不重复入账
+    let s = call(
+        &app,
+        "GET",
+        "/api/p/bonus/v1/users/me/summary",
+        None,
+        &[("cookie", &cookie)],
+    )
+    .await
+    .body;
+    assert_eq!(
+        (
+            s["balances"][0]["balance"].as_i64(),
+            s["balances"][1]["balance"].as_i64()
+        ),
+        (Some(160), Some(5)),
+        "{s}"
+    );
+    let states: Vec<String> = sqlx::query_scalar("SELECT state FROM bonus.postings ORDER BY currency")
+        .fetch_all(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(states, vec!["done", "done"]);
+    let settled: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM kernel.event_log WHERE event_type = 'bonus.hourly_settled'")
+            .fetch_one(&mut db)
+            .await
+            .unwrap();
+    assert_eq!(settled, 1);
+
     // 沙箱：截止时间、陷入、内存上限、跨 schema 读取、Redis 白名单；越界后插件仍可正常服务
     for (op, code) in [
         ("loop", "kernel.timeout"),

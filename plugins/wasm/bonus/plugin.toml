@@ -8,15 +8,29 @@ authors = ["PT Studio"]
 description = "站点魔力值：币种初始化、行为奖励、ctx.bonus.award（P3 试点子集）"
 
 provides = ["ctx.bonus@0.1.0"]
-requires = ["ctx.ledger@^0.1"]
-publishes = ["bonus.awarded"]
+requires = ["ctx.ledger@^0.1", "ctx.users@^0.1"]
+publishes = ["bonus.awarded", "bonus.hourly_settled"]
 
 [capabilities]
 kv = true
 sql = true
+# snatch_seed_secs 变量
+views = ["accounting.v_snatch"]
 
 [capabilities.scopes]
 "ctx.ledger" = ["currency:bonus", "currency:seed_points", "read"]
+
+[[subscriptions]]
+name = "on_seeding_snapshot"
+event = "traffic.seeding_snapshot_taken"
+ordered = true
+
+[[cron]]
+name = "post_accruals"
+schedule = "40 * * * *"
+timeout_secs = 3000
+catch_up = "once"
+tx = "manual"
 
 [[subscriptions]]
 name = "on_torrent_created"
@@ -31,6 +45,11 @@ rate_limit = "user:60/m"
 
 [database]
 migrations = "migrations"
+
+[[database.partitions]]
+table = "user_hours"
+by = "range_month"
+premake = 3
 
 [wasm]
 memory_mb = 64
