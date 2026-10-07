@@ -9,7 +9,7 @@ description = "消费 pt-tracker 的流量流，按时间窗口聚合结算上�
 
 provides = ["ctx.accounting@0.1.0"]
 requires = ["ctx.rbac@^0.1"]
-publishes = ["traffic.settled", "traffic.snatch_completed", "traffic.adjusted"]
+publishes = ["traffic.settled", "traffic.snatch_completed", "traffic.adjusted", "traffic.seeding_snapshot_taken"]
 
 [capabilities]
 kv = true
@@ -26,6 +26,13 @@ stream_prefix = "acct:"
 partitions_from = "acct:_meta"
 redis_role = "acct"
 default_partitions = 64
+
+[[cron]]
+name = "seeding_snapshot"
+schedule = "2 * * * *"
+timeout_secs = 3300
+catch_up = "once"
+tx = "manual"
 
 [[subscriptions]]
 name = "mirror_torrent"

@@ -19,7 +19,17 @@ use sqlx::{PgConnection, Row};
 
 use crate::{Config, rates};
 
+pub const FLAG_FIRST_SEEN: u32 = 1;
 pub const FLAG_FIRST_COMPLETED: u32 = 1 << 4;
+
+/// 需要写 snatch 的条目（03 §1.2）：纯做种续报只进入 peers 的小时槽
+pub fn touches(e: &Entry) -> bool {
+    e.dup > 0
+        || e.ddown > 0
+        || e.dleech > 0
+        || e.flags & (FLAG_FIRST_SEEN | FLAG_FIRST_COMPLETED) != 0
+        || matches!(e.ev, Ev::Started | Ev::Completed | Ev::Stopped)
+}
 const MAX_DELTA: u64 = 1 << 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -246,6 +256,8 @@ struct PeerAgg {
     active: bool,
     client: String,
     last_ts: i64,
+    /// 本微批的做种秒数（写入小时槽，由小时快照折叠进 snatches，03 §1.9）
+    seed: u64,
 }
 
 fn ts_dt(secs: i64) -> DateTime<Utc> {
@@ -397,32 +409,41 @@ async fn store(
     let mut peers: BTreeMap<(u64, u64, [u8; 20]), PeerAgg> = BTreeMap::new();
     for e in entries {
         let t_ms = i(e.id.0);
-        let (up_pm, down_pm, ids) = rates::effective(&idx, e.uid, e.tid, t_ms, cfg.max_up_permille);
-        let key = rates::rate_key(up_pm, down_pm, &ids);
-        let p = pairs.entry((e.uid, e.tid, key)).or_insert_with(|| PairAgg {
-            up_permille: up_pm,
-            down_permille: down_pm,
-            rule_ids: ids.clone(),
-            first_ts: e.ts,
-            ..PairAgg::default()
-        });
-        p.up_raw += e.dup;
-        p.down_raw += e.ddown;
-        p.up += rates::credited(e.dup, up_pm);
-        p.down += rates::credited(e.ddown, down_pm);
-        p.seed += e.dseed;
-        p.leech += e.dleech;
-        p.last_ts = p.last_ts.max(e.ts);
-        p.first_ts = p.first_ts.min(e.ts);
-        if e.flags & FLAG_FIRST_COMPLETED != 0 {
-            p.completed_at = Some(p.completed_at.map_or(e.ts, |c| c.min(e.ts)));
+        let touch = touches(e);
+        let (up_pm, down_pm, ids) = if touch {
+            rates::effective(&idx, e.uid, e.tid, t_ms, cfg.max_up_permille)
+        } else {
+            (1000, 1000, vec![])
+        };
+        if touch {
+            let key = rates::rate_key(up_pm, down_pm, &ids);
+            let p = pairs.entry((e.uid, e.tid, key)).or_insert_with(|| PairAgg {
+                up_permille: up_pm,
+                down_permille: down_pm,
+                rule_ids: ids.clone(),
+                first_ts: e.ts,
+                ..PairAgg::default()
+            });
+            p.up_raw += e.dup;
+            p.down_raw += e.ddown;
+            p.up += rates::credited(e.dup, up_pm);
+            p.down += rates::credited(e.ddown, down_pm);
+            p.seed += e.dseed;
+            p.leech += e.dleech;
+            p.last_ts = p.last_ts.max(e.ts);
+            p.first_ts = p.first_ts.min(e.ts);
+            if e.flags & FLAG_FIRST_COMPLETED != 0 {
+                p.completed_at = Some(p.completed_at.map_or(e.ts, |c| c.min(e.ts)));
+            }
         }
         let pe = peers.entry((e.uid, e.tid, e.pid)).or_insert_with(|| PeerAgg {
             is_seeder: e.left == 0,
             active: true,
             client: e.client.clone(),
             last_ts: e.ts,
+            seed: 0,
         });
+        pe.seed += e.dseed;
         pe.is_seeder = e.left == 0;
         pe.active = e.ev != Ev::Stopped;
         pe.client.clone_from(&e.client);
@@ -431,8 +452,8 @@ async fn store(
 
     // ---- peers ----
     if !peers.is_empty() {
-        let (mut u, mut t, mut pid, mut seeder, mut active, mut client, mut at) =
-            (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+        let (mut u, mut t, mut pid, mut seeder, mut active, mut client, mut at, mut secs) =
+            (vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
         for ((uid, tid, p), a) in &peers {
             u.push(i(*uid));
             t.push(i(*tid));
@@ -441,14 +462,30 @@ async fn store(
             active.push(a.active);
             client.push(a.client.clone());
             at.push(ts_dt(a.last_ts));
+            secs.push(i32::try_from(a.seed.min(86_400)).unwrap_or(0));
         }
+        // 小时 = 窗口所在小时（窗口整除 1 小时，微批不跨窗口）；按 hour % 2 选槽，槽内同小时累加、换小时覆盖
+        let hour = i32::try_from(window_start.div_euclid(3600)).unwrap_or(0);
         sqlx::query(
-            "INSERT INTO peers AS p (user_id, torrent_id, peer_id, part, is_seeder, is_active, client_prefix, first_seen_at, last_announce_at)
-             SELECT u, t, pid, $1, s, a, cl, at, at FROM unnest($2::bigint[], $3::bigint[], $4::bytea[], $5::bool[], $6::bool[], $7::text[], $8::timestamptz[])
-                  AS x(u, t, pid, s, a, cl, at)
+            "INSERT INTO peers AS p (user_id, torrent_id, peer_id, part, is_seeder, is_active, client_prefix, first_seen_at, last_announce_at,
+                                    slot0_hour, slot0_secs, slot1_hour, slot1_secs)
+             SELECT u, t, pid, $1, s, a, cl, at, at,
+                    CASE WHEN $9 % 2 = 0 THEN $9 END, CASE WHEN $9 % 2 = 0 THEN sec ELSE 0 END,
+                    CASE WHEN $9 % 2 = 1 THEN $9 END, CASE WHEN $9 % 2 = 1 THEN sec ELSE 0 END
+               FROM unnest($2::bigint[], $3::bigint[], $4::bytea[], $5::bool[], $6::bool[], $7::text[], $8::timestamptz[], $10::int[])
+                  AS x(u, t, pid, s, a, cl, at, sec)
+             ORDER BY u, t, pid
              ON CONFLICT (user_id, torrent_id, peer_id) DO UPDATE SET
                 is_seeder = EXCLUDED.is_seeder, is_active = EXCLUDED.is_active, client_prefix = EXCLUDED.client_prefix,
-                last_announce_at = greatest(p.last_announce_at, EXCLUDED.last_announce_at)",
+                last_announce_at = greatest(p.last_announce_at, EXCLUDED.last_announce_at),
+                slot0_secs = CASE WHEN EXCLUDED.slot0_hour IS NULL THEN p.slot0_secs
+                                  WHEN p.slot0_hour = EXCLUDED.slot0_hour THEN p.slot0_secs + EXCLUDED.slot0_secs
+                                  ELSE EXCLUDED.slot0_secs END,
+                slot0_hour = coalesce(EXCLUDED.slot0_hour, p.slot0_hour),
+                slot1_secs = CASE WHEN EXCLUDED.slot1_hour IS NULL THEN p.slot1_secs
+                                  WHEN p.slot1_hour = EXCLUDED.slot1_hour THEN p.slot1_secs + EXCLUDED.slot1_secs
+                                  ELSE EXCLUDED.slot1_secs END,
+                slot1_hour = coalesce(EXCLUDED.slot1_hour, p.slot1_hour)",
         )
         .bind(part)
         .bind(&u)
@@ -458,6 +495,8 @@ async fn store(
         .bind(&active)
         .bind(&client)
         .bind(&at)
+        .bind(hour)
+        .bind(&secs)
         .execute(&mut *c)
         .await?;
     }
@@ -499,7 +538,7 @@ async fn store(
         s.down_raw += a.down_raw;
         s.up += a.up;
         s.down += a.down;
-        s.seed += a.seed;
+        // 做种时长只由小时快照折叠（03 §1.9），此处不计入，避免与快照重复
         s.leech += a.leech;
         s.last_ts = s.last_ts.max(a.last_ts);
         s.first_ts = s.first_ts.min(a.first_ts);

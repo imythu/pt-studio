@@ -6,6 +6,7 @@
 
 pub mod ingest;
 pub mod rates;
+pub mod snapshot;
 
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -27,7 +28,13 @@ use sqlx::Row;
 use crate::rates::{EffectiveRate, RateIndex, RateRule};
 
 pub const MANIFEST: &str = include_str!("../plugin.toml");
-pub const MIGRATIONS: &[(&str, &str)] = &[("0001_init.sql", include_str!("../migrations/0001_init.sql"))];
+pub const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    (
+        "0002_hourly_slots.sql",
+        include_str!("../migrations/0002_hourly_slots.sql"),
+    ),
+];
 pub const ACCOUNTING: &str = "ctx.accounting";
 
 /// 静态配置（`site.toml [plugin.accounting]`，03 §4）。
@@ -325,6 +332,35 @@ impl Lifecycle for Accounting {
 impl PartitionWorker for Accounting {
     async fn poll(&self, ctx: &Ctx, partition: u32, fence: u64) -> PResult<PollOutcome> {
         ingest::poll(&self.0, ctx, partition, fence).await
+    }
+}
+
+#[async_trait]
+impl pt_plugin_api::OnCron for Accounting {
+    async fn run(&self, ctx: &Ctx, job: pt_plugin_api::JobInvocation) -> PResult<()> {
+        match job.name.as_str() {
+            "seeding_snapshot" => {
+                let cfg = self.0.cfg()?;
+                let mut conn = ctx.redis.global("acct")?;
+                let parts: u32 = redis::cmd("HGET")
+                    .arg("acct:_meta")
+                    .arg("partitions")
+                    .query_async::<Option<u32>>(&mut conn)
+                    .await?
+                    .unwrap_or(cfg.default_partitions);
+                // 手动运行可指定 {"hour": H(t), "force": true}
+                let hour = job.payload.get("hour").and_then(serde_json::Value::as_i64);
+                let force = job
+                    .payload
+                    .get("force")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let n = snapshot::run(ctx, parts, cfg.settle_grace_secs, hour, force).await?;
+                tracing::info!(users = n, "seeding snapshot done");
+                Ok(())
+            }
+            other => Err(PluginError::internal(format!("unknown job `{other}`"))),
+        }
     }
 }
 
@@ -663,6 +699,7 @@ pub fn plugin() -> NativePlugin {
         migrations: MIGRATIONS,
         lifecycle: Some(a.clone()),
         on_event: Some(a.clone()),
+        on_cron: Some(a.clone()),
         http: Some(Arc::new(Routes)),
         workers: vec![("ingest", a.clone())],
         services: vec![(ACCOUNTING, service_object::<dyn AccountingService>(a.clone()))],

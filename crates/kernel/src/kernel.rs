@@ -442,9 +442,38 @@ impl Kernel {
         }
 
         let (stop, stop_rx) = watch::channel(false);
-        let tasks = events::spawn_background(shared.clone(), stop_rx);
+        let mut tasks = events::spawn_background(shared.clone(), stop_rx.clone());
+        tasks.extend(crate::scheduler::spawn(shared.clone(), stop_rx));
         tracing::info!(plugins = ?shared.order, node = %shared.node_id, "kernel started");
         Ok(Kernel { shared, stop, tasks })
+    }
+
+    /// 手动运行一个 cron 任务（kind = manual，不做按触发时间去重，仍禁止重叠）。
+    /// 供 CLI（`pt-server jobs run`）与测试使用。
+    pub async fn run_job_now(
+        &self,
+        plugin: &str,
+        name: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), PluginError> {
+        let rt = self.shared.plugin(plugin)?;
+        let decl = rt
+            .manifest
+            .cron
+            .iter()
+            .find(|c| c.name == name)
+            .cloned()
+            .ok_or_else(|| PluginError::not_found(format!("plugin `{plugin}` has no cron job `{name}`")))?;
+        crate::scheduler::fire(
+            &self.shared,
+            plugin,
+            &decl,
+            chrono::Utc::now(),
+            pt_plugin_api::JobKind::Manual,
+            payload,
+        )
+        .await
+        .unwrap_or_else(|| Err(PluginError::new("kernel.conflict", "job is already running").retryable()))
     }
 
     pub fn router(&self) -> axum::Router {

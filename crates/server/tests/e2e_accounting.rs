@@ -423,6 +423,46 @@ async fn accounting_end_to_end() {
         "no double counting after restart: {totals}"
     );
 
+    // 小时快照：把本小时 peers 槽中的做种秒数折叠进 snatches / 用户总量，并发布快照事件；重复运行不重复折叠
+    let hour = chrono::Utc::now().timestamp().div_euclid(3600);
+    kernel
+        .run_job_now(
+            "accounting",
+            "seeding_snapshot",
+            json!({"hour": hour, "force": true}),
+        )
+        .await
+        .unwrap();
+    kernel
+        .run_job_now(
+            "accounting",
+            "seeding_snapshot",
+            json!({"hour": hour, "force": true}),
+        )
+        .await
+        .unwrap();
+    let seed: i64 = sqlx::query_scalar("SELECT seed_secs FROM accounting.user_totals WHERE user_id = 7")
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(seed, 4 * 30, "dseed of the 4 distinct entries");
+    let per_torrent: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT torrent_id, seed_secs FROM accounting.snatches WHERE user_id = 7 ORDER BY torrent_id",
+    )
+    .fetch_all(&mut db)
+    .await
+    .unwrap();
+    assert_eq!(per_torrent, vec![(5, 60), (6, 60)]);
+    let snaps: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload FROM kernel.event_log WHERE event_type = 'traffic.seeding_snapshot_taken'",
+    )
+    .fetch_all(&mut db)
+    .await
+    .unwrap();
+    assert_eq!(snaps.len(), 1, "{snaps:?}");
+    assert_eq!(snaps[0]["torrents"].as_array().unwrap().len(), 2);
+    assert_eq!(snaps[0]["torrents"][0]["seed_secs"], 60);
+
     // HTTP：本人统计
     let reg = call(
         &app,
