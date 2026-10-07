@@ -1,0 +1,123 @@
+id = "ledger"
+name = "账本"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "站点货币的复式记账：发行、回收、转账、冻结、锁定、冲正（ctx.ledger）"
+
+provides = ["ctx.ledger@0.1.0"]
+requires = ["ctx.users@^0.1"]
+publishes = ["ledger.currency_registered", "ledger.entry_posted", "ledger.entry_reversed"]
+
+[capabilities]
+kv = true
+sql = true
+# 转账收款方按用户名查找
+views = ["identity.v_user_public"]
+
+[[hook_points]]
+name = "ledger.before_transfer"
+input_schema = "schemas/hooks/ledger.before_transfer.json"
+
+[[jobs]]
+name = "expire_hold"
+timeout_secs = 60
+
+[[http.routes]]
+id = "currencies"
+method = "GET"
+path = "/v1/currencies"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "my_balances"
+method = "GET"
+path = "/v1/users/me/balances"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "my_entries"
+method = "GET"
+path = "/v1/users/me/entries"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "transfer"
+method = "POST"
+path = "/v1/transfers"
+auth = "user"
+permission = "ledger.transfer.use"
+rate_limit = "user:20/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_adjust"
+method = "POST"
+path = "/v1/admin/adjustments"
+auth = "admin"
+permission = "ledger.balance.adjust"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_reverse"
+method = "POST"
+path = "/v1/admin/entries/{id}/reversals"
+auth = "admin"
+permission = "ledger.balance.adjust"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_currency_settings"
+method = "PATCH"
+path = "/v1/admin/currencies/{code}"
+auth = "admin"
+permission = "ledger.balance.adjust"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "admin_user_balances"
+method = "GET"
+path = "/v1/admin/users/{id}/balances"
+auth = "admin"
+permission = "ledger.balance.read"
+
+[[permissions]]
+name = "ledger.balance.read"
+description_term = "ledger.perm.balance_read"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "ledger.balance.adjust"
+description_term = "ledger.perm.balance_adjust"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "ledger.transfer.use"
+description_term = "ledger.perm.transfer_use"
+default_roles = ["user"]
+
+[database]
+migrations = "migrations"
+views = ["v_balance"]
+
+[[database.partitions]]
+table = "entries"
+by = "range_month"
+premake = 3
+
+[[database.partitions]]
+table = "lines"
+by = "range_month"
+premake = 3
+
+[[database.partitions]]
+table = "checkpoints"
+by = "range_month"
+premake = 2

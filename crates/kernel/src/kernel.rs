@@ -344,6 +344,7 @@ impl Kernel {
 
         record_registry(&shared, &ordered).await?;
         maintain_partitions(&shared).await;
+        maintain_plugin_partitions(&shared).await;
         register_permissions(&shared).await?;
         for id in &shared.order {
             let rt = shared.plugin(id).map_err(|e| StartError::Init {
@@ -425,6 +426,90 @@ pub async fn maintain_partitions(sh: &Shared) {
         if let Err(e) = sh.pool.execute(sql.as_str()).await {
             // 默认分区中已有该日数据时无法建分区：保留在默认分区，记录告警
             tracing::warn!(partition = %name, error = %e, "event_log partition not created");
+        }
+    }
+}
+
+/// 插件声明的范围分区（`[[database.partitions]]`，conventions/database.md §7）：以插件角色预建
+/// 上一周期到 `premake` 个周期之后的分区。`by = "hash"` 的分区由插件迁移自行创建。
+pub async fn maintain_plugin_partitions(sh: &Shared) {
+    use chrono::Datelike;
+    for rt in sh.plugins.values() {
+        let Some(db) = &rt.manifest.database else { continue };
+        for p in &db.partitions {
+            let (Some(table), Some(by)) = (
+                p.get("table").and_then(|v| v.as_str()),
+                p.get("by").and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            let premake = p
+                .get("premake")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(3)
+                .clamp(0, 36);
+            let valid_ident = |s: &str| {
+                !s.is_empty()
+                    && s.bytes()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+            };
+            if !valid_ident(table) {
+                tracing::warn!(plugin = %rt.id, table, "invalid partition table name");
+                continue;
+            }
+            let today = chrono::Utc::now().date_naive();
+            let mut ranges = Vec::new();
+            for off in -1..=premake {
+                match by {
+                    "range_month" => {
+                        let m0 = today.with_day(1).unwrap_or(today);
+                        let start = m0
+                            .checked_add_months(chrono::Months::new(u32::try_from(off.max(0)).unwrap_or(0)))
+                            .and_then(|d| {
+                                if off < 0 {
+                                    d.checked_sub_months(chrono::Months::new(1))
+                                } else {
+                                    Some(d)
+                                }
+                            });
+                        let Some(start) = start else { continue };
+                        let Some(end) = start.checked_add_months(chrono::Months::new(1)) else {
+                            continue;
+                        };
+                        ranges.push((
+                            format!("{table}_y{}m{:02}", start.year(), start.month()),
+                            start,
+                            end,
+                        ));
+                    }
+                    "range_day" => {
+                        let start = today + chrono::Duration::days(off);
+                        ranges.push((
+                            format!("{table}_d{}", start.format("%Y%m%d")),
+                            start,
+                            start + chrono::Duration::days(1),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            for (name, start, end) in ranges {
+                let sql = format!(
+                    "CREATE TABLE IF NOT EXISTS \"{schema}\".\"{name}\" PARTITION OF \"{schema}\".\"{table}\" FOR VALUES FROM ('{start}') TO ('{end}')",
+                    schema = rt.schema
+                );
+                let r = async {
+                    let mut tx = sh.pool.begin().await?;
+                    tx.execute(format!("SET LOCAL ROLE \"{}\"", rt.role).as_str())
+                        .await?;
+                    tx.execute(sql.as_str()).await?;
+                    tx.commit().await
+                }
+                .await;
+                if let Err(e) = r {
+                    tracing::warn!(plugin = %rt.id, partition = %name, error = %e, "partition not created");
+                }
+            }
         }
     }
 }

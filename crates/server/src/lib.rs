@@ -10,5 +10,7 @@ pub fn native_plugins() -> Vec<NativePlugin> {
     v.push(pt_plugin_identity::plugin());
     #[cfg(feature = "torrent")]
     v.push(pt_plugin_torrent::plugin());
+    #[cfg(feature = "ledger")]
+    v.push(pt_plugin_ledger::plugin());
     v
 }

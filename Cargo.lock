@@ -1557,6 +1557,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-plugin-ledger"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64",
+ "chrono",
+ "hex",
+ "pt-plugin-api",
+ "pt-plugin-identity",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "pt-plugin-torrent"
 version = "0.1.0"
 dependencies = [
@@ -1583,12 +1603,14 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "chrono",
  "clap",
  "hex",
  "http",
  "pt-kernel",
  "pt-plugin-api",
  "pt-plugin-identity",
+ "pt-plugin-ledger",
  "pt-plugin-torrent",
  "redis",
  "serde_json",

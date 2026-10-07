@@ -11,15 +11,17 @@ name = "pt-server"
 path = "src/main.rs"
 
 [features]
-default = ["identity", "torrent"]
+default = ["identity", "torrent", "ledger"]
 identity = ["dep:pt-plugin-identity"]
 torrent = ["identity", "dep:pt-plugin-torrent"]
+ledger = ["identity", "dep:pt-plugin-ledger"]
 
 [dependencies]
 pt-kernel.workspace = true
 pt-plugin-api.workspace = true
 pt-plugin-identity = { path = "../../plugins/native/identity", optional = true }
 pt-plugin-torrent = { path = "../../plugins/native/torrent", optional = true }
+pt-plugin-ledger = { path = "../../plugins/native/ledger", optional = true }
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
@@ -28,6 +30,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 hex.workspace = true
 sha1 = "0.10"
 tracing-subscriber.workspace = true

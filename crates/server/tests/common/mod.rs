@@ -84,12 +84,20 @@ pub async fn reset() {
         "postgres://postgres@127.0.0.1:55432/pt_test",
     );
     let mut c = PgConnection::connect(&su).await.unwrap();
-    for s in ["kernel", "identity", "torrent", "x_probe", "ext"] {
+    for s in [
+        "kernel", "identity", "torrent", "ledger", "x_probe", "x_coin", "ext",
+    ] {
         c.execute(format!("DROP SCHEMA IF EXISTS {s} CASCADE").as_str())
             .await
             .unwrap();
     }
-    for r in ["pt_plugin_identity", "pt_plugin_torrent", "pt_plugin_x_probe"] {
+    for r in [
+        "pt_plugin_identity",
+        "pt_plugin_torrent",
+        "pt_plugin_ledger",
+        "pt_plugin_x_probe",
+        "pt_plugin_x_coin",
+    ] {
         c.execute(format!("DROP ROLE IF EXISTS {r}").as_str())
             .await
             .unwrap();
