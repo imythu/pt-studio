@@ -208,23 +208,23 @@ async fn plugin_mw(
         .map_or_else(|| uuid::Uuid::now_v7().to_string(), str::to_owned);
     let resp = match prepare(&st, matched, &mut req, &request_id).await {
         Err(e) => e.into_response(),
-        Ok(ctx) => {
-            let uow = ctx.unit.clone();
-            req.extensions_mut().insert(RequestCtx(Arc::new(ctx)));
-            let resp = next.run(req).await;
-            let failed = resp.extensions().get::<ErrorMarker>().is_some() || resp.status().is_server_error();
-            let finish = match uow.downcast::<crate::storage::uow::Uow>() {
-                Ok(u) => u.finish(!failed).await,
-                Err(_) => Err(PluginError::internal("missing unit of work")),
-            };
-            match finish {
-                Ok(()) => resp,
-                Err(e) => {
-                    tracing::error!(error = %e, "commit failed");
-                    e.into_response()
-                }
+        Ok(p) => run_prepared(&st, p, req, next).await,
+    };
+    // 限流超限：Retry-After
+    let resp = match resp.extensions().get::<ErrorMarker>() {
+        Some(m) if m.0.code == "kernel.rate_limited" => {
+            let retry =
+                m.0.details
+                    .as_ref()
+                    .and_then(|d| d["retry_after"].as_i64())
+                    .unwrap_or(1);
+            let mut r = resp;
+            if let Ok(v) = header::HeaderValue::from_str(&retry.to_string()) {
+                r.headers_mut().insert(header::RETRY_AFTER, v);
             }
+            r
         }
+        _ => resp,
     };
     // 插件未显式给出状态时，使用 error-codes 目录登记的状态（conventions/api.md §7）
     let resp = match resp.extensions().get::<ErrorMarker>() {
@@ -242,12 +242,116 @@ async fn plugin_mw(
     finish_problem(resp, &request_id)
 }
 
+/// 调用插件 handler：幂等键处理（§8.4）、工作单元提交 / 回滚、限流响应头。
+async fn run_prepared(st: &PluginState, p: Prepared, req: Request, next: Next) -> Response {
+    let Prepared {
+        ctx,
+        route,
+        principal_key,
+        verdict,
+    } = p;
+    let uow = ctx.unit.clone();
+    let idem = match (
+        route.idempotent,
+        req.method().clone(),
+        req.headers().get("idempotency-key").and_then(|v| v.to_str().ok()),
+    ) {
+        (true, Method::POST | Method::PATCH, Some(k)) => {
+            if !crate::limits::valid_key(k) {
+                return PluginError::bad_request("Idempotency-Key must be 1-64 visible ASCII characters")
+                    .into_response();
+            }
+            principal_key.as_ref().map(|pk| format!("k:idem:{pk}:{k}"))
+        }
+        _ => None,
+    };
+    let redis = st.shared.redis.get("main").cloned();
+    let (req, idem) = match (idem, redis) {
+        (Some(key), Some(redis)) => {
+            let limit = usize::try_from(route.max_body_kb.unwrap_or(st.shared.cfg.http.max_body_kb))
+                .unwrap_or(1024)
+                * 1024;
+            let (parts, body) = req.into_parts();
+            let bytes = match axum::body::to_bytes(body, limit).await {
+                Ok(b) => b,
+                Err(_) => {
+                    return PluginError::new("kernel.payload_too_large", "request body too large")
+                        .into_response();
+                }
+            };
+            let mut h = <sha2::Sha256 as sha2::Digest>::new();
+            sha2::Digest::update(&mut h, parts.method.as_str().as_bytes());
+            sha2::Digest::update(&mut h, parts.uri.path().as_bytes());
+            sha2::Digest::update(&mut h, &bytes);
+            let fp = hex::encode(sha2::Digest::finalize(h));
+            match crate::limits::begin(&redis, &key, &fp).await {
+                Err(e) => return e.into_response(),
+                Ok(crate::limits::IdemState::Done {
+                    status,
+                    content_type,
+                    body,
+                }) => {
+                    let mut r =
+                        (StatusCode::from_u16(status).unwrap_or(StatusCode::OK), body).into_response();
+                    if let Ok(v) = header::HeaderValue::from_str(&content_type) {
+                        r.headers_mut().insert(header::CONTENT_TYPE, v);
+                    }
+                    r.headers_mut()
+                        .insert("idempotent-replayed", header::HeaderValue::from_static("true"));
+                    return r;
+                }
+                Ok(crate::limits::IdemState::Fresh) => {}
+            }
+            (
+                Request::from_parts(parts, axum::body::Body::from(bytes)),
+                Some((redis, key)),
+            )
+        }
+        (_, _) => (req, None),
+    };
+    let mut req = req;
+    req.extensions_mut().insert(RequestCtx(Arc::new(ctx)));
+    let resp = next.run(req).await;
+    let failed = resp.extensions().get::<ErrorMarker>().is_some() || resp.status().is_server_error();
+    let finish = match uow.downcast::<crate::storage::uow::Uow>() {
+        Ok(u) => u.finish(!failed).await,
+        Err(_) => Err(PluginError::internal("missing unit of work")),
+    };
+    let mut resp = match finish {
+        Ok(()) => resp,
+        Err(e) => {
+            tracing::error!(error = %e, "commit failed");
+            e.into_response()
+        }
+    };
+    if let Some((redis, key)) = idem {
+        if resp.status().is_server_error() {
+            crate::limits::abandon(&redis, &key).await;
+        } else {
+            let (parts, body) = resp.into_parts();
+            let bytes = axum::body::to_bytes(body, 16 << 20).await.unwrap_or_default();
+            let ct = parts
+                .headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("application/json")
+                .to_owned();
+            crate::limits::complete(&redis, &key, parts.status.as_u16(), &ct, &bytes).await;
+            resp = Response::from_parts(parts, axum::body::Body::from(bytes));
+        }
+    }
+    if let Some(v) = &verdict {
+        rate_headers(&mut resp, v);
+    }
+    resp
+}
+
 async fn prepare(
     st: &PluginState,
     matched: Option<MatchedPath>,
     req: &mut Request,
     request_id: &str,
-) -> Result<pt_plugin_api::Ctx, PluginError> {
+) -> Result<Prepared, PluginError> {
     let sh = &st.shared;
     let prefix = format!("/api/p/{}", st.plugin);
     let pattern = matched.as_ref().map(MatchedPath::as_str).unwrap_or_default();
@@ -329,6 +433,32 @@ async fn prepare(
     }
     kuow.finish(true).await?;
 
+    // 限流（第 7 步）：全站默认规则 + 路由规则
+    let mut verdict = None;
+    if let Some(redis) = sh.redis.get("main") {
+        let ip = spec.client_ip.as_deref();
+        let user = principal.as_ref().map(|p| p.user_id);
+        let token = principal
+            .as_ref()
+            .filter(|p| p.credential_kind != "session")
+            .map(|p| p.credential_id.as_str());
+        let site = crate::limits::parse(&sh.cfg.http.rate_limit.default).unwrap_or_default();
+        crate::limits::check(redis, "_site", &site, ip, user, token).await?;
+        if let Some(spec_rl) = &route.rate_limit {
+            let rules = crate::limits::parse(spec_rl).map_err(PluginError::internal)?;
+            verdict = crate::limits::check(
+                redis,
+                &format!("{}.{}", st.plugin, route.id),
+                &rules,
+                ip,
+                user,
+                token,
+            )
+            .await?;
+        }
+    }
+    let principal_key = principal.as_ref().map(|p| p.credential_id.clone());
+
     // 插件调用上下文（第 9 步）
     spec.actor = match &principal {
         Some(p) => Actor::user(p.user_id, Some(p.credential_id.clone())),
@@ -343,7 +473,34 @@ async fn prepare(
     {
         l.push(p.user_id);
     }
-    Ok(ctx)
+    Ok(Prepared {
+        ctx,
+        route,
+        principal_key,
+        verdict,
+    })
+}
+
+struct Prepared {
+    ctx: pt_plugin_api::Ctx,
+    route: RouteDecl,
+    /// 幂等键的主体（凭据 ID；匿名请求不支持幂等键）
+    principal_key: Option<String>,
+    verdict: Option<crate::limits::Verdict>,
+}
+
+fn rate_headers(resp: &mut Response, v: &crate::limits::Verdict) {
+    let h = resp.headers_mut();
+    if let Ok(x) = header::HeaderValue::from_str(&format!("\"{}\"", v.policy)) {
+        h.insert("ratelimit-policy", x);
+    }
+    if let Ok(x) = header::HeaderValue::from_str(&format!(
+        "remaining={}, reset={}",
+        v.remaining.max(0),
+        v.reset_secs
+    )) {
+        h.insert("ratelimit", x);
+    }
 }
 
 #[cfg(test)]

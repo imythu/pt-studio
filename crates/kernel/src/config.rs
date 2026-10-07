@@ -93,11 +93,33 @@ pub struct HttpSection {
     pub request_timeout_ms: u32,
     #[serde(default)]
     pub trusted_proxies: Vec<String>,
+    #[serde(default)]
+    pub rate_limit: RateLimitSection,
+}
+
+/// `[http.rate_limit]`：全站默认规则，与路由规则叠加
+#[derive(Debug, Clone, Deserialize)]
+pub struct RateLimitSection {
+    #[serde(default = "default_rate")]
+    pub default: String,
+}
+
+impl Default for RateLimitSection {
+    fn default() -> Self {
+        Self {
+            default: default_rate(),
+        }
+    }
+}
+
+fn default_rate() -> String {
+    "ip:600/m".into()
 }
 
 impl Default for HttpSection {
     fn default() -> Self {
         Self {
+            rate_limit: RateLimitSection::default(),
             bind: default_bind(),
             max_body_kb: default_body_kb(),
             request_timeout_ms: default_timeout(),

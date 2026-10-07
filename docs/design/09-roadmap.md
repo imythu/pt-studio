@@ -13,7 +13,7 @@
 | P6 AI | ctx.llm、MCP 网关、AI 插件 |
 | P7 冻结 API | WIT 定为 v1.0，发布插件 SDK、模板仓库、文档和 `llms.txt` |
 
-> 进度（2026-10-06）：P1 内核骨架完成——identity、torrent 两个 Native 插件跑通注册 / 登录 / 上传 / 下载，端到端测试覆盖钩子、事件、服务调用、schema 隔离与视图授权。详见 [../dev/README.md](../dev/README.md) §4。
+> 进度（2026-10-07）：P1 内核骨架完成（identity、torrent）；P2 记账完成主体（ledger 复式记账、accounting 流量结算的恰好一次链路、分区 worker），网关限流与幂等键已接入。详见 [../dev/README.md](../dev/README.md) §4。
 
 ## 2. 待验证项
 

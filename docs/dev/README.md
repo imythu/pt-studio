@@ -40,17 +40,19 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 
 端到端测试（`crates/server/tests/`）连接真实 PostgreSQL 与 Redis，默认地址对应 §1.2；可用环境变量 `PT_TEST_SUPERUSER_URL`、`PT_TEST_ADMIN_URL`、`PT_TEST_GATEWAY_URL`、`PT_TEST_REDIS_URL`（建议用独立 DB 号，测试会 `FLUSHDB`）、`PT_TEST_BLOB_DIR` 覆盖。测试会删除并重建测试库中的 `kernel`、`identity`、`torrent` 等 schema。
 
-## 4. 实现状态（P1 内核骨架，2026-10-06）
+## 4. 实现状态（P1 内核骨架 + P2 记账，2026-10-07）
 
 | 模块 | 已实现 | 未实现 / 简化（后续迭代） |
 |---|---|---|
 | `pt-plugin-api` | 错误模型与状态推导、Actor / InvocationInfo、全部宿主 trait、导出 trait、`Ctx`（服务调用 `Svc::call`、`authenticate`、`with_principal`）、清单模型与基础校验 | WIT 包、`service!` 宏、清单 JSON Schema |
 | 内核 · 加载器 | 依赖解析（single 服务选择、版本要求、缺失、歧义）、拓扑排序与环检测、钩子点归属检查、敏感能力授权检查 | WASM 插件发现与签名校验；catalog 只生成了钩子与错误码（`build.rs` 解析 docs） |
-| 内核 · 存储 | 迁移（advisory lock、每插件角色与 schema、`_inbox`/`_kv`、校验和、视图授权同步）、工作单元（`SET LOCAL ROLE`、kv、outbox 事件、审计、延迟任务）、Redis 键改写与命令白名单、本地文件 blob | pg_query 语句检查（WASM 用）、配额、S3 后端、分区维护任务化（目前启动时预建事件日志日分区） |
+| 内核 · 存储 | 迁移（advisory lock、每插件角色与 schema、`_inbox`/`_kv`、校验和、视图授权同步）、插件范围分区预建（`[[database.partitions]]`）、工作单元（`SET LOCAL ROLE`、kv、outbox 事件、审计、延迟任务）、Redis 键改写与命令白名单、本地文件 blob | pg_query 语句检查（WASM 用）、配额、S3 后端、分区维护任务化（目前启动时预建事件日志日分区） |
 | 内核 · 运行期 | 服务调用（深度、截止时间、重入检测 `kernel.reentrant_call`、独立工作单元）、钩子管线（顺序、超时、fail-closed / 锁定、可修改字段与只追加检查、敏感字段裁剪、`disabled_handlers`）、客户端 IP 只传给获授 `user.ip` 的插件 | WASM 宿主（wasmtime） |
-| 内核 · 事件 | outbox 中继（租约、LISTEN/NOTIFY + 轮询）、消费者（每订阅每分区租约、专用连接、XAUTOCLAIM、inbox 去重、退避重试、死信）、延迟任务执行 | cron、回放、按类型保留期清理、分区 worker |
-| 内核 · 网关 | 声明路由校验、会话 / Bearer 鉴权、CSRF、`check_principal`、`reauth_secs`、可信代理 IP、problem+json 与目录状态码、请求级工作单元 | 限流、幂等键、OpenAPI 聚合、前端清单、CORS |
+| 内核 · 事件 | outbox 中继（租约、LISTEN/NOTIFY + 轮询）、消费者（每订阅每分区租约、专用连接、XAUTOCLAIM、inbox 去重、退避重试、死信）、延迟任务执行、分区 worker（`[[workers]]`，每分区租约 + fencing token，每次 poll 一个工作单元） | cron、回放、按类型保留期清理 |
+| 内核 · 网关 | 声明路由校验、会话 / Bearer 鉴权、CSRF、`check_principal`、`reauth_secs`、可信代理 IP、problem+json 与目录状态码、请求级工作单元、GCRA 限流（全站默认 + 路由规则，RateLimit 头、Retry-After）、幂等键（指纹、处理中 / 冲突 / 重放、5xx 释放） | OpenAPI 聚合、前端清单、CORS |
 | identity | 注册（规范化、钩子、加密邮箱与 passkey）、密码登录、会话、登出、`ctx.auth` / `ctx.rbac` / `ctx.users`、内置角色继承、权限登记、授予角色 | 2FA、WebAuthn、token、限制、改名、找回密码、Redis 缓存、限流、UTS #39 混淆骨架 |
+| ledger | 币种注册、发行 / 回收 / 转账（手续费、每日限额、`ledger.before_transfer`）、批量发行、幂等、冻结（到期由延迟任务释放）/ 扣款、账户锁定、冲正、流水分页、供给统计、用户转账与管理员调整 / 冲正 / 设置 HTTP | 日对账、月结余快照、归档、用户删除处理、MCP 工具 |
+| accounting | `acct:<p>` 微批消费、eid 去重、拒收记录、倍率规则（favorable / override、索引与版本号刷新）、peers、snatches、首次完成与 `traffic.snatch_completed`、用户总量与日统计、结算窗口与 `traffic.settled`、分段明细、游标 CAS（恰好一次，重启不重复计入）、流量调整、种子镜像、统计 HTTP | 基础信号、swarm 统计、小时快照、实时计数扣减、交叉校验、重算、流修剪 |
 | torrent | 严格 bencode、v1 / v2 / hybrid 解析、规范化（private、source、白名单）、上传（钩子、重复检测）、详情、文件列表、下载（passkey 注入、钩子、下载记录） | 资源类型插件接入、Group、状态机、编辑与替换、签名链接、批量下载、NFO |
 
 ## 5. 与设计文档的差异（实现时的决定）
@@ -61,3 +63,15 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 - **InvocationInfo** 增加 `chain`（重入检测）、`authenticated`、`client_ip`、`user_agent`、`request_id`。
 - **identity 邮箱**：按评审 U-1 推荐方案实现——`email_enc`（AES-256-GCM）+ `email_mac`（HMAC，唯一）+ `email_domain`，没有明文邮箱视图。
 - **错误码后缀规则**：conventions/api.md §7 原先只引用未定义，已补充定义并实现。
+- **ledger 币种设置**：内核设置接口完成前，可变设置存放在 `ledger.currency_settings` 表，管理员经 `PATCH /v1/admin/currencies/{code}` 修改。
+- **ledger 冻结到期**：每个冻结创建时登记一个延迟任务 `expire_hold`（内核 cron 尚未实现）。
+- **accounting 落库**：用 `unnest` 多行语句代替 COPY + 暂存表；用户日统计暂按 UTC 日期；`PartitionWorker` 采用 `poll(ctx, partition, fence)` 模型（accounting HLD §7 N-1），取代 plugin-api 初稿中的 `run(…, cancel)`。
+- **网关幂等与插件幂等**：路由声明 `idempotent = true` 时，网关先按 `Idempotency-Key` 返回首次响应（`Idempotent-Replayed: true`）；ledger 等插件内部的服务级幂等仍然保留（服务调用没有网关）。
+- **测试已知风险**：端到端测试中钩子处理者的超时为目录规定值（如注册钩子 500 ms），机器负载很高时偶发超时导致失败（2026-10-07 观察到一次，复跑 9 次未复现）。
+
+## 6. 进度记录
+
+| 日期 | 内容 |
+|---|---|
+| 2026-10-06 | P1：内核骨架、identity、torrent |
+| 2026-10-07 | P2：ledger、accounting、分区 worker、插件分区维护、网关限流与幂等键 |

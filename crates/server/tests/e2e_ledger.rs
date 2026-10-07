@@ -290,10 +290,9 @@ async fn ledger_end_to_end() {
         json!({"currency": "coin", "to_username": "Bob", "amount": 100}),
     )
     .await;
-    assert_eq!(
-        (r.status, r.body["duplicate"].as_bool()),
-        (StatusCode::OK, Some(true))
-    );
+    // 网关幂等键（kernel/03 §8.4）直接返回首次响应，不再进入 ledger
+    assert_eq!((r.status, r.body["duplicate"].as_bool()), (StatusCode::CREATED, Some(false)));
+    assert_eq!(r.headers["idempotent-replayed"], "true");
     let transfer_entry = r.body["entry_id"].as_str().unwrap().to_owned();
     assert_eq!(balance_of(&app, bob).await, (100, 0));
 
