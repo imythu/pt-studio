@@ -128,11 +128,12 @@ mode = "dev"
 node_id = "test-node"
 # 调试构建且整套测试并行时，WASM 首次实例化较慢
 service_timeout_ms = 5000
+hook_timeout_factor = 10
 
 [database]
 url = "{gw}"
 admin_url = "{admin}"
-pool_size = 8
+pool_size = 20
 
 [redis.main]
 url = "{redis}"

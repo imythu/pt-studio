@@ -70,6 +70,24 @@ pub struct KernelSection {
     /// 服务调用的默认超时（kernel/03 §3.3：被调方法默认 1 s，且不超过调用方剩余时间）
     #[serde(default = "default_service_timeout")]
     pub service_timeout_ms: i64,
+    /// 钩子超时倍数（只在 dev 模式生效，用于调试构建与并行测试；生产保持目录给出的预算）
+    #[serde(default = "one")]
+    pub hook_timeout_factor: u32,
+}
+
+fn one() -> u32 {
+    1
+}
+
+impl KernelSection {
+    /// 生效的钩子超时倍数
+    pub fn hook_factor(&self) -> i64 {
+        if self.mode == Mode::Dev {
+            i64::from(self.hook_timeout_factor.clamp(1, 100))
+        } else {
+            1
+        }
+    }
 }
 
 fn default_service_timeout() -> i64 {
@@ -83,6 +101,7 @@ impl Default for KernelSection {
             node_id: None,
             strict_catalog: true,
             service_timeout_ms: default_service_timeout(),
+            hook_timeout_factor: 1,
         }
     }
 }

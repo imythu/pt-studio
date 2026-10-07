@@ -631,13 +631,14 @@ impl HookRunner for PipelineRunner {
         }
         let mut cur = input;
         let started = now_ms();
-        let budget = i64::from(def.timeout_ms) * 3;
+        let factor = sh.cfg.kernel.hook_factor();
+        let budget = i64::from(def.timeout_ms) * 3 * factor;
         let handlers = sh.hook_handlers.get(hook).cloned().unwrap_or_default();
         for h in handlers.iter().filter(|h| !disabled.contains(&h.plugin)) {
             let rt = sh.plugin(&h.plugin)?;
             let Some(imp) = rt.hooks.clone() else { continue };
             let remaining = (budget - (now_ms() - started))
-                .min(i64::from(h.timeout_ms))
+                .min(i64::from(h.timeout_ms) * factor)
                 .min(self.inv.deadline - now_ms());
             let outcome: Result<HookDecision, PluginError> = if remaining <= 0 {
                 Err(PluginError::new("kernel.timeout", "hook budget exhausted"))

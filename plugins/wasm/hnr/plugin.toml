@@ -1,0 +1,127 @@
+id = "hnr"
+name = "H&R 考核"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "下载完成后的做种考核：豁免规则、分层评估、超限限制下载、免除"
+
+provides = ["ctx.hnr@0.1.0"]
+requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
+optional_requires = ["ctx.promotions@^0.1"]
+publishes = ["hnr.recorded", "hnr.exempted", "hnr.prewarned", "hnr.satisfied", "hnr.failed", "hnr.forgiven"]
+
+[capabilities]
+sql = true
+views = ["accounting.v_snatch", "torrent.v_torrent_public", "identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.users" = ["write:status"]
+
+[[subscriptions]]
+name = "on_snatch_completed"
+event = "traffic.snatch_completed"
+ordered = true
+
+[[subscriptions]]
+name = "on_torrent_deleted"
+event = "torrent.deleted"
+
+[[subscriptions]]
+name = "on_torrent_status"
+event = "torrent.status_changed"
+
+[[hooks]]
+hook = "torrent.before_download"
+priority = 40
+
+[[hooks]]
+hook = "invite.before_issue"
+priority = 40
+
+[[cron]]
+name = "evaluate_hot"
+schedule = "*/10 * * * *"
+timeout_secs = 540
+tx = "manual"
+
+[[cron]]
+name = "evaluate_cold"
+schedule = "20 * * * *"
+timeout_secs = 1800
+tx = "manual"
+
+[[cron]]
+name = "expire_counts"
+schedule = "50 3 * * *"
+timeout_secs = 1800
+tx = "manual"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "my_records"
+method = "GET"
+path = "/v1/me/records"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "user_records"
+method = "GET"
+path = "/v1/users/{id}/records"
+auth = "user"
+permission = "hnr.read"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "forgive"
+method = "POST"
+path = "/v1/records/{id}/forgive"
+auth = "admin"
+permission = "hnr.forgive"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "requirement"
+method = "GET"
+path = "/v1/torrents/{id}/requirement"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[permissions]]
+name = "hnr.read"
+description_term = "hnr.perm.read"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "hnr.forgive"
+description_term = "hnr.perm.forgive"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "hnr.manage"
+description_term = "hnr.perm.manage"
+default_roles = ["admin"]
+
+[database]
+migrations = "migrations"
+
+[[database.partitions]]
+table = "records"
+by = "range_month"
+premake = 3
+
+[terms]
+"hnr.name" = { zh-CN = "H&R", en = "H&R" }
+"hnr.active" = { zh-CN = "考核中", en = "In progress" }
+"hnr.failed" = { zh-CN = "已计入", en = "Counted" }
+"hnr.perm.read" = { zh-CN = "查看他人 H&R", en = "View H&R records" }
+"hnr.perm.forgive" = { zh-CN = "免除 H&R", en = "Forgive H&R" }
+"hnr.perm.manage" = { zh-CN = "管理 H&R 规则", en = "Manage H&R rules" }

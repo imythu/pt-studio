@@ -82,6 +82,9 @@
 | `ledger.duplicate_transfer` | 200 | ledger | 幂等键重复：返回首次结果（不作为错误抛出，仅用于日志） |
 | `ratio-policy.download_restricted` | 403 | ratio-policy | 分享率不足禁止下载 |
 | `hnr.download_restricted` | 403 | hnr | H&R 过多禁止下载 |
+| `hnr.restricted` | 403 | hnr | 有未处理的 H&R，不能执行该操作 |
+| `hnr.record_not_found` | 404 | hnr | H&R 记录不存在 |
+| `hnr.not_forgivable` | 409 | hnr | 记录状态不可免除 |
 | `newbie-exam.restricted` | 403 | newbie-exam | 考核期限制 |
 | `levels.class_required` | 403 | levels | 等级不足 |
 | `search-meilisearch.unavailable` | 503 | search-meilisearch | 搜索后端不可用 |

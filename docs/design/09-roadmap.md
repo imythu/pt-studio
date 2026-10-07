@@ -13,7 +13,7 @@
 | P6 AI | ctx.llm、MCP 网关、AI 插件 |
 | P7 冻结 API | WIT 定为 v1.0，发布插件 SDK、模板仓库、文档和 `llms.txt` |
 
-> 进度（2026-10-07）：P1 内核骨架完成（identity、torrent）；P2 记账完成主体（ledger、accounting、分区 worker、网关限流与幂等键）；P3 WASM 宿主跑通（bonus 以 WASM 实现，经 JSON 分派与 Native 服务互调；截止时间、内存、陷入、隔离均有测试）；内核 cron、accounting 小时快照与 bonus 小时结算 / 批量入账打通（tracker 流 → 魔力值到账）；促销（promotion）与等级（levels）以 WASM 实现完成，P3 计划的三个检验插件全部落地（倍率经 accounting 生效、等级经 identity 生效并绑定角色）。P4：search-meilisearch 完成主体（贡献者合并、增量同步、swap 重建、可见性强制查询），对 Meilisearch 1.54 实测通过。invite 完成主体（签发、兑换、额度、邀请树、连坐），identity 增加限制与有效状态。详见 [../dev/README.md](../dev/README.md) §4。
+> 进度（2026-10-07）：P1 内核骨架完成（identity、torrent）；P2 记账完成主体（ledger、accounting、分区 worker、网关限流与幂等键）；P3 WASM 宿主跑通（bonus 以 WASM 实现，经 JSON 分派与 Native 服务互调；截止时间、内存、陷入、隔离均有测试）；内核 cron、accounting 小时快照与 bonus 小时结算 / 批量入账打通（tracker 流 → 魔力值到账）；促销（promotion）与等级（levels）以 WASM 实现完成，P3 计划的三个检验插件全部落地（倍率经 accounting 生效、等级经 identity 生效并绑定角色）。P4：search-meilisearch 完成主体（贡献者合并、增量同步、swap 重建、可见性强制查询），对 Meilisearch 1.54 实测通过。invite 完成主体（签发、兑换、额度、邀请树、连坐），identity 增加限制与有效状态。hnr 完成主体（建档、分层评估、限制联动、免除）；P4 计划的插件（邀请、H&R、搜索）全部落地，资源类型插件留到前端阶段与插槽一起做。详见 [../dev/README.md](../dev/README.md) §4。
 
 ## 2. 待验证项
 
