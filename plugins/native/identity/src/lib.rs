@@ -22,7 +22,13 @@ use sqlx::Row;
 use crate::api::{USERS, UserSummary, UsersService};
 
 pub const MANIFEST: &str = include_str!("../plugin.toml");
-pub const MIGRATIONS: &[(&str, &str)] = &[("0001_init.sql", include_str!("../migrations/0001_init.sql"))];
+pub const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    (
+        "0002_class_roles.sql",
+        include_str!("../migrations/0002_class_roles.sql"),
+    ),
+];
 
 #[derive(Debug, Default)]
 pub struct Identity {
@@ -167,10 +173,62 @@ impl pt_plugin_api::JsonService for Svc {
                     UsersService::get_many(self, ctx, &ids).await?,
                 )?)
             }
-            other => Err(
-                PluginError::new("kernel.not_found", format!("ctx.users has no method `{other}`"))
-                    .with_status(404),
-            ),
+            // ctx.users.set_class：作用域 write:class（levels）
+            "set_class" => {
+                if !ctx.invocation.has_scope("write:class") {
+                    return Err(PluginError::forbidden("scope write:class required"));
+                }
+                let uid = i64::try_from(id("id")?).map_err(|_| PluginError::bad_request("bad user id"))?;
+                let class = a
+                    .get("class_id")
+                    .and_then(serde_json::Value::as_i64)
+                    .ok_or_else(|| PluginError::validation("class_id"))?;
+                let reason = a
+                    .get("reason")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                Ok(serde_json::json!({ "changed": rbac::set_class(ctx, uid, class, &reason).await? }))
+            }
+            // ctx.rbac.define_role / set_class_roles：作用域 write:roles（+ write:class）
+            "define_role" => {
+                if !ctx.invocation.has_scope("write:roles") {
+                    return Err(PluginError::forbidden("scope write:roles required"));
+                }
+                let role = a
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| PluginError::validation("role"))?;
+                rbac::define_role(ctx, &ctx.invocation.caller_plugin, role).await?;
+                Ok(serde_json::json!({}))
+            }
+            "set_class_roles" => {
+                if !(ctx.invocation.has_scope("write:roles") && ctx.invocation.has_scope("write:class")) {
+                    return Err(PluginError::forbidden(
+                        "scopes write:roles and write:class required",
+                    ));
+                }
+                let class = a
+                    .get("class_id")
+                    .and_then(serde_json::Value::as_i64)
+                    .ok_or_else(|| PluginError::validation("class_id"))?;
+                let roles: Vec<String> = serde_json::from_value(a.get("roles").cloned().unwrap_or_default())
+                    .map_err(|e| PluginError::validation(format!("roles: {e}")))?;
+                rbac::set_class_roles(ctx, &ctx.invocation.caller_plugin, class, &roles).await?;
+                Ok(serde_json::json!({}))
+            }
+            "roles_of" => {
+                let uid = i64::try_from(id("user")?).map_err(|_| PluginError::bad_request("bad user id"))?;
+                let (_, roles) = rbac::effective_roles(ctx, uid).await?;
+                let mut roles: Vec<String> = roles.into_iter().collect();
+                roles.sort();
+                Ok(serde_json::json!(roles))
+            }
+            other => Err(PluginError::new(
+                "kernel.not_found",
+                format!("ctx.users / ctx.rbac has no method `{other}`"),
+            )
+            .with_status(404)),
         }
     }
 }
@@ -196,7 +254,7 @@ pub fn plugin() -> NativePlugin {
             (RBAC, service_object::<dyn RbacService>(svc.clone())),
             (USERS, service_object::<dyn UsersService>(svc.clone())),
         ],
-        json_services: vec![(USERS, svc)],
+        json_services: vec![(USERS, svc.clone()), (RBAC, svc)],
         ..Default::default()
     }
 }

@@ -1,0 +1,117 @@
+id = "levels"
+name = "等级"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "用户等级：按流量、分享率、注册时长、发布数自动升降级（警告期、升级保护、覆盖层），等级绑定角色决定权限"
+
+provides = ["ctx.levels@0.1.0"]
+requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
+publishes = ["level.promoted", "level.demoted", "level.warned", "level.warning_cleared"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public", "accounting.v_user_totals", "torrent.v_uploader_counts"]
+
+[capabilities.scopes]
+"ctx.users" = ["write:class"]
+"ctx.rbac" = ["write:roles", "write:class"]
+
+[[subscriptions]]
+name = "on_registered"
+event = "user.registered"
+
+[[subscriptions]]
+name = "on_traffic_settled"
+event = "traffic.settled"
+
+[[subscriptions]]
+name = "on_logged_in"
+event = "user.logged_in"
+
+[[hooks]]
+hook = "invite.before_issue"
+priority = 20
+
+[[cron]]
+name = "incr_evaluate"
+schedule = "*/15 * * * *"
+timeout_secs = 600
+tx = "manual"
+
+[[cron]]
+name = "daily_evaluate"
+schedule = "0 4 * * *"
+timeout_secs = 1800
+tx = "manual"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "classes"
+method = "GET"
+path = "/v1/classes"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "set_user_class"
+method = "POST"
+path = "/v1/admin/users/{user_id}/class"
+auth = "admin"
+permission = "levels.manage"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "unlock_user_class"
+method = "DELETE"
+path = "/v1/admin/users/{user_id}/class"
+auth = "admin"
+permission = "levels.manage"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "protect_user"
+method = "POST"
+path = "/v1/admin/users/{user_id}/protect"
+auth = "admin"
+permission = "levels.protect"
+rate_limit = "user:60/m"
+
+[[permissions]]
+name = "levels.manage"
+description_term = "levels.perm.manage"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "levels.protect"
+description_term = "levels.perm.protect"
+default_roles = ["admin"]
+
+[database]
+migrations = "migrations"
+
+[[database.partitions]]
+table = "history"
+by = "range_month"
+premake = 3
+
+[terms]
+"levels.class.10.name" = { zh-CN = "农民", en = "Peasant" }
+"levels.class.20.name" = { zh-CN = "用户", en = "User" }
+"levels.class.30.name" = { zh-CN = "精英用户", en = "Power User" }
+"levels.class.40.name" = { zh-CN = "爱好者", en = "Elite User" }
+"levels.class.50.name" = { zh-CN = "狂热者", en = "Crazy User" }
+"levels.class.60.name" = { zh-CN = "疯狂者", en = "Insane User" }
+"levels.class.70.name" = { zh-CN = "府丞", en = "Veteran User" }
+"levels.class.80.name" = { zh-CN = "府尹", en = "Extreme User" }
+"levels.class.90.name" = { zh-CN = "极限玩家", en = "Ultimate User" }
+"levels.class.100.name" = { zh-CN = "大师", en = "Nexus Master" }
+"levels.class.200.name" = { zh-CN = "贵宾", en = "VIP" }
