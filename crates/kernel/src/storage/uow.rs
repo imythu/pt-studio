@@ -272,13 +272,33 @@ fn valid_event_key(k: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || b"_.:-".contains(&c))
 }
 
+/// 不指定类型的 NULL 参数（OID 0）：由 PostgreSQL 按上下文推断类型。
+/// 若以具体类型（如 text）绑定，写入 bigint 列时会报类型不匹配。
+#[derive(Debug, Clone, Copy)]
+struct UntypedNull;
+
+impl sqlx::Type<Postgres> for UntypedNull {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_oid(sqlx::postgres::types::Oid(0))
+    }
+}
+
+impl sqlx::Encode<'_, Postgres> for UntypedNull {
+    fn encode_by_ref(
+        &self,
+        _buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        Ok(sqlx::encode::IsNull::Yes)
+    }
+}
+
 fn bind_values<'q>(
     mut q: Query<'q, Postgres, PgArguments>,
     params: &'q [SqlValue],
 ) -> Query<'q, Postgres, PgArguments> {
     for p in params {
         q = match p {
-            SqlValue::Null => q.bind(None::<String>),
+            SqlValue::Null => q.bind(UntypedNull),
             SqlValue::Boolean(b) => q.bind(*b),
             SqlValue::Int(i) => q.bind(*i),
             SqlValue::Float(f) => q.bind(*f),

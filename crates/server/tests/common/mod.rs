@@ -126,6 +126,8 @@ base_url = "https://pt.test"
 [kernel]
 mode = "dev"
 node_id = "test-node"
+# 调试构建且整套测试并行时，WASM 首次实例化较慢
+service_timeout_ms = 5000
 
 [database]
 url = "{gw}"
@@ -163,4 +165,131 @@ types = ["generic", "movie"]
         redis = env("PT_TEST_REDIS_URL", "redis://127.0.0.1:56379/15"),
         key = "11".repeat(32),
     )
+}
+
+/// 构建 plugins/wasm 工作区并组装插件目录 `<dir>/<id>/{plugin.toml, plugin.wasm, migrations/}`。
+pub fn package_wasm_plugins() -> std::path::PathBuf {
+    let ws = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../plugins/wasm");
+    let st = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args(["build", "--release", "--target", "wasm32-wasip2"])
+        .current_dir(&ws)
+        .status()
+        .unwrap();
+    assert!(st.success(), "building plugins/wasm failed");
+    let dir = std::path::PathBuf::from(env("PT_TEST_PLUGINS_DIR", "/tmp/pt-studio-test-plugins"));
+    let _ = std::fs::remove_dir_all(&dir);
+    for entry in std::fs::read_dir(&ws).unwrap() {
+        let src = entry.unwrap().path();
+        if !src.join("plugin.toml").exists() {
+            continue;
+        }
+        let id = src.file_name().unwrap().to_string_lossy().into_owned();
+        let artifact = format!("pt_wasm_{}.wasm", id.replace('-', "_"));
+        let dst = dir.join(&id);
+        std::fs::create_dir_all(dst.join("migrations")).unwrap();
+        std::fs::copy(src.join("plugin.toml"), dst.join("plugin.toml")).unwrap();
+        std::fs::copy(
+            ws.join("target/wasm32-wasip2/release").join(artifact),
+            dst.join("plugin.wasm"),
+        )
+        .unwrap();
+        if let Ok(rd) = std::fs::read_dir(src.join("migrations")) {
+            for f in rd {
+                let f = f.unwrap().path();
+                std::fs::copy(&f, dst.join("migrations").join(f.file_name().unwrap())).unwrap();
+            }
+        }
+    }
+    dir
+}
+
+/// 已登录用户：(用户 ID, cookie, csrf)
+pub struct User {
+    pub id: u64,
+    pub cookie: String,
+    pub csrf: String,
+}
+
+impl User {
+    /// 写请求所需的请求头
+    pub fn headers(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("cookie", self.cookie.clone()),
+            ("x-csrf-token", self.csrf.clone()),
+            ("sec-fetch-site", "same-origin".into()),
+        ]
+    }
+}
+
+pub fn hv<'a>(h: &'a [(&'static str, String)]) -> Vec<(&'static str, &'a str)> {
+    h.iter().map(|(k, v)| (*k, v.as_str())).collect()
+}
+
+pub async fn register_login(app: &Router, name: &str) -> User {
+    let r = call(app, "POST", "/api/p/identity/v1/users",
+        Some(serde_json::json!({"username": name, "email": format!("{name}@example.com"), "password": "correct horse"})), &[]).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let r = call(
+        app,
+        "POST",
+        "/api/p/identity/v1/sessions",
+        Some(serde_json::json!({"username": name, "password": "correct horse"})),
+        &[],
+    )
+    .await;
+    User {
+        id: r.body["user"]["id"].as_u64().unwrap(),
+        cookie: r.cookies.join("; "),
+        csrf: r.body["csrf_token"].as_str().unwrap().to_owned(),
+    }
+}
+
+/// 以超级用户直接授予内置角色（测试用）
+pub async fn grant_role(user: u64, role: &str) {
+    let mut c = PgConnection::connect(&env(
+        "PT_TEST_SUPERUSER_URL",
+        "postgres://postgres@127.0.0.1:55432/pt_test",
+    ))
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO identity.user_roles (user_id, role, granted_by) VALUES ($1, $2, 'test')")
+        .bind(i64::try_from(user).unwrap())
+        .bind(role)
+        .execute(&mut c)
+        .await
+        .unwrap();
+}
+
+/// 上传一个 v1 种子，返回种子 ID
+pub async fn upload(app: &Router, u: &User, title: &str, files: &[(&str, u64)]) -> i64 {
+    let file = pt_plugin_torrent::fixtures::sample_v1(title, files, true);
+    let boundary = "b0undary-x";
+    let mut body = Vec::new();
+    body.extend(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"meta\"\r\n\r\n{}\r\n",
+            serde_json::json!({"type_id": "generic", "title": title})
+        )
+        .as_bytes(),
+    );
+    body.extend(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"torrent\"; filename=\"t.torrent\"\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend(&file);
+    body.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let h = u.headers();
+    let r = send(app, "POST", "/api/p/torrent/v1/torrents", &hv(&h), |b| {
+        b.header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body.clone()))
+        .unwrap()
+    })
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    r.body["id"].as_i64().unwrap()
 }

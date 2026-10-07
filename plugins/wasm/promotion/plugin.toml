@@ -1,0 +1,134 @@
+id = "promotion"
+name = "促销"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "单种 / 自动 / 全站促销与个人促销卡；倍率经 ctx.accounting 的倍率规则生效"
+
+provides = ["ctx.promotions@0.1.0"]
+requires = ["ctx.accounting@^0.1"]
+publishes = ["promotion.started", "promotion.ended", "promotion.card_applied", "promotion.cards_changed"]
+
+[capabilities]
+sql = true
+
+[capabilities.scopes]
+"ctx.accounting" = ["write:rates", "read"]
+
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+ordered = true
+
+[[cron]]
+name = "expire"
+schedule = "* * * * *"
+timeout_secs = 50
+
+[[cron]]
+name = "reconcile"
+schedule = "*/10 * * * *"
+timeout_secs = 540
+
+[[http.routes]]
+id = "torrent_state"
+method = "GET"
+path = "/v1/torrents/{torrent_id}"
+auth = "user"
+rate_limit = "user:300/m"
+
+[[http.routes]]
+id = "torrent_states"
+method = "GET"
+path = "/v1/torrents"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "set_single"
+method = "POST"
+path = "/v1/torrents/promotions"
+auth = "admin"
+permission = "promotion.create"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "end_single"
+method = "DELETE"
+path = "/v1/torrents/{torrent_id}/promotion"
+auth = "admin"
+permission = "promotion.create"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "create_event"
+method = "POST"
+path = "/v1/admin/events"
+auth = "admin"
+permission = "promotion.manage"
+rate_limit = "user:30/m"
+idempotent = true
+
+[[http.routes]]
+id = "create_rule"
+method = "POST"
+path = "/v1/admin/rules"
+auth = "admin"
+permission = "promotion.manage"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "grant_cards"
+method = "POST"
+path = "/v1/admin/users/{user_id}/cards"
+auth = "admin"
+permission = "promotion.manage"
+rate_limit = "user:60/m"
+idempotent = true
+
+[[http.routes]]
+id = "my_cards"
+method = "GET"
+path = "/v1/me/cards"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "apply_card"
+method = "POST"
+path = "/v1/me/cards/apply"
+auth = "user"
+rate_limit = "user:20/m"
+
+[[permissions]]
+name = "promotion.create"
+description_term = "promotion.perm.create"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "promotion.manage"
+description_term = "promotion.perm.manage"
+default_roles = ["admin"]
+
+[database]
+migrations = "migrations"
+
+[[database.partitions]]
+table = "history"
+by = "range_month"
+premake = 3
+
+[terms]
+"promotion.free" = { zh-CN = "免费", en = "Freeleech" }
+"promotion.double_up" = { zh-CN = "2x 上传", en = "2x Upload" }
+"promotion.double_up_free" = { zh-CN = "2x 免费", en = "2x Freeleech" }
+"promotion.half_down" = { zh-CN = "50% 下载", en = "50% Download" }
+"promotion.thirty_down" = { zh-CN = "30% 下载", en = "30% Download" }
+"promotion.double_up_half_down" = { zh-CN = "2x 上传 50% 下载", en = "2x Up 50% Down" }
+"promotion.neutral" = { zh-CN = "中性", en = "Neutral" }
+"promotion.custom" = { zh-CN = "自定义促销", en = "Custom" }
+"promotion.card.free" = { zh-CN = "个人免费卡", en = "Personal Freeleech" }
+"promotion.card.double_up" = { zh-CN = "个人 2x 卡", en = "Personal 2x Upload" }

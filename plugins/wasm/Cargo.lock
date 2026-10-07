@@ -123,6 +123,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-promotion"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "pt-wasm-x-chaos"
 version = "0.1.0"
 dependencies = [

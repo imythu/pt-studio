@@ -6,7 +6,7 @@
 
 mod common;
 
-use std::{path::PathBuf, process::Command, sync::Arc};
+use std::sync::Arc;
 
 use axum::{Json, Router, body::Body, http::StatusCode, response::IntoResponse, routing::post};
 use pt_kernel::{Kernel, config::SiteConfig};
@@ -15,40 +15,6 @@ use serde_json::Value;
 use sqlx::{Connection, PgConnection};
 
 use common::{call, env, reset, send};
-
-fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-/// 构建 WASM 插件并组装插件目录：<dir>/bonus/{plugin.toml, plugin.wasm, migrations/}
-fn package_plugins() -> PathBuf {
-    let ws = repo().join("plugins/wasm");
-    let st = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args(["build", "--release", "--target", "wasm32-wasip2"])
-        .current_dir(&ws)
-        .status()
-        .unwrap();
-    assert!(st.success(), "building plugins/wasm failed");
-    let dir = PathBuf::from(common::env("PT_TEST_PLUGINS_DIR", "/tmp/pt-studio-test-plugins"));
-    let _ = std::fs::remove_dir_all(&dir);
-    for (id, artifact) in [("bonus", "pt_wasm_bonus"), ("x-chaos", "pt_wasm_x_chaos")] {
-        let dst = dir.join(id);
-        std::fs::create_dir_all(dst.join("migrations")).unwrap();
-        std::fs::copy(ws.join(id).join("plugin.toml"), dst.join("plugin.toml")).unwrap();
-        std::fs::copy(
-            ws.join(format!("target/wasm32-wasip2/release/{artifact}.wasm")),
-            dst.join("plugin.wasm"),
-        )
-        .unwrap();
-        if let Ok(rd) = std::fs::read_dir(ws.join(id).join("migrations")) {
-            for f in rd {
-                let f = f.unwrap().path();
-                std::fs::copy(&f, dst.join("migrations").join(f.file_name().unwrap())).unwrap();
-            }
-        }
-    }
-    dir
-}
 
 const AWARDER: &str = r#"
 id = "x-awarder"
@@ -97,7 +63,7 @@ async fn wasm_bonus_end_to_end() {
         .with_test_writer()
         .with_env_filter("info,sqlx=warn,cranelift=warn,wasmtime=warn")
         .try_init();
-    let dir = package_plugins();
+    let dir = common::package_wasm_plugins();
     reset().await;
     let mut plugins = pt_server::native_plugins();
     plugins.push(NativePlugin {

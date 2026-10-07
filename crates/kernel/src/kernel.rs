@@ -478,7 +478,9 @@ impl Kernel {
             .await;
             match r {
                 Some(r) => return r,
-                None if tokio::time::Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(200)).await,
+                None if tokio::time::Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(200)).await
+                }
                 None => return Err(PluginError::new("kernel.conflict", "job is already running").retryable()),
             }
         }

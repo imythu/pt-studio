@@ -28,7 +28,6 @@ use crate::{
 };
 
 pub const MAX_DEPTH: u8 = 8;
-pub const SERVICE_TIMEOUT_MS: i64 = 1000;
 
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -331,7 +330,12 @@ impl Shared {
 
     /// 内核发起的服务调用（网关鉴权、权限检查）：不检查依赖边，其余与普通服务调用相同。
     pub async fn kernel_service_ctx(&self, caller: &Ctx, provider: &str) -> PResult<(Ctx, Arc<Uow>)> {
-        let spec = self.child_spec(caller, InvocationKind::Service, provider, SERVICE_TIMEOUT_MS)?;
+        let spec = self.child_spec(
+            caller,
+            InvocationKind::Service,
+            provider,
+            self.cfg.kernel.service_timeout_ms,
+        )?;
         self.make_ctx(provider, spec)
     }
 }
@@ -360,7 +364,12 @@ impl KernelLink for Shared {
     }
 
     async fn enter_service(&self, caller: &Ctx, provider: &str, service: &str) -> PResult<Ctx> {
-        let mut spec = self.child_spec(caller, InvocationKind::Service, provider, SERVICE_TIMEOUT_MS)?;
+        let mut spec = self.child_spec(
+            caller,
+            InvocationKind::Service,
+            provider,
+            self.cfg.kernel.service_timeout_ms,
+        )?;
         spec.caller_scopes = self
             .plugins
             .get(&*caller.plugin_id)

@@ -67,6 +67,13 @@ pub struct KernelSection {
     pub node_id: Option<String>,
     #[serde(default = "yes")]
     pub strict_catalog: bool,
+    /// 服务调用的默认超时（kernel/03 §3.3：被调方法默认 1 s，且不超过调用方剩余时间）
+    #[serde(default = "default_service_timeout")]
+    pub service_timeout_ms: i64,
+}
+
+fn default_service_timeout() -> i64 {
+    1000
 }
 
 impl Default for KernelSection {
@@ -75,6 +82,7 @@ impl Default for KernelSection {
             mode: Mode::Prod,
             node_id: None,
             strict_catalog: true,
+            service_timeout_ms: default_service_timeout(),
         }
     }
 }
