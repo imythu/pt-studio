@@ -1,0 +1,7 @@
+/target
+/.dev
+*.log
+# 调研用的第三方源码克隆（各自许可证），不纳入仓库
+/.spike/refs
+/.spike/torrust-tracker
+/.spike/*/target

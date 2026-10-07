@@ -1,0 +1,30 @@
+[package]
+name = "pt-plugin-identity"
+description = "PT Studio identity plugin: accounts, sessions, ctx.auth, ctx.rbac, ctx.users"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pt-plugin-api.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+aes-gcm = "0.10"
+argon2 = "0.5"
+base64 = "0.22"
+hkdf = "0.12"
+hmac = "0.12"
+unicode-normalization = "0.1"
+
+[lints]
+workspace = true

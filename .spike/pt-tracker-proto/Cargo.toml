@@ -1,0 +1,31 @@
+[package]
+name = "pt-tracker-proto"
+version = "0.0.1"
+edition = "2024"
+publish = false
+# 本原型链接了 AGPL-3.0-only 的 torrust 包，因此原型本身也只能以 AGPL-3.0 分发。
+license = "AGPL-3.0-only"
+description = "PT Studio spike: 用 torrust 各包组装 PT 专用 tracker 的最小原型"
+
+# 独立 workspace，避免被上层目录或 torrust workspace 吸收
+[workspace]
+
+[dependencies]
+# 注：不依赖 tracker-core / http-core / axum-http-server（它们会带入 sqlx 三种数据库驱动，且鉴权/白名单无法替换）
+# ---- torrust 包（develop 分支，未发布到 crates.io，只能 path / git 引用）----
+# 等价 git 写法（锁定提交）：
+#   torrust-tracker-swarm-coordination-registry = { git = "https://github.com/torrust/torrust-tracker", rev = "135ec2ab410071d6417823acadfccbbb66b18ffe" }
+torrust-tracker-swarm-coordination-registry = { path = "../torrust-tracker/packages/swarm-coordination-registry" }
+torrust-tracker-primitives = { path = "../torrust-tracker/packages/primitives" }
+torrust-tracker-http-protocol = { path = "../torrust-tracker/packages/http-protocol" }
+torrust-tracker-events = { path = "../torrust-tracker/packages/events" }
+# ---- 已发布到 crates.io 的 torrust 基础包（版本必须与上面 path 包一致）----
+torrust-info-hash = "=0.2.0"
+torrust-peer-id = "0.1.0"
+# ---- 通用 ----
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

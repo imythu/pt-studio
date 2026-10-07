@@ -1,0 +1,469 @@
+//! 启动编排（kernel/03 §2.5、§2.6）。
+
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
+
+use pt_plugin_api::{
+    Actor, InvocationKind, NativePlugin, PluginError,
+    services::{PermissionDecl, RBAC, RbacService},
+};
+use redis::aio::ConnectionManager;
+use sqlx::{Executor, postgres::PgPoolOptions};
+use tokio::sync::watch;
+
+use crate::{
+    catalog,
+    config::SiteConfig,
+    events,
+    loader::{self, LoadError, PluginSpec},
+    runtime::{
+        CallSpec, HookHandlerEntry, PluginRuntime, ServiceObj, Shared, effective_scopes, effective_sensitive,
+        role_names,
+    },
+    storage::{migrate, redis::RedisGateway},
+};
+
+#[derive(Debug, thiserror::Error)]
+pub enum StartError {
+    #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
+    Load(Vec<LoadError>),
+    #[error(transparent)]
+    Migrate(#[from] migrate::MigrateError),
+    #[error("infrastructure unavailable: {0}")]
+    Infra(String),
+    #[error("plugin `{plugin}` init failed: {error}")]
+    Init { plugin: String, error: PluginError },
+}
+
+impl StartError {
+    /// 退出码（§2.6）
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::Load(_) => 2,
+            Self::Migrate(_) => 3,
+            Self::Infra(_) => 4,
+            Self::Init { .. } => 5,
+        }
+    }
+}
+
+pub struct Kernel {
+    pub shared: Arc<Shared>,
+    stop: watch::Sender<bool>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for Kernel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Kernel")
+            .field("shared", &self.shared)
+            .finish_non_exhaustive()
+    }
+}
+
+/// 只做清单与依赖检查（`pt-server check --offline`）。
+pub fn check(cfg: &SiteConfig, natives: Vec<NativePlugin>) -> Result<loader::Resolution, Vec<LoadError>> {
+    let specs = enabled_specs(cfg, natives)?;
+    let res = loader::resolve(&specs, cfg)?;
+    let errs = static_checks(cfg, &specs);
+    if errs.is_empty() { Ok(res) } else { Err(errs) }
+}
+
+fn enabled_specs(cfg: &SiteConfig, natives: Vec<NativePlugin>) -> Result<Vec<PluginSpec>, Vec<LoadError>> {
+    let mut specs = Vec::new();
+    let mut errors = Vec::new();
+    for np in natives {
+        match PluginSpec::native(np) {
+            Ok(s) if cfg.plugins.disabled.iter().any(|d| d == s.id()) => {}
+            Ok(s) => specs.push(s),
+            Err(e) => errors.push(e),
+        }
+    }
+    if errors.is_empty() { Ok(specs) } else { Err(errors) }
+}
+
+/// 与 catalog 相关的检查：钩子点归属、处理的钩子存在、敏感能力授权。
+fn static_checks(cfg: &SiteConfig, specs: &[PluginSpec]) -> Vec<LoadError> {
+    let mut errs = Vec::new();
+    for s in specs {
+        let m = &s.manifest;
+        for hp in &m.hook_points {
+            match catalog::hook_point(&hp.name) {
+                Some(def) if def.owner == m.id => {}
+                Some(def) => errs.push(LoadError::new(
+                    "E-CATALOG",
+                    &m.id,
+                    format!("hook point `{}` belongs to `{}`", hp.name, def.owner),
+                )),
+                None if cfg.kernel.strict_catalog && !m.id.starts_with("x-") => {
+                    errs.push(LoadError::new(
+                        "E-CATALOG",
+                        &m.id,
+                        format!("hook point `{}` is not in catalog/hooks.md", hp.name),
+                    ));
+                }
+                None => {}
+            }
+        }
+        for h in &m.hooks {
+            if catalog::hook_point(&h.hook).is_none() {
+                errs.push(LoadError::new(
+                    "E-CATALOG",
+                    &m.id,
+                    format!("handles unknown hook `{}`", h.hook),
+                ));
+            }
+        }
+        if s.native.as_ref().is_some_and(|n| n.hooks.is_none()) && !m.hooks.is_empty() {
+            errs.push(LoadError::new(
+                "E-LOAD-WORLD",
+                &m.id,
+                "declares [[hooks]] but does not implement Hooks",
+            ));
+        }
+        if s.native.as_ref().is_some_and(|n| n.on_event.is_none()) && !m.subscriptions.is_empty() {
+            errs.push(LoadError::new(
+                "E-LOAD-WORLD",
+                &m.id,
+                "declares [[subscriptions]] but does not implement OnEvent",
+            ));
+        }
+        let granted: HashSet<&String> = cfg
+            .grants
+            .get(&m.id)
+            .map(|g| g.sensitive.iter().collect())
+            .unwrap_or_default();
+        for sens in &m.capabilities.sensitive {
+            if !granted.contains(sens) {
+                errs.push(LoadError::new(
+                    "E-CAP-SENSITIVE",
+                    &m.id,
+                    format!("sensitive capability `{sens}` requires site.toml [grants.{}] sensitive = [\"{sens}\"]", m.id),
+                ));
+            }
+        }
+    }
+    errs
+}
+
+/// 只执行迁移（`pt-server migrate`）。
+pub async fn migrate_only(cfg: &SiteConfig, natives: Vec<NativePlugin>) -> Result<(), StartError> {
+    let specs = enabled_specs(cfg, natives).map_err(StartError::Load)?;
+    let res = loader::resolve(&specs, cfg).map_err(StartError::Load)?;
+    let ordered: Vec<&PluginSpec> = res
+        .order
+        .iter()
+        .filter_map(|id| specs.iter().find(|s| s.id() == id))
+        .collect();
+    migrate::migrate_all(cfg, &ordered).await?;
+    Ok(())
+}
+
+async fn with_retry<T, F, Fut>(what: &str, f: F) -> Result<T, StartError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let mut delay = Duration::from_millis(200);
+    loop {
+        match f().await {
+            Ok(v) => return Ok(v),
+            Err(e) if tokio::time::Instant::now() + delay < deadline => {
+                tracing::warn!(what, error = %e, "retrying");
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(5));
+            }
+            Err(e) => return Err(StartError::Infra(format!("{what}: {e}"))),
+        }
+    }
+}
+
+impl Kernel {
+    pub async fn start(cfg: SiteConfig, natives: Vec<NativePlugin>) -> Result<Kernel, StartError> {
+        let cfg = Arc::new(cfg);
+        let specs = enabled_specs(&cfg, natives).map_err(StartError::Load)?;
+        let res = loader::resolve(&specs, &cfg).map_err(StartError::Load)?;
+        let errs = static_checks(&cfg, &specs);
+        if !errs.is_empty() {
+            return Err(StartError::Load(errs));
+        }
+        let ordered: Vec<&PluginSpec> = res
+            .order
+            .iter()
+            .filter_map(|id| specs.iter().find(|s| s.id() == id))
+            .collect();
+
+        if cfg.database.migrate_on_start {
+            migrate::migrate_all(&cfg, &ordered).await?;
+        }
+        let url = cfg.database.url.clone();
+        let opts = (cfg.database.pool_size, cfg.database.acquire_timeout_ms);
+        let pool = with_retry("postgres", || {
+            let url = url.clone();
+            async move {
+                PgPoolOptions::new()
+                    .max_connections(opts.0)
+                    .acquire_timeout(Duration::from_millis(opts.1))
+                    .connect(&url)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        })
+        .await?;
+        let mut redis = BTreeMap::new();
+        let mut redis_clients = BTreeMap::new();
+        for (role, inst) in &cfg.redis {
+            if let Ok(c) = redis::Client::open(inst.url.as_str()) {
+                redis_clients.insert(role.clone(), c);
+            }
+            let url = inst.url.clone();
+            let conn = with_retry("redis", || {
+                let url = url.clone();
+                async move {
+                    let client = redis::Client::open(url.as_str()).map_err(|e| e.to_string())?;
+                    ConnectionManager::new(client).await.map_err(|e| e.to_string())
+                }
+            })
+            .await?;
+            redis.insert(role.clone(), conn);
+        }
+
+        // 运行时表
+        let mut plugins = BTreeMap::new();
+        let mut services: BTreeMap<String, Vec<(String, ServiceObj)>> = BTreeMap::new();
+        let mut hook_handlers: BTreeMap<String, Vec<HookHandlerEntry>> = BTreeMap::new();
+        let mut errors = Vec::new();
+        for spec in &ordered {
+            let m = spec.manifest.clone();
+            let (role, schema) = role_names(&cfg, &m);
+            let mut globals = BTreeMap::new();
+            for g in &m.capabilities.redis_global {
+                match redis.get(&g.role).or_else(|| redis.get("main")) {
+                    Some(c) => {
+                        globals.insert(g.role.clone(), c.clone());
+                    }
+                    None => errors.push(LoadError::new(
+                        "E-CAP-REDIS",
+                        &m.id,
+                        format!("redis role `{}` is not configured", g.role),
+                    )),
+                }
+            }
+            let rg = RedisGateway::new(&m.id, m.capabilities.redis, redis.get("main").cloned(), globals);
+            let native = spec.native.as_ref();
+            for (svc, obj) in native.map(|n| n.services.as_slice()).unwrap_or(&[]) {
+                if !m.provides.iter().any(|p| p.split('@').next() == Some(*svc)) {
+                    errors.push(LoadError::new(
+                        "E-LOAD-WORLD",
+                        &m.id,
+                        format!("implements `{svc}` but does not declare it in provides"),
+                    ));
+                    continue;
+                }
+                if res.providers.get(*svc).is_some_and(|p| p.contains(&m.id)) {
+                    services
+                        .entry((*svc).to_owned())
+                        .or_default()
+                        .push((m.id.clone(), obj.clone()));
+                }
+            }
+            for h in &m.hooks {
+                let def = catalog::hook_point(&h.hook);
+                let point_timeout = def.map_or(200, |d| d.timeout_ms);
+                let priority = cfg
+                    .hooks
+                    .get(&h.hook)
+                    .and_then(|o| o.priority.get(&m.id).copied())
+                    .unwrap_or(h.priority);
+                hook_handlers
+                    .entry(h.hook.clone())
+                    .or_default()
+                    .push(HookHandlerEntry {
+                        plugin: m.id.clone(),
+                        priority,
+                        timeout_ms: h.timeout_ms.unwrap_or(point_timeout).min(point_timeout),
+                    });
+            }
+            let rt = PluginRuntime {
+                id: m.id.clone(),
+                schema,
+                role,
+                static_config: cfg
+                    .plugin
+                    .get(&m.id)
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({})),
+                sensitive: effective_sensitive(&cfg, &m),
+                scopes: effective_scopes(&cfg, &m),
+                lifecycle: native.and_then(|n| n.lifecycle.clone()),
+                hooks: native.and_then(|n| n.hooks.clone()),
+                on_event: native.and_then(|n| n.on_event.clone()),
+                on_cron: native.and_then(|n| n.on_cron.clone()),
+                http: native.and_then(|n| n.http.clone()),
+                redis: rg,
+                manifest: m,
+            };
+            plugins.insert(rt.id.clone(), Arc::new(rt));
+        }
+        for (svc, provs) in &res.providers {
+            if !services.contains_key(svc) {
+                errors.push(LoadError::new(
+                    "E-LOAD-WORLD",
+                    &provs.join(","),
+                    format!("declares `{svc}` in provides but registers no implementation"),
+                ));
+            }
+        }
+        if !errors.is_empty() {
+            return Err(StartError::Load(errors));
+        }
+        for list in hook_handlers.values_mut() {
+            list.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.plugin.cmp(&b.plugin)));
+        }
+
+        let events_cfg = Arc::new(cfg.events.clone());
+        let node_id = cfg.node_id();
+        let shared = Arc::new_cyclic(|me| Shared {
+            cfg: cfg.clone(),
+            pool,
+            redis,
+            redis_clients,
+            plugins,
+            order: res.order.clone(),
+            services,
+            allowed: res.allowed.clone(),
+            hook_handlers,
+            node_id,
+            events_cfg,
+            me: me.clone(),
+        });
+
+        record_registry(&shared, &ordered).await?;
+        maintain_partitions(&shared).await;
+        register_permissions(&shared).await?;
+        for id in &shared.order {
+            let rt = shared.plugin(id).map_err(|e| StartError::Init {
+                plugin: id.clone(),
+                error: e,
+            })?;
+            let Some(lc) = rt.lifecycle.clone() else { continue };
+            let (ctx, uow) = shared
+                .make_ctx(id, CallSpec::new(InvocationKind::Init, Actor::system(), 30_000))
+                .map_err(|e| StartError::Init {
+                    plugin: id.clone(),
+                    error: e,
+                })?;
+            let r = match tokio::time::timeout(Duration::from_secs(30), lc.init(&ctx)).await {
+                Ok(r) => r,
+                Err(_) => Err(PluginError::new("kernel.timeout", "init timed out")),
+            };
+            uow.finish(r.is_ok()).await.map_err(|e| StartError::Init {
+                plugin: id.clone(),
+                error: e,
+            })?;
+            r.map_err(|e| StartError::Init {
+                plugin: id.clone(),
+                error: e,
+            })?;
+        }
+
+        let (stop, stop_rx) = watch::channel(false);
+        let tasks = events::spawn_background(shared.clone(), stop_rx);
+        tracing::info!(plugins = ?shared.order, node = %shared.node_id, "kernel started");
+        Ok(Kernel { shared, stop, tasks })
+    }
+
+    pub fn router(&self) -> axum::Router {
+        crate::gateway::router(self.shared.clone())
+    }
+
+    pub async fn shutdown(self) {
+        let _ = self.stop.send(true);
+        for t in self.tasks {
+            let _ = tokio::time::timeout(Duration::from_secs(10), t).await;
+        }
+        self.shared.pool.close().await;
+    }
+}
+
+async fn record_registry(sh: &Shared, specs: &[&PluginSpec]) -> Result<(), StartError> {
+    for s in specs {
+        let kind = match s.manifest.kind {
+            pt_plugin_api::manifest::PluginKind::Native => "native",
+            pt_plugin_api::manifest::PluginKind::Wasm => "wasm",
+        };
+        sqlx::query(
+            "INSERT INTO kernel.plugin_registry (plugin_id, version, kind, manifest_sha256) VALUES ($1,$2,$3,$4)
+             ON CONFLICT (plugin_id) DO UPDATE SET version = EXCLUDED.version, kind = EXCLUDED.kind,
+               manifest_sha256 = EXCLUDED.manifest_sha256, last_seen_at = now(), removed_at = NULL",
+        )
+        .bind(s.id())
+        .bind(s.manifest.version.to_string())
+        .bind(kind)
+        .bind(&s.manifest_sha256)
+        .execute(&sh.pool)
+        .await
+        .map_err(|e| StartError::Infra(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// 事件日志按日分区（评审 R1 B-08）：预建昨天到 3 天后的分区。
+pub async fn maintain_partitions(sh: &Shared) {
+    let today = chrono::Utc::now().date_naive();
+    for offset in -1..=3i64 {
+        let d = today + chrono::Duration::days(offset);
+        let next = d + chrono::Duration::days(1);
+        let name = format!("event_log_d{}", d.format("%Y%m%d"));
+        let sql = format!(
+            "CREATE TABLE IF NOT EXISTS kernel.{name} PARTITION OF kernel.event_log FOR VALUES FROM ('{d}') TO ('{next}')"
+        );
+        if let Err(e) = sh.pool.execute(sql.as_str()).await {
+            // 默认分区中已有该日数据时无法建分区：保留在默认分区，记录告警
+            tracing::warn!(partition = %name, error = %e, "event_log partition not created");
+        }
+    }
+}
+
+/// 收集全部插件的权限点，交给 `ctx.rbac`（§2.5 第 3 步）。
+async fn register_permissions(sh: &Shared) -> Result<(), StartError> {
+    let Some((provider, obj)) = sh.services.get(RBAC).and_then(|v| v.first()).cloned() else {
+        return Ok(());
+    };
+    let rbac = obj
+        .downcast_ref::<Arc<dyn RbacService>>()
+        .cloned()
+        .ok_or_else(|| StartError::Init {
+            plugin: provider.clone(),
+            error: PluginError::internal("ctx.rbac has wrong type"),
+        })?;
+    let perms: Vec<PermissionDecl> = sh
+        .plugins
+        .values()
+        .flat_map(|rt| {
+            rt.manifest.permissions.iter().map(|p| PermissionDecl {
+                plugin_id: rt.id.clone(),
+                name: p.name.clone(),
+                description_term: p.description_term.clone(),
+                default_roles: p.default_roles.clone(),
+            })
+        })
+        .collect();
+    let err = |e| StartError::Init {
+        plugin: provider.clone(),
+        error: e,
+    };
+    let (ctx, uow) = sh
+        .make_ctx(
+            &provider,
+            CallSpec::new(InvocationKind::Init, Actor::system(), 30_000),
+        )
+        .map_err(err)?;
+    let r = rbac.register_permissions(&ctx, perms).await;
+    uow.finish(r.is_ok()).await.map_err(err)?;
+    r.map_err(err)
+}

@@ -1,0 +1,91 @@
+id = "torrent"
+name = "种子"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "种子上传、规范化、存储与下载（ctx.torrents）"
+
+requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
+publishes = ["torrent.created", "torrent.downloaded"]
+
+[capabilities]
+kv = true
+sql = true
+blob = true
+
+[capabilities.scopes]
+"ctx.users" = ["read:passkey"]
+
+[[hook_points]]
+name = "torrent.before_upload"
+input_schema = "schemas/hooks/torrent.before_upload.json"
+
+[[hook_points]]
+name = "torrent.before_download"
+input_schema = "schemas/hooks/torrent.before_download.json"
+
+[[http.routes]]
+id = "upload"
+method = "POST"
+path = "/v1/torrents"
+auth = "user"
+permission = "torrent.upload"
+rate_limit = "user:20/h"
+max_body_kb = 12288
+
+[[http.routes]]
+id = "get_torrent"
+method = "GET"
+path = "/v1/torrents/{id}"
+auth = "user"
+rate_limit = "user:300/m"
+
+[[http.routes]]
+id = "list_files"
+method = "GET"
+path = "/v1/torrents/{id}/files"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "download"
+method = "GET"
+path = "/v1/torrents/{id}/download"
+auth = "user"
+permission = "torrent.download"
+rate_limit = "user:120/m"
+
+[[permissions]]
+name = "torrent.upload"
+description_term = "torrent.perm.upload"
+default_roles = ["user"]
+
+[[permissions]]
+name = "torrent.download"
+description_term = "torrent.perm.download"
+default_roles = ["user"]
+
+[[permissions]]
+name = "torrent.update"
+description_term = "torrent.perm.update"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "torrent.delete"
+description_term = "torrent.perm.delete"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "torrent.anonymous.reveal"
+description_term = "torrent.perm.anonymous_reveal"
+default_roles = ["admin"]
+
+[database]
+migrations = "migrations"
+views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent_fingerprint", "v_uploader_counts"]
+
+[terms]
+"torrent.status.approved" = { zh-CN = "已发布", en = "Approved" }
+"torrent.status.pending" = { zh-CN = "待审核", en = "Pending" }

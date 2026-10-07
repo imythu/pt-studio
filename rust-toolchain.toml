@@ -1,0 +1,3 @@
+[toolchain]
+channel = "stable"  # 当前为 1.98.1；按 conventions/coding.md 每季度升级
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,139 @@
+id = "identity"
+name = "身份与权限"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "账号、会话、鉴权（ctx.auth）、权限（ctx.rbac）、用户资料（ctx.users）"
+
+provides = ["ctx.auth@0.1.0", "ctx.rbac@0.1.0", "ctx.users@0.1.0"]
+publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out"]
+
+[capabilities]
+kv = true
+sql = true
+redis = true
+# 登录限流、钩子输入中的 ip / email 需要（site.toml [grants.identity]）
+sensitive_optional = ["user.ip", "user.email"]
+
+[[hook_points]]
+name = "user.before_register"
+input_schema = "schemas/hooks/user.before_register.json"
+
+[[hook_points]]
+name = "user.before_login"
+input_schema = "schemas/hooks/user.before_login.json"
+
+[[http.routes]]
+id = "login"
+method = "POST"
+path = "/v1/sessions"
+auth = "public"
+rate_limit = "ip:20/m"
+
+[[http.routes]]
+id = "logout"
+method = "DELETE"
+path = "/v1/sessions/current"
+auth = "user"
+
+[[http.routes]]
+id = "register"
+method = "POST"
+path = "/v1/users"
+auth = "public"
+rate_limit = "ip:5/h"
+
+[[http.routes]]
+id = "get_me"
+method = "GET"
+path = "/v1/users/me"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "my_permissions"
+method = "GET"
+path = "/v1/users/me/permissions"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "get_passkey"
+method = "GET"
+path = "/v1/users/me/passkey"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "get_user"
+method = "GET"
+path = "/v1/users/{id}"
+auth = "user"
+rate_limit = "user:300/m"
+
+[[http.routes]]
+id = "admin_user_roles_grant"
+method = "POST"
+path = "/v1/admin/users/{id}/roles"
+auth = "admin"
+permission = "identity.roles.assign"
+rate_limit = "user:60/h"
+
+[[permissions]]
+name = "identity.profile.update_own"
+description_term = "identity.perm.profile_update_own"
+default_roles = ["user"]
+
+[[permissions]]
+name = "identity.passkey.reset_own"
+description_term = "identity.perm.passkey_reset_own"
+default_roles = ["user"]
+
+[[permissions]]
+name = "identity.tokens.manage_own"
+description_term = "identity.perm.tokens_manage_own"
+default_roles = ["user"]
+
+[[permissions]]
+name = "identity.users.read"
+description_term = "identity.perm.users_read"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "identity.users.update"
+description_term = "identity.perm.users_update"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "identity.users.ban"
+description_term = "identity.perm.users_ban"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "identity.users.read_sensitive"
+description_term = "identity.perm.users_read_sensitive"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "identity.roles.assign"
+description_term = "identity.perm.roles_assign"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "identity.roles.manage"
+description_term = "identity.perm.roles_manage"
+default_roles = []
+
+[database]
+migrations = "migrations"
+views = ["v_user_public"]
+
+[terms]
+"identity.role.guest" = { zh-CN = "访客", en = "Guest" }
+"identity.role.user" = { zh-CN = "用户", en = "User" }
+"identity.role.uploader" = { zh-CN = "发布员", en = "Uploader" }
+"identity.role.moderator" = { zh-CN = "版主", en = "Moderator" }
+"identity.role.admin" = { zh-CN = "管理员", en = "Administrator" }
+"identity.role.sysop" = { zh-CN = "站务", en = "Sysop" }

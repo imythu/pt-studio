@@ -1,0 +1,43 @@
+[package]
+name = "pt-server"
+description = "PT Studio server binary: kernel + compiled-in Native plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pt-server"
+path = "src/main.rs"
+
+[features]
+default = ["identity", "torrent"]
+identity = ["dep:pt-plugin-identity"]
+torrent = ["identity", "dep:pt-plugin-torrent"]
+
+[dependencies]
+pt-kernel.workspace = true
+pt-plugin-api.workspace = true
+pt-plugin-identity = { path = "../../plugins/native/identity", optional = true }
+pt-plugin-torrent = { path = "../../plugins/native/torrent", optional = true }
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+sha1 = "0.10"
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+http.workspace = true
+redis.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tower.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

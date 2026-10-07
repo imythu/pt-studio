@@ -1,0 +1,26 @@
+[package]
+name = "pt-plugin-torrent"
+description = "PT Studio torrent plugin: upload, normalisation, storage and download of .torrent files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pt-plugin-api.workspace = true
+pt-plugin-identity = { path = "../identity" }
+async-trait.workspace = true
+axum.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+sha1 = "0.10"
+
+[lints]
+workspace = true

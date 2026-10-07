@@ -1,0 +1,381 @@
+//! HTTP 网关（kernel/03 §8）。
+
+use std::{collections::HashMap, sync::Arc};
+
+use axum::{
+    Json as AxJson, Router,
+    extract::{DefaultBodyLimit, MatchedPath, Request, State},
+    http::{HeaderMap, Method, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::get,
+};
+use pt_plugin_api::{
+    Actor, Credential, ErrorMarker, InvocationKind, PluginError, Principal, RequestCtx,
+    manifest::{AuthLevel, RouteDecl},
+    services::{RBAC, RbacService},
+};
+use serde_json::json;
+
+use crate::runtime::{CallSpec, Shared};
+
+pub const SESSION_COOKIE: &str = "__Host-pt_session";
+pub const CSRF_COOKIE: &str = "__Host-pt_csrf";
+
+#[derive(Clone)]
+struct PluginState {
+    shared: Arc<Shared>,
+    plugin: String,
+    /// (方法, 路由模板) → 声明
+    routes: Arc<HashMap<(String, String), RouteDecl>>,
+}
+
+pub fn router(shared: Arc<Shared>) -> Router {
+    let mut app = Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/readyz", get(readyz))
+        .route("/api/kernel/v1/plugins", get(list_plugins))
+        .with_state(shared.clone());
+    for (id, rt) in &shared.plugins {
+        let Some(http) = &rt.http else { continue };
+        let routes: HashMap<(String, String), RouteDecl> = rt
+            .manifest
+            .http
+            .as_ref()
+            .map(|h| {
+                h.routes
+                    .iter()
+                    .map(|r| ((r.method.to_ascii_uppercase(), r.path.clone()), r.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let state = PluginState {
+            shared: shared.clone(),
+            plugin: id.clone(),
+            routes: Arc::new(routes),
+        };
+        let max_kb = usize::try_from(shared.cfg.http.max_body_kb).unwrap_or(1024);
+        let r = http
+            .router()
+            .route_layer(middleware::from_fn_with_state(state, plugin_mw))
+            .layer(DefaultBodyLimit::max(max_kb * 1024));
+        app = app.nest(&format!("/api/p/{id}"), r);
+    }
+    app.fallback(|| async { PluginError::not_found("no such route") })
+}
+
+async fn readyz(State(sh): State<Arc<Shared>>) -> Response {
+    match sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&sh.pool).await {
+        Ok(_) => "ready".into_response(),
+        Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "database unavailable").into_response(),
+    }
+}
+
+async fn list_plugins(State(sh): State<Arc<Shared>>) -> Response {
+    let items: Vec<_> = sh
+        .order
+        .iter()
+        .filter_map(|id| sh.plugins.get(id))
+        .map(|rt| {
+            json!({ "id": rt.id, "name": rt.manifest.name, "version": rt.manifest.version.to_string(),
+                          "kind": rt.manifest.kind, "provides": rt.manifest.provides })
+        })
+        .collect();
+    AxJson(json!({ "items": items })).into_response()
+}
+
+fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .find_map(|c| {
+            let (k, v) = c.trim().split_once('=')?;
+            (k == name).then_some(v)
+        })
+}
+
+fn credential(headers: &HeaderMap) -> Option<Credential> {
+    if let Some(auth) = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok())
+        && let Some(tok) = auth.strip_prefix("Bearer ")
+    {
+        return Some(Credential::Bearer(tok.trim().to_owned()));
+    }
+    cookie(headers, SESSION_COOKIE).map(|s| Credential::Session(s.to_owned()))
+}
+
+fn locale(headers: &HeaderMap) -> Option<String> {
+    let v = headers.get(header::ACCEPT_LANGUAGE)?.to_str().ok()?;
+    let first = v.split(',').next()?.split(';').next()?.trim();
+    (!first.is_empty() && first.len() <= 16).then(|| first.to_owned())
+}
+
+/// 客户端 IP：直连地址在 trusted_proxies 内时，取 X-Forwarded-For 中最右侧的不可信地址。
+fn client_ip(req: &Request, headers: &HeaderMap, trusted: &[String]) -> Option<String> {
+    let peer = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0.ip());
+    let is_trusted = |ip: &std::net::IpAddr| trusted.iter().any(|cidr| cidr_contains(cidr, ip));
+    let mut ip = peer?;
+    if is_trusted(&ip)
+        && let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
+    {
+        for hop in xff.rsplit(',') {
+            let Ok(h) = hop.trim().parse::<std::net::IpAddr>() else {
+                break;
+            };
+            ip = h;
+            if !is_trusted(&h) {
+                break;
+            }
+        }
+    }
+    Some(ip.to_string())
+}
+
+fn cidr_contains(cidr: &str, ip: &std::net::IpAddr) -> bool {
+    let (net, bits) = match cidr.split_once('/') {
+        Some((n, b)) => (n, b.parse::<u32>().ok()),
+        None => (cidr, None),
+    };
+    let Ok(net) = net.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    match (net, ip) {
+        (std::net::IpAddr::V4(n), std::net::IpAddr::V4(i)) => {
+            let b = bits.unwrap_or(32).min(32);
+            let mask = if b == 0 { 0 } else { u32::MAX << (32 - b) };
+            (u32::from(n) & mask) == (u32::from(*i) & mask)
+        }
+        (std::net::IpAddr::V6(n), std::net::IpAddr::V6(i)) => {
+            let b = bits.unwrap_or(128).min(128);
+            let mask = if b == 0 { 0 } else { u128::MAX << (128 - b) };
+            (u128::from(n) & mask) == (u128::from(*i) & mask)
+        }
+        _ => false,
+    }
+}
+
+fn origin_of(url: &str) -> &str {
+    // scheme://host[:port]
+    match url.find("://") {
+        Some(i) => match url[i + 3..].find('/') {
+            Some(j) => &url[..i + 3 + j],
+            None => url,
+        },
+        None => url,
+    }
+}
+
+/// CSRF（§8.2 第 5 步）：仅会话凭据的非安全方法。
+fn csrf_ok(headers: &HeaderMap, base_url: &str) -> bool {
+    let token = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
+    let cookie_token = cookie(headers, CSRF_COOKIE);
+    let tokens_ok = matches!((token, cookie_token), (Some(a), Some(b)) if !a.is_empty() && a == b);
+    let site_ok = match headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+        Some(s) => s == "same-origin" || s == "none",
+        None => headers
+            .get(header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+            .is_none_or(|o| o == origin_of(base_url)),
+    };
+    tokens_ok && site_ok
+}
+
+fn finish_problem(mut resp: Response, request_id: &str) -> Response {
+    resp.headers_mut().insert(
+        "x-request-id",
+        request_id
+            .parse()
+            .unwrap_or_else(|_| header::HeaderValue::from_static("-")),
+    );
+    resp
+}
+
+async fn plugin_mw(
+    State(st): State<PluginState>,
+    matched: Option<MatchedPath>,
+    mut req: Request,
+    next: Next,
+) -> Response {
+    let request_id = req
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.len() <= 64)
+        .map_or_else(|| uuid::Uuid::now_v7().to_string(), str::to_owned);
+    let resp = match prepare(&st, matched, &mut req, &request_id).await {
+        Err(e) => e.into_response(),
+        Ok(ctx) => {
+            let uow = ctx.unit.clone();
+            req.extensions_mut().insert(RequestCtx(Arc::new(ctx)));
+            let resp = next.run(req).await;
+            let failed = resp.extensions().get::<ErrorMarker>().is_some() || resp.status().is_server_error();
+            let finish = match uow.downcast::<crate::storage::uow::Uow>() {
+                Ok(u) => u.finish(!failed).await,
+                Err(_) => Err(PluginError::internal("missing unit of work")),
+            };
+            match finish {
+                Ok(()) => resp,
+                Err(e) => {
+                    tracing::error!(error = %e, "commit failed");
+                    e.into_response()
+                }
+            }
+        }
+    };
+    // 插件未显式给出状态时，使用 error-codes 目录登记的状态（conventions/api.md §7）
+    let resp = match resp.extensions().get::<ErrorMarker>() {
+        Some(m) if m.0.status.is_none() => match crate::catalog::error_status(&m.0.code) {
+            Some(st) if st != resp.status().as_u16() => m.0.clone().with_status(st).into_response(),
+            _ => resp,
+        },
+        _ => resp,
+    };
+    if let Some(m) = resp.extensions().get::<ErrorMarker>()
+        && resp.status().is_server_error()
+    {
+        tracing::error!(plugin = %st.plugin, %request_id, code = %m.0.code, message = %m.0.message, "request failed");
+    }
+    finish_problem(resp, &request_id)
+}
+
+async fn prepare(
+    st: &PluginState,
+    matched: Option<MatchedPath>,
+    req: &mut Request,
+    request_id: &str,
+) -> Result<pt_plugin_api::Ctx, PluginError> {
+    let sh = &st.shared;
+    let prefix = format!("/api/p/{}", st.plugin);
+    let pattern = matched.as_ref().map(MatchedPath::as_str).unwrap_or_default();
+    let pattern = pattern.strip_prefix(&prefix).unwrap_or(pattern);
+    let method = req.method().as_str().to_owned();
+    let route = st
+        .routes
+        .get(&(method.clone(), pattern.to_owned()))
+        .or_else(|| {
+            (req.method() == Method::HEAD)
+                .then(|| st.routes.get(&("GET".to_owned(), pattern.to_owned())))
+                .flatten()
+        })
+        .ok_or_else(|| PluginError::not_found("route not declared"))?
+        .clone();
+    let headers = req.headers().clone();
+    let timeout_ms = i64::from(route.timeout_ms.unwrap_or(sh.cfg.http.request_timeout_ms));
+
+    // 鉴权（§8.2 第 3、4 步）
+    let mut spec = CallSpec::new(InvocationKind::Http, Actor::anonymous(), timeout_ms);
+    spec.request_id = request_id.to_owned();
+    spec.locale = locale(&headers);
+    spec.client_ip = client_ip(req, &headers, &sh.cfg.http.trusted_proxies);
+    spec.user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.chars().take(256).collect());
+    let (kctx, kuow) = sh.make_ctx("kernel", spec.clone())?;
+    let cred = credential(&headers);
+    let principal: Option<Principal> = match &cred {
+        Some(c) => kctx.authenticate(c.clone()).await?,
+        None => None,
+    };
+    if cred.is_some() && principal.is_none() && route.auth != AuthLevel::Public {
+        return Err(PluginError::unauthenticated());
+    }
+    if route.auth != AuthLevel::Public && principal.is_none() {
+        return Err(PluginError::unauthenticated());
+    }
+    // CSRF（第 5 步）
+    let unsafe_method = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    if unsafe_method
+        && matches!(cred, Some(Credential::Session(_)))
+        && principal.is_some()
+        && !csrf_ok(&headers, &sh.cfg.site.base_url)
+    {
+        return Err(PluginError::new("kernel.csrf_failed", "CSRF check failed"));
+    }
+    // 权限（第 6 步，评审 R1 B-06）
+    if let Some(p) = &principal {
+        if let Some((rbac_id, obj)) = sh.services.get(RBAC).and_then(|v| v.first()) {
+            let rbac = obj
+                .downcast_ref::<Arc<dyn RbacService>>()
+                .cloned()
+                .ok_or_else(|| PluginError::internal("ctx.rbac has wrong type"))?;
+            let (rctx, ruow) = sh.kernel_service_ctx(&kctx, rbac_id).await?;
+            let r = rbac
+                .check_principal(&rctx, p, route.permission.as_deref(), &method)
+                .await;
+            ruow.finish(r.is_ok()).await?;
+            if !r? {
+                return Err(PluginError::forbidden("permission denied")
+                    .with_details(json!({ "permission": route.permission })));
+            }
+        } else if route.permission.is_some() {
+            return Err(PluginError::unavailable("no ctx.rbac provider"));
+        }
+        if let Some(secs) = route.reauth_secs {
+            let fresh = p
+                .reauth_at
+                .is_some_and(|t| crate::runtime::now_ms() - t <= i64::from(secs) * 1000);
+            if !fresh {
+                return Err(PluginError::new(
+                    "identity.reauth_required",
+                    "please re-authenticate",
+                ));
+            }
+        }
+    }
+    kuow.finish(true).await?;
+
+    // 插件调用上下文（第 9 步）
+    spec.actor = match &principal {
+        Some(p) => Actor::user(p.user_id, Some(p.credential_id.clone())),
+        None => Actor::anonymous(),
+    };
+    if !sh.has_sensitive(&st.plugin, "user.ip") {
+        spec.client_ip = None;
+    }
+    let (ctx, _) = sh.make_ctx(&st.plugin, spec)?;
+    if let Some(p) = &principal
+        && let Ok(mut l) = ctx.authenticated.lock()
+    {
+        l.push(p.user_id);
+    }
+    Ok(ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csrf() {
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::COOKIE,
+            "a=1; __Host-pt_csrf=tok"
+                .parse()
+                .unwrap_or_else(|_| unreachable!()),
+        );
+        assert!(!csrf_ok(&h, "https://pt.example"));
+        h.insert("x-csrf-token", "tok".parse().unwrap_or_else(|_| unreachable!()));
+        assert!(csrf_ok(&h, "https://pt.example"));
+        h.insert(
+            header::ORIGIN,
+            "https://evil.example".parse().unwrap_or_else(|_| unreachable!()),
+        );
+        assert!(!csrf_ok(&h, "https://pt.example/"));
+        h.insert(
+            "sec-fetch-site",
+            "same-origin".parse().unwrap_or_else(|_| unreachable!()),
+        );
+        assert!(csrf_ok(&h, "https://pt.example"));
+        assert_eq!(origin_of("https://pt.example/x/y"), "https://pt.example");
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap_or_else(|_| unreachable!());
+        assert!(cidr_contains("10.0.0.0/8", &ip("10.2.3.4")));
+        assert!(!cidr_contains("10.0.0.0/8", &ip("11.2.3.4")));
+        assert!(cidr_contains("::1", &ip("::1")));
+    }
+}
