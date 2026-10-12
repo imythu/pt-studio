@@ -3,24 +3,7 @@
 use pt_type_kit::{Errors, Template};
 use serde_json::{Map, Value, json};
 
-pub const RESOLUTIONS: &[&str] = &["4320p", "2160p", "1080p", "1080i", "720p", "576p", "480p"];
-pub const SOURCES: &[&str] = &["uhd_bluray", "bluray", "web_dl", "webrip", "hdtv", "dvd"];
-pub const RELEASE_TYPES: &[&str] = &["disc", "remux", "encode", "web", "hdtv"];
-pub const VIDEO: &[&str] = &["hevc", "avc", "av1", "vc1", "mpeg2"];
-pub const AUDIO: &[&str] = &[
-    "truehd",
-    "atmos",
-    "dts_x",
-    "dts_hd_ma",
-    "dts",
-    "ddp",
-    "dd",
-    "aac",
-    "flac",
-    "lpcm",
-    "opus",
-];
-pub const HDR: &[&str] = &["dv", "hdr10plus", "hdr10", "hlg"];
+pub use pt_type_kit::specs::{AUDIO, HDR, RELEASE_TYPES, RESOLUTIONS, SOURCES, VIDEO};
 
 pub const DEFAULT_TEMPLATE: &str = "{title} {year} {edition?| }{resolution} {release_type?| }{source} {hdr?| }{video_codec} {audio_codecs?| }-{release_group}";
 
@@ -136,67 +119,6 @@ pub fn group_schema() -> Value {
             "x-pt-order": ["poster", "title", "original_title", "year", "genres", "runtime_min", "rating", "countries", "imdb_id", "tmdb_id", "douban_id", "overview"] })
 }
 
-/// 用户输入的同义写法 → 规范值
-fn canon(field: &str, v: &str) -> Option<String> {
-    let l = v.trim().to_lowercase().replace([' ', '.', '-'], "");
-    let out = match field {
-        "resolution" => match l.as_str() {
-            "4k" | "uhd" => "2160p",
-            "8k" => "4320p",
-            x if RESOLUTIONS.contains(&x) => x,
-            _ => return None,
-        },
-        "source" => match l.as_str() {
-            "bluray" | "bd" | "bluray1080p" => "bluray",
-            "uhdbluray" | "uhdbd" => "uhd_bluray",
-            "webdl" | "web" => "web_dl",
-            "webrip" => "webrip",
-            "hdtv" => "hdtv",
-            "dvd" | "dvdrip" => "dvd",
-            _ => return None,
-        },
-        "release_type" => match l.as_str() {
-            "disc" | "fulldisc" | "原盘" => "disc",
-            "remux" => "remux",
-            "encode" | "rip" => "encode",
-            "web" => "web",
-            "hdtv" => "hdtv",
-            _ => return None,
-        },
-        "video_codec" => match l.as_str() {
-            "hevc" | "h265" | "x265" => "hevc",
-            "avc" | "h264" | "x264" => "avc",
-            "av1" => "av1",
-            "vc1" => "vc1",
-            "mpeg2" => "mpeg2",
-            _ => return None,
-        },
-        "audio_codecs" => match l.as_str() {
-            "truehd" => "truehd",
-            "atmos" => "atmos",
-            "dtsx" | "dts:x" => "dts_x",
-            "dtshdma" | "dtshd" | "dts_hd_ma" => "dts_hd_ma",
-            "dts" => "dts",
-            "ddp" | "dd+" | "eac3" => "ddp",
-            "dd" | "ac3" => "dd",
-            "aac" => "aac",
-            "flac" => "flac",
-            "lpcm" | "pcm" => "lpcm",
-            "opus" => "opus",
-            _ => return None,
-        },
-        "hdr" => match l.as_str() {
-            "dv" | "dovi" | "dolbyvision" => "dv",
-            "hdr10+" | "hdr10plus" => "hdr10plus",
-            "hdr" | "hdr10" => "hdr10",
-            "hlg" => "hlg",
-            _ => return None,
-        },
-        _ => return None,
-    };
-    Some(out.to_owned())
-}
-
 fn text(v: &Value, max: usize) -> Option<String> {
     let s: String = v.as_str()?.trim().chars().filter(|c| !c.is_control()).collect();
     (!s.is_empty()).then(|| s.chars().take(max).collect())
@@ -266,40 +188,25 @@ pub fn normalize(input: &Value) -> Result<Value, Errors> {
             ),
         }
     }
-    for k in ["resolution", "source", "release_type", "video_codec"] {
-        if let Some(v) = get(k).and_then(Value::as_str) {
-            match canon(k, v) {
-                Some(c) => {
-                    o.insert(k.into(), json!(c));
-                }
-                None => errs.add(k, &format!("type-movie.{k}_invalid"), "unknown value"),
-            }
-        }
-    }
-    for k in ["audio_codecs", "hdr"] {
-        if let Some(v) = get(k) {
-            let xs: Vec<&str> = match v {
-                Value::Array(a) => a.iter().filter_map(Value::as_str).collect(),
-                Value::String(s) => s.split(',').collect(),
-                _ => vec![],
-            };
-            let mut out: Vec<String> = Vec::new();
-            for x in xs.iter().filter(|x| !x.trim().is_empty()) {
-                match canon(k, x) {
-                    Some(c) if !out.contains(&c) => out.push(c),
-                    Some(_) => {}
-                    None => errs.add(k, &format!("type-movie.{k}_invalid"), "unknown value"),
-                }
-            }
-            o.insert(k.into(), json!(out));
-        }
-    }
+    pt_type_kit::specs::normalize_specs(
+        input,
+        &mut o,
+        &mut errs,
+        "type-movie",
+        &[
+            "resolution",
+            "source",
+            "release_type",
+            "video_codec",
+            "audio_codecs",
+            "hdr",
+        ],
+    );
     if let Some(b) = get("is_3d").and_then(Value::as_bool) {
         o.insert("is_3d".into(), json!(b));
     }
     // 发布名补全（用户填写优先）
     if let Some(r) = &release_name {
-        let p = pt_release_parser::parse_release(r);
         let fill = |o: &mut Map<String, Value>, k: &str, v: Option<Value>| {
             if let Some(v) = v
                 && !o.contains_key(k)
@@ -307,39 +214,13 @@ pub fn normalize(input: &Value) -> Result<Value, Errors> {
                 o.insert(k.into(), v);
             }
         };
+        let p = pt_type_kit::specs::fill_from_release(&mut o, r);
         fill(
             &mut o,
             "title",
             pt_release_parser::parse_title(r).map(|t| json!(t)),
         );
         fill(&mut o, "year", p.year.map(|y| json!(y)));
-        fill(&mut o, "resolution", p.resolution.clone().map(|x| json!(x)));
-        let (src, rtype) = match p.source.as_deref() {
-            Some("remux") => (Some("bluray"), Some("remux")),
-            Some("bluray") => (
-                Some(if p.resolution.as_deref() == Some("2160p") {
-                    "uhd_bluray"
-                } else {
-                    "bluray"
-                }),
-                Some("encode"),
-            ),
-            Some("web_dl") => (Some("web_dl"), Some("web")),
-            Some("webrip") => (Some("webrip"), Some("web")),
-            Some("hdtv") => (Some("hdtv"), Some("hdtv")),
-            Some("dvd") => (Some("dvd"), Some("encode")),
-            _ => (None, None),
-        };
-        fill(&mut o, "source", src.map(|x| json!(x)));
-        fill(&mut o, "release_type", rtype.map(|x| json!(x)));
-        fill(&mut o, "video_codec", p.video_codec.map(|x| json!(x)));
-        if !p.audio_codec.is_empty() {
-            fill(&mut o, "audio_codecs", Some(json!(p.audio_codec)));
-        }
-        if !p.hdr.is_empty() {
-            fill(&mut o, "hdr", Some(json!(p.hdr)));
-        }
-        fill(&mut o, "release_group", p.group.map(|x| json!(x)));
         if p.flags.iter().any(|f| f == "3D") {
             fill(&mut o, "is_3d", Some(json!(true)));
         }
@@ -383,47 +264,7 @@ pub fn group_key(f: &Value) -> Option<String> {
     }
 }
 
-/// 规范值 → 标题中的显示写法
-fn display(field: &str, v: &Value) -> Option<String> {
-    let s = v.as_str();
-    fn m<'a>(field: &str, x: &'a str) -> &'a str {
-        match (field, x) {
-            ("source", "uhd_bluray") => "UHD BluRay",
-            ("source", "bluray") => "BluRay",
-            ("source", "web_dl") => "WEB-DL",
-            ("source", "webrip") => "WEBRip",
-            ("source", "hdtv") => "HDTV",
-            ("source", "dvd") => "DVD",
-            ("release_type", "remux") => "REMUX",
-            ("release_type", _) => "",
-            ("video_codec", "hevc") => "HEVC",
-            ("video_codec", "avc") => "AVC",
-            ("video_codec", "av1") => "AV1",
-            ("video_codec", "vc1") => "VC-1",
-            ("video_codec", "mpeg2") => "MPEG-2",
-            ("audio_codecs", "truehd") => "TrueHD",
-            ("audio_codecs", "atmos") => "Atmos",
-            ("audio_codecs", "dts_x") => "DTS:X",
-            ("audio_codecs", "dts_hd_ma") => "DTS-HD MA",
-            ("audio_codecs", "dts") => "DTS",
-            ("audio_codecs", "ddp") => "DDP",
-            ("audio_codecs", "dd") => "DD",
-            ("audio_codecs", "aac") => "AAC",
-            ("audio_codecs", "flac") => "FLAC",
-            ("audio_codecs", "lpcm") => "LPCM",
-            ("audio_codecs", "opus") => "Opus",
-            ("hdr", "dv") => "DV",
-            ("hdr", "hdr10plus") => "HDR10+",
-            ("hdr", "hdr10") => "HDR10",
-            ("hdr", "hlg") => "HLG",
-            (_, other) => other,
-        }
-    }
-    match s {
-        Some(x) => Some(m(field, x).to_owned()),
-        None => pt_type_kit::plain(v),
-    }
-}
+use pt_type_kit::specs::display;
 
 pub fn canonical_title(f: &Value, template: Option<&str>) -> String {
     let tpl = template

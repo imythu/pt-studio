@@ -319,7 +319,7 @@ pub async fn mock_tmdb(hits: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> 
                 if !auth(&q) {
                     return (axum::http::StatusCode::UNAUTHORIZED, "{}").into_response();
                 }
-                if id == "tt0133093" { axum::Json(serde_json::json!({ "movie_results": [{ "id": 603 }], "tv_results": [] })).into_response() } else { axum::Json(serde_json::json!({ "movie_results": [], "tv_results": [] })).into_response() }
+                if id == "tt0133093" { axum::Json(serde_json::json!({ "movie_results": [{ "id": 603 }], "tv_results": [] })).into_response() } else if id == "tt0944947" { axum::Json(serde_json::json!({ "movie_results": [], "tv_results": [{ "id": 1399 }] })).into_response() } else { axum::Json(serde_json::json!({ "movie_results": [], "tv_results": [] })).into_response() }
             }),
         )
         .route(
@@ -348,6 +348,34 @@ pub async fn mock_tmdb(hits: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> 
             }),
         )
         .route(
+            "/3/tv/{id}",
+            axum::routing::get(|axum::extract::Path(id): axum::extract::Path<u64>| async move {
+                if id != 1399 {
+                    return (axum::http::StatusCode::NOT_FOUND, "{}").into_response();
+                }
+                axum::Json(serde_json::json!({
+                    "id": 1399, "name": "权力的游戏", "original_name": "Game of Thrones", "first_air_date": "2011-04-17",
+                    "origin_country": ["US"], "status": "Ended", "number_of_episodes": 73, "genres": [{ "id": 18 }],
+                    "vote_average": 8.5, "vote_count": 20000, "overview": "七大王国的权力争夺。", "poster_path": "/got.jpg",
+                    "external_ids": { "imdb_id": "tt0944947", "tvdb_id": 121361 },
+                }))
+                .into_response()
+            }),
+        )
+        .route(
+            "/3/tv/{id}/season/{n}",
+            axum::routing::get(|axum::extract::Path((id, n)): axum::extract::Path<(u64, u32)>| async move {
+                if id != 1399 || n != 1 {
+                    return (axum::http::StatusCode::NOT_FOUND, "{}").into_response();
+                }
+                axum::Json(serde_json::json!({
+                    "id": 3624, "name": "第 1 季", "air_date": "2011-04-17", "season_number": 1, "overview": "第一季简介。",
+                    "poster_path": "/got_s1.jpg", "episodes": (1..=10).map(|e| serde_json::json!({ "episode_number": e })).collect::<Vec<_>>(),
+                }))
+                .into_response()
+            }),
+        )
+        .route(
             "/3/search/movie",
             axum::routing::get(|axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>| async move {
                 axum::Json(serde_json::json!({ "results": if q.get("query").map(String::as_str) == Some("matrix") {
@@ -358,7 +386,7 @@ pub async fn mock_tmdb(hits: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> 
         .route(
             "/t/p/w500/{file}",
             axum::routing::get(|axum::extract::Path(file): axum::extract::Path<String>| async move {
-                if file == "matrix.jpg" { ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], JPEG).into_response() } else { axum::http::StatusCode::NOT_FOUND.into_response() }
+                if ["matrix.jpg", "got.jpg", "got_s1.jpg"].contains(&file.as_str()) { ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], JPEG).into_response() } else { axum::http::StatusCode::NOT_FOUND.into_response() }
             }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

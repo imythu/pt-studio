@@ -1,0 +1,113 @@
+id = "type-anime"
+name = "资源类型：动漫"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "动漫：解析字幕组风格发布名（字幕组、集号、字幕语言与方式）、字幕组别名、按 Bangumi / AniDB / TMDB 分组、范围检查、搜索字段"
+
+requires = ["ctx.torrents@^0.1"]
+optional_requires = ["ctx.metadata@^0.1"]
+
+[capabilities]
+sql = true
+content_type = true
+search_contributor = true
+views = ["torrent.v_torrent_fields"]
+
+[capabilities.scopes]
+"ctx.torrents" = ["write:group"]
+
+[[hooks]]
+hook = "torrent.before_upload"
+priority = 21
+
+[[subscriptions]]
+name = "on_group_created"
+event = "group.created"
+
+[[jobs]]
+name = "fetch_metadata"
+timeout_secs = 60
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.title_template]
+type = "string"
+maxLength = 300
+title = "规范标题模板"
+default = "{fansub?[|] }{title} {se} {resolution?[|]}{source?[|]}{video_codec?[|]}{bit_depth?[|bit]}{subtitle_langs?[|]}"
+
+[settings_schema.properties.metadata_locale]
+type = "string"
+maxLength = 16
+title = "元数据语言"
+default = "zh-CN"
+
+[settings_schema.properties.scope_check]
+type = "boolean"
+title = "上传时按文件列表检查范围"
+default = true
+
+[settings_schema.properties.season_pack_min_ratio]
+type = "number"
+minimum = 0
+maximum = 1
+title = "季包最少集数比例（完结季）"
+default = 0.8
+
+[settings_schema.properties.fansub_aliases]
+type = "object"
+title = "字幕组别名（别名 → 规范名）"
+additionalProperties = { type = "string", maxLength = 60 }
+default = {}
+
+[terms]
+"type-anime.name" = { zh-CN = "动漫", en = "Anime" }
+"type-anime.field.title" = { zh-CN = "罗马音 / 英文名", en = "Title" }
+"type-anime.field.title_zh" = { zh-CN = "中文名", en = "Chinese title" }
+"type-anime.field.original_title" = { zh-CN = "原名", en = "Original title" }
+"type-anime.field.year" = { zh-CN = "年份", en = "Year" }
+"type-anime.field.bangumi_id" = { zh-CN = "Bangumi", en = "Bangumi" }
+"type-anime.field.anidb_id" = { zh-CN = "AniDB", en = "AniDB" }
+"type-anime.field.tmdb_tv_id" = { zh-CN = "TMDB", en = "TMDB" }
+"type-anime.field.media" = { zh-CN = "形式", en = "Media" }
+"type-anime.field.scope" = { zh-CN = "范围", en = "Scope" }
+"type-anime.field.season" = { zh-CN = "季", en = "Season" }
+"type-anime.field.episode" = { zh-CN = "集", en = "Episode" }
+"type-anime.field.episode_end" = { zh-CN = "结束集", en = "Last episode" }
+"type-anime.field.ongoing" = { zh-CN = "连载中", en = "Ongoing" }
+"type-anime.field.fansub" = { zh-CN = "字幕组", en = "Fansub" }
+"type-anime.field.subtitle_langs" = { zh-CN = "字幕语言", en = "Subtitles" }
+"type-anime.field.subtitle_kind" = { zh-CN = "字幕方式", en = "Subtitle type" }
+"type-anime.field.resolution" = { zh-CN = "分辨率", en = "Resolution" }
+"type-anime.field.source" = { zh-CN = "片源", en = "Source" }
+"type-anime.field.video_codec" = { zh-CN = "视频编码", en = "Video codec" }
+"type-anime.field.bit_depth" = { zh-CN = "位深", en = "Bit depth" }
+"type-anime.field.audio_codecs" = { zh-CN = "音频编码", en = "Audio codecs" }
+"type-anime.field.release_name" = { zh-CN = "发布名", en = "Release name" }
+"type-anime.field.poster" = { zh-CN = "海报", en = "Poster" }
+"type-anime.field.overview" = { zh-CN = "简介", en = "Overview" }
+"type-anime.field.genres" = { zh-CN = "类型", en = "Genres" }
+"type-anime.field.episode_count" = { zh-CN = "集数", en = "Episodes" }
+"type-anime.field.status" = { zh-CN = "播出状态", en = "Status" }
+"type-anime.field.rating" = { zh-CN = "TMDB 评分", en = "TMDB rating" }
+"type-anime.field.media.tv" = { zh-CN = "TV 动画", en = "TV" }
+"type-anime.field.media.movie" = { zh-CN = "剧场版", en = "Movie" }
+"type-anime.field.media.ova" = { zh-CN = "OVA", en = "OVA" }
+"type-anime.field.media.ona" = { zh-CN = "ONA / 网络动画", en = "ONA" }
+"type-anime.field.media.special" = { zh-CN = "特别篇", en = "Special" }
+"type-anime.field.scope.season_pack" = { zh-CN = "季包 / 合集", en = "Season pack" }
+"type-anime.field.scope.episode" = { zh-CN = "单集", en = "Episode" }
+"type-anime.field.scope.episodes" = { zh-CN = "多集", en = "Episodes" }
+"type-anime.field.scope.complete" = { zh-CN = "全集", en = "Complete series" }
+"type-anime.field.subtitle_langs.chs" = { zh-CN = "简体中文", en = "Simplified Chinese" }
+"type-anime.field.subtitle_langs.cht" = { zh-CN = "繁体中文", en = "Traditional Chinese" }
+"type-anime.field.subtitle_langs.jpn" = { zh-CN = "日文", en = "Japanese" }
+"type-anime.field.subtitle_langs.eng" = { zh-CN = "英文", en = "English" }
+"type-anime.field.subtitle_kind.softsub" = { zh-CN = "内封", en = "Soft subs" }
+"type-anime.field.subtitle_kind.hardsub" = { zh-CN = "内嵌", en = "Hardsubs" }
+"type-anime.field.subtitle_kind.external" = { zh-CN = "外挂", en = "External" }
+"type-anime.field.subtitle_kind.none" = { zh-CN = "无字幕", en = "None" }

@@ -1,0 +1,94 @@
+id = "type-tv"
+name = "资源类型：剧集"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "剧集：从发布名推断季集与范围、按季分组、上传时按文件列表检查范围、剧与季元数据补全、搜索字段"
+
+requires = ["ctx.torrents@^0.1"]
+optional_requires = ["ctx.metadata@^0.1"]
+
+[capabilities]
+sql = true
+content_type = true
+search_contributor = true
+views = ["torrent.v_torrent_fields"]
+
+[capabilities.scopes]
+"ctx.torrents" = ["write:group"]
+
+[[hooks]]
+hook = "torrent.before_upload"
+priority = 20
+
+[[subscriptions]]
+name = "on_group_created"
+event = "group.created"
+
+[[jobs]]
+name = "fetch_metadata"
+timeout_secs = 60
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.title_template]
+type = "string"
+maxLength = 300
+title = "规范标题模板"
+default = "{title} {se} {resolution} {release_type?| }{source} {hdr?| }{video_codec} {audio_codecs?| }-{release_group}"
+
+[settings_schema.properties.metadata_locale]
+type = "string"
+maxLength = 16
+title = "元数据语言"
+default = "zh-CN"
+
+[settings_schema.properties.scope_check]
+type = "boolean"
+title = "上传时按文件列表检查范围"
+default = true
+
+[settings_schema.properties.season_pack_min_ratio]
+type = "number"
+minimum = 0
+maximum = 1
+title = "季包最少集数比例（完结季）"
+default = 0.8
+
+[terms]
+"type-tv.name" = { zh-CN = "剧集", en = "TV" }
+"type-tv.field.title" = { zh-CN = "剧名", en = "Title" }
+"type-tv.field.title_zh" = { zh-CN = "中文名", en = "Chinese title" }
+"type-tv.field.original_title" = { zh-CN = "原名", en = "Original title" }
+"type-tv.field.first_air_year" = { zh-CN = "首播年份", en = "First aired" }
+"type-tv.field.tmdb_tv_id" = { zh-CN = "TMDB", en = "TMDB" }
+"type-tv.field.imdb_id" = { zh-CN = "IMDb", en = "IMDb" }
+"type-tv.field.douban_id" = { zh-CN = "豆瓣", en = "Douban" }
+"type-tv.field.scope" = { zh-CN = "范围", en = "Scope" }
+"type-tv.field.season" = { zh-CN = "季", en = "Season" }
+"type-tv.field.episode" = { zh-CN = "集", en = "Episode" }
+"type-tv.field.episode_end" = { zh-CN = "结束集", en = "Last episode" }
+"type-tv.field.ongoing" = { zh-CN = "连载中", en = "Ongoing" }
+"type-tv.field.network" = { zh-CN = "播出平台", en = "Network" }
+"type-tv.field.resolution" = { zh-CN = "分辨率", en = "Resolution" }
+"type-tv.field.source" = { zh-CN = "片源", en = "Source" }
+"type-tv.field.release_type" = { zh-CN = "发布类型", en = "Release type" }
+"type-tv.field.video_codec" = { zh-CN = "视频编码", en = "Video codec" }
+"type-tv.field.audio_codecs" = { zh-CN = "音频编码", en = "Audio codecs" }
+"type-tv.field.hdr" = { zh-CN = "HDR", en = "HDR" }
+"type-tv.field.release_group" = { zh-CN = "制作组", en = "Release group" }
+"type-tv.field.release_name" = { zh-CN = "发布名", en = "Release name" }
+"type-tv.field.poster" = { zh-CN = "海报", en = "Poster" }
+"type-tv.field.overview" = { zh-CN = "简介", en = "Overview" }
+"type-tv.field.genres" = { zh-CN = "类型", en = "Genres" }
+"type-tv.field.countries" = { zh-CN = "国家 / 地区", en = "Countries" }
+"type-tv.field.episode_count" = { zh-CN = "集数", en = "Episodes" }
+"type-tv.field.status" = { zh-CN = "播出状态", en = "Status" }
+"type-tv.field.rating" = { zh-CN = "TMDB 评分", en = "TMDB rating" }
+"type-tv.field.scope.season_pack" = { zh-CN = "季包", en = "Season pack" }
+"type-tv.field.scope.episode" = { zh-CN = "单集", en = "Episode" }
+"type-tv.field.scope.episodes" = { zh-CN = "多集", en = "Episodes" }
+"type-tv.field.scope.complete" = { zh-CN = "全集", en = "Complete series" }

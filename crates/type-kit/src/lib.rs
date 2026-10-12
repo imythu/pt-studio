@@ -1,5 +1,9 @@
 //! 资源类型插件共用工具（content-types-common §2、§5）：标题模板、字段错误、外部 ID 提取。纯函数。
 
+pub mod episodes;
+pub mod metadata;
+pub mod specs;
+
 use serde_json::{Value, json};
 
 /// 模板片段

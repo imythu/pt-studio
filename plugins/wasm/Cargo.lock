@@ -181,6 +181,7 @@ version = "0.1.0"
 name = "pt-type-kit"
 version = "0.1.0"
 dependencies = [
+ "pt-release-parser",
  "serde_json",
 ]
 
@@ -241,6 +242,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-type-anime"
+version = "0.1.0"
+dependencies = [
+ "pt-release-parser",
+ "pt-type-kit",
+ "serde",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "pt-wasm-type-generic"
 version = "0.1.0"
 dependencies = [
@@ -252,6 +264,17 @@ dependencies = [
 
 [[package]]
 name = "pt-wasm-type-movie"
+version = "0.1.0"
+dependencies = [
+ "pt-release-parser",
+ "pt-type-kit",
+ "serde",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
+name = "pt-wasm-type-tv"
 version = "0.1.0"
 dependencies = [
  "pt-release-parser",

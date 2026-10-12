@@ -28,7 +28,7 @@
 | `user.before_rename` | identity | `user_id, old_username, new_username` | allow / deny | 200 ms | deny | shop（改名卡）、moderation |
 | `user.before_title_change` | identity | `user_id, old_title?, new_title` | allow / deny / modify：`new_title` | 200 ms | deny | shop（头衔卡）、moderation、levels |
 | `invite.before_issue` | invite | `inviter_id, email_domain?` | allow / deny | 200 ms | deny | levels、ratio-policy、hnr |
-| `torrent.before_upload` | torrent（解析 .torrent 后、落库前） | `uploader_id, type_id, title, size, file_count, files_sample[]（前 200 个路径与大小）, info_hash_v1?, info_hash_v2?, fields{}, anonymous, group_id?, nfo_present` | allow / deny / modify：`title`、`fields`、`initial_status`（candidate/pending/approved）、`tags[]` | 1000 ms | deny（锁定） | type-*、moderation、levels、newbie-exam |
+| `torrent.before_upload` | torrent（解析 .torrent 后、落库前） | `uploader_id, type_id, title, size, file_count, files_sample[]（前 200 个路径与大小）, info_hash_v1?, info_hash_v2?, fields{}, anonymous, group_id?, group_fields?（已有 Group 的字段）, nfo_present` | allow / deny / modify：`title`、`fields`、`initial_status`（candidate/pending/approved）、`tags[]` | 1000 ms | deny（锁定） | type-*、moderation、levels、newbie-exam |
 | `torrent.before_update` | torrent | `torrent_id, editor_id, changes{}` | allow / deny / modify：`changes` | 500 ms | deny | type-*、moderation |
 | `torrent.before_status_change` | torrent | `torrent_id, from, to, reason` | allow / deny | 200 ms | deny | moderation |
 | `torrent.before_delete` | torrent | `torrent_id, reason` | allow / deny | 200 ms | deny | moderation、requests |

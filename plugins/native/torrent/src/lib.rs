@@ -383,8 +383,24 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
             );
         }
     }
+    // 已有 Group（catalog/hooks.md `group_id?`、`group_fields?`）：供类型插件按作品元数据检查（如季包集数）。
+    // 钩子内不能回调 ctx.torrents（重入），所以直接带上字段
+    let existing_group: Option<(i64, serde_json::Value)> = match &group_key {
+        Some(k) => {
+            let mut c = ctx.sql.conn().await?;
+            sqlx::query_as(
+                "SELECT id, fields FROM groups WHERE type_id = $1 AND group_key = $2 AND deleted_at IS NULL AND merged_into IS NULL",
+            )
+            .bind(&m.type_id)
+            .bind(k)
+            .fetch_optional(&mut *c)
+            .await?
+        }
+        None => None,
+    };
     let input = json!({
         "version": 1, "actor": ctx.invocation.actor, "uploader_id": uploader, "type_id": m.type_id,
+        "group_id": existing_group.as_ref().map(|g| g.0), "group_fields": existing_group.map(|g| g.1),
         "title": title, "size": parsed.total_size, "file_count": parsed.files.len(),
         "files_sample": parsed.files.iter().take(200).map(|f| json!({ "path": f.path.join("/"), "size": f.size })).collect::<Vec<_>>(),
         "info_hash_v1": ih_v1.as_ref().map(hex::encode), "info_hash_v2": ih_v2.as_ref().map(hex::encode),
@@ -434,12 +450,15 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
     let mut new_group = false;
     let group_id: Option<i64> = match &group_key {
         Some(k) if k.chars().count() <= 256 => {
+            // 资源类型可给出规范作品标题（如剧集“剧名 第 N 季”）
             let gtitle = fields
-                .get("title")
+                .get("group_title")
+                .or_else(|| fields.get("title"))
                 .and_then(serde_json::Value::as_str)
                 .map_or_else(|| title.clone(), |s| s.chars().take(300).collect());
             let year = fields
                 .get("year")
+                .or_else(|| fields.get("first_air_year"))
                 .and_then(serde_json::Value::as_i64)
                 .and_then(|y| i32::try_from(y).ok())
                 .filter(|y| (1800..=2200).contains(y));
@@ -922,11 +941,13 @@ async fn http_update(
                 group_id = match &key {
                     Some(k) => {
                         let gtitle = fields
-                            .get("title")
+                            .get("group_title")
+                            .or_else(|| fields.get("title"))
                             .and_then(serde_json::Value::as_str)
                             .map_or_else(|| title.clone(), str::to_owned);
                         let year = fields
                             .get("year")
+                            .or_else(|| fields.get("first_air_year"))
                             .and_then(serde_json::Value::as_i64)
                             .and_then(|y| i32::try_from(y).ok());
                         let r: (i64, bool) = sqlx::query_as(

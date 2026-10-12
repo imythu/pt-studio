@@ -92,5 +92,12 @@
 | `metadata-tmdb.id_invalid` | 422 | metadata-tmdb | ID 格式错误 |
 | `metadata-tmdb.not_found` | 404 | metadata-tmdb | TMDB 条目不存在 |
 | `metadata-tmdb.upstream_error` | 502 | metadata-tmdb | TMDB 上游错误 |
+| `type-tv.scope_invalid` | 422 | type-tv | 范围（单集 / 多集 / 季包 / 全集）与季集字段组合不合法 |
+| `type-tv.external_id_required` | 422 | type-tv | 标题与外部 ID 至少填一项 |
+| `type-tv.scope_mismatch` | 422 | type-tv | 种子文件列表与声明的范围不符（集号越界、季包缺集等） |
+| `type-anime.scope_invalid` | 422 | type-anime | 范围与季集字段组合不合法 |
+| `type-anime.external_id_required` | 422 | type-anime | 标题与外部 ID 至少填一项 |
+| `type-anime.subtitle_invalid` | 422 | type-anime | 字幕语言 / 方式无法识别 |
+| `type-anime.scope_mismatch` | 422 | type-anime | 种子文件列表与声明的范围不符 |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `llm-claude.upstream_error`、`llm-openai-compat.upstream_error` | 502 | llm-* | 模型服务出错 |

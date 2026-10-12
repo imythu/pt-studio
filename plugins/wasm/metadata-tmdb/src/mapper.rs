@@ -84,7 +84,8 @@ pub fn map(kind: &str, r: &Value, locale: &str) -> Value {
     let movie = kind == "movie";
     let title = s(&r[if movie { "title" } else { "name" }]);
     let original = s(&r[if movie { "original_title" } else { "original_name" }]);
-    let date = s(&r[if movie { "release_date" } else { "first_air_date" }]);
+    // 季（/tv/{id}/season/{n}）用 air_date
+    let date = s(&r[if movie { "release_date" } else { "first_air_date" }]).or_else(|| s(&r["air_date"]));
     let year = date
         .as_deref()
         .and_then(|d| d.get(..4))
@@ -172,7 +173,8 @@ pub fn map(kind: &str, r: &Value, locale: &str) -> Value {
         "kind": kind,
         "titles": { "original": original, "localized": localized, "aliases": [] },
         "year": year, "release_date": date, "ids": ids, "genres": genres, "countries": countries, "languages": languages,
-        "people": people, "runtime_min": runtime, "episode_count": r["number_of_episodes"].as_i64(),
+        "people": people, "runtime_min": runtime, "episode_count": r["number_of_episodes"].as_i64().or_else(|| r["episodes"].as_array().map(|a| a.len() as i64)),
+        "season": r["season_number"].as_i64(),
         "ratings": r["vote_average"].as_f64().map_or(json!({}), |v| json!({ "tmdb": { "value": v, "votes": r["vote_count"].as_i64().unwrap_or(0) } })),
         "images": {}, "overview": overview, "extra": extra,
         "attribution": { "source": "tmdb", "url": format!("https://www.themoviedb.org/{kind}/{id}"), "license_note": LICENSE_NOTE },

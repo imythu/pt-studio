@@ -123,7 +123,7 @@ export function TypeBadge({ typeId }: { typeId?: string }) {
 }
 
 /** 由元数据面板展示的字段，不在通用字段表中重复 */
-const HIDDEN_FIELDS = ['release_name', 'poster', 'overview'];
+const HIDDEN_FIELDS = ['release_name', 'poster', 'overview', 'group_title'];
 
 /** 作品元数据：海报、简介、类型、评分（来自元数据插件写入的 Group 字段） */
 export function GroupMeta({ fields }: { fields: Record<string, unknown> }) {
@@ -173,12 +173,20 @@ export function FieldsView({ typeId, fields }: { typeId: string; fields: Record<
     const v = term ? t(`term:${term}`) : null;
     return v && v !== term ? v : (s?.title ?? k);
   };
+  // 枚举值的术语：`<字段术语>.<值>`（与 schema-form 一致），没有则显示原值
+  const value = (k: string, x: unknown) => {
+    const term = props[k]?.['x-pt-label-term'];
+    if (!term) return String(x);
+    const key = `${term}.${String(x)}`;
+    const v = t(`term:${key}`);
+    return v && v !== key ? v : String(x);
+  };
   return (
     <dl className="fields">
       {rows.map(([k, v]) => (
         <div key={k}>
           <dt>{label(k)}</dt>
-          <dd>{Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? '✓' : '✗') : String(v)}</dd>
+          <dd>{Array.isArray(v) ? v.map((x) => value(k, x)).join(', ') : typeof v === 'boolean' ? (v ? '✓' : '✗') : value(k, v)}</dd>
         </div>
       ))}
     </dl>
