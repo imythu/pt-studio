@@ -41,6 +41,27 @@ fn main() {
     }
     out.push_str("];\n");
 
+    // 前端插槽（catalog/slots.md §2）
+    let slots_md = root.join("slots.md");
+    println!("cargo:rerun-if-changed={}", slots_md.display());
+    let slots = fs::read_to_string(&slots_md).unwrap_or_default();
+    let section = slots
+        .split("## 2.")
+        .nth(1)
+        .unwrap_or("")
+        .split("\n## ")
+        .next()
+        .unwrap_or("");
+    out.push_str("pub static SLOTS: &[&str] = &[\n");
+    for line in section.lines() {
+        if let Some(row) = line.strip_prefix("| `")
+            && let Some((name, _)) = row.split_once('`')
+        {
+            let _ = writeln!(out, "    {name:?},");
+        }
+    }
+    out.push_str("];\n");
+
     // 错误码 → HTTP 状态（catalog/error-codes.md）
     let codes_md = root.join("error-codes.md");
     println!("cargo:rerun-if-changed={}", codes_md.display());

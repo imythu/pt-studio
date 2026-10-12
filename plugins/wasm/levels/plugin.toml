@@ -103,6 +103,12 @@ table = "history"
 by = "range_month"
 premake = 3
 
+[frontend]
+entry = "index.js"
+slots = ["user.profile.stats"]
+routes = []
+settings_ui = "schema"
+
 [terms]
 "levels.class.10.name" = { zh-CN = "农民", en = "Peasant" }
 "levels.class.20.name" = { zh-CN = "用户", en = "User" }

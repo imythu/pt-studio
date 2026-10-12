@@ -139,6 +139,18 @@ fn static_checks(cfg: &SiteConfig, specs: &[PluginSpec]) -> Vec<LoadError> {
                 None => {}
             }
         }
+        for slot in m.frontend.iter().flat_map(|f| &f.slots) {
+            if !catalog::SLOTS.contains(&slot.as_str())
+                && cfg.kernel.strict_catalog
+                && !m.id.starts_with("x-")
+            {
+                errs.push(LoadError::new(
+                    "E-CATALOG",
+                    &m.id,
+                    format!("frontend slot `{slot}` is not in catalog/slots.md"),
+                ));
+            }
+        }
         for h in &m.hooks {
             if catalog::hook_point(&h.hook).is_none() {
                 errs.push(LoadError::new(
@@ -642,7 +654,7 @@ async fn register_permissions(sh: &Shared) -> Result<(), StartError> {
             plugin: provider.clone(),
             error: PluginError::internal("ctx.rbac has wrong type"),
         })?;
-    let perms: Vec<PermissionDecl> = sh
+    let mut perms: Vec<PermissionDecl> = sh
         .plugins
         .values()
         .flat_map(|rt| {
@@ -654,6 +666,19 @@ async fn register_permissions(sh: &Shared) -> Result<(), StartError> {
             })
         })
         .collect();
+    perms.extend(
+        crate::frontend::KERNEL_PERMISSIONS
+            .iter()
+            .map(|(name, role)| PermissionDecl {
+                plugin_id: "kernel".into(),
+                name: (*name).into(),
+                description_term: Some(format!(
+                    "kernel.perm.{}",
+                    name.trim_start_matches("kernel.").replace('.', "_")
+                )),
+                default_roles: vec![(*role).into()],
+            }),
+    );
     let err = |e| StartError::Init {
         plugin: provider.clone(),
         error: e,

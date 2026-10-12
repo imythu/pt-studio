@@ -67,6 +67,9 @@ pub struct Manifest {
     pub terms: BTreeMap<String, Json>,
     #[serde(default)]
     pub frontend: Option<FrontendDecl>,
+    /// 运行时设置的 JSON Schema（内联，供后台 schema 表单；`settings_ui = "schema"`）
+    #[serde(default)]
+    pub settings_schema: Option<Json>,
     #[serde(default)]
     pub mcp: Option<McpDecl>,
     #[serde(default)]

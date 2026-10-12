@@ -8,6 +8,7 @@
 | PostgreSQL | ≥ 16（开发用 17） | 需要 `GRANT … WITH INHERIT FALSE, SET TRUE`（PG16+） |
 | Redis | ≥ 7.4（开发用 8.0） | 需要 `HEXPIRE` 等命令；消费者使用 Streams |
 | Meilisearch | ≥ 1.13（CE） | search-meilisearch；只监听内网 |
+| Node.js | ≥ 20（开发用 24） | 前端构建（`web/`，npm workspaces + esbuild）；浏览器端到端用 Playwright + Chromium |
 
 ### 1.1 初始化数据库（一次）
 
@@ -35,6 +36,15 @@ cargo run -p pt-server -- --config site.toml serve
 
 最小 `site.toml` 见 `crates/server/tests/common/mod.rs` 中的 `config()`。
 
+前端：
+
+```bash
+cd web && npm ci && npm run build      # 输出 web/dist（index.html、static/、plugins/<id>/）
+npm run typecheck && npm test          # tsc + vitest
+```
+
+`site.toml` 中设置 `[http] web_dir = "web/dist"` 后，内核在非 `/api` 路径上提供 SPA（每次响应生成 CSP nonce 写入 import map）、`/static/*` 与插件前端 `/static/plugins/<id>/<version>/*`。
+
 ## 3. 测试
 
 ```bash
@@ -42,9 +52,9 @@ cargo clippy --workspace --all-targets      # 0 警告
 cargo test --workspace                      # 单元测试 + 端到端测试
 ```
 
-端到端测试（`crates/server/tests/`）连接真实 PostgreSQL 与 Redis，默认地址对应 §1.2；可用环境变量 `PT_TEST_SUPERUSER_URL`、`PT_TEST_ADMIN_URL`、`PT_TEST_GATEWAY_URL`、`PT_TEST_REDIS_URL`（建议用独立 DB 号，测试会 `FLUSHDB`）、`PT_TEST_BLOB_DIR`、`PT_TEST_MEILI_URL` / `PT_TEST_MEILI_KEY` 覆盖。Meilisearch 不可达时 `e2e_search` 跳过（输出 `SKIPPED`）。测试会删除并重建测试库中的 `kernel`、`identity`、`torrent` 等 schema。
+端到端测试（`crates/server/tests/`）连接真实 PostgreSQL 与 Redis，默认地址对应 §1.2；可用环境变量 `PT_TEST_SUPERUSER_URL`、`PT_TEST_ADMIN_URL`、`PT_TEST_GATEWAY_URL`、`PT_TEST_REDIS_URL`（建议用独立 DB 号，测试会 `FLUSHDB`）、`PT_TEST_BLOB_DIR`、`PT_TEST_MEILI_URL` / `PT_TEST_MEILI_KEY` 覆盖。Meilisearch 不可达时 `e2e_search` 跳过（输出 `SKIPPED`）；缺少 node 或 `web/node_modules/playwright` 时 `e2e_web` 跳过（Chromium 用 Playwright 缓存，可用 `PT_CHROME` 指定）。测试会删除并重建测试库中的 `kernel`、`identity`、`torrent` 等 schema。
 
-## 4. 实现状态（P1 内核骨架 + P2 记账 + P3 WASM 宿主 + P4 部分插件，2026-10-07）
+## 4. 实现状态（P1 内核骨架 + P2 记账 + P3 WASM 宿主 + P4 扩展插件 + P5 前端，2026-10-12）
 
 | 模块 | 已实现 | 未实现 / 简化（后续迭代） |
 |---|---|---|
@@ -62,6 +72,8 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | promotion（WASM） | 促销类型、单种促销（替换 / 结束）、自动规则（谓词与优先级，`torrent.created` 及手动促销结束后重新评估）、全站活动、个人促销卡（发放 / 使用、冗余检查）、同步到 accounting 倍率规则（对账重试）、到期 cron、展示状态、`ctx.promotions` | 促销申请审核、促销统计、自定义类型的前端展示 |
 | levels（WASM） | NexusPHP 预设等级（农民为降级落点，用户 0.6 / 0.5 滞回）、角色同步（`levels:class_<id>` 绑定到等级）、指标（注册天数、上传 / 下载 / 分享率、做种时长、平均做种时长、做种体积、发布数）、评估（覆盖 > 升级 one_step / highest > 保护期 > 保级 / 警告 / 到期降级）、增量评估（`traffic.settled` 标记，只升级）与每日全量评估、`invite.before_issue`、手动锁定 / 解锁、保号、`ctx.levels`、`GET /v1/me` 进度 | 等级编辑接口、模拟评估、邀请奖励、不活跃处理、VIP / 荣誉覆盖来源、等级权限默认配置 |
 | invite（WASM） | 码派生（HMAC、只存哈希、Crockford 容错）、个人 / 系统 / 活动码签发（资格检查、`invite.before_issue`、FIFO 消耗额度、`request_id` 重放）、注册钩子预留 + `user.registered` 确认（超额兑换标记、邀请树边与闭包表）、额度批次与流水（初始、晋升、周期、管理员、服务发放 / 扣减、到期落账）、撤销 / 过期（返还原批次）、预留释放、邀请树 / 上游 / 统计、发邀权暂停、连坐（封禁触发：扣额度、暂停、撤销未用、限制邀请人、复核；解封撤销）、`ctx.invites`、HTTP | 批量发放、整树操作、日统计与问题邀请人评分、对账、MCP、连坐通知（等 notify）、`anticheat.case_resolved` 触发、`user.deleted` 处理、链接再次显示 |
+| 内核 · 前端支持 | 前端清单（插件入口、插槽、路由、settings_ui）、术语快照（清单 `[terms]` 合并、按语言回退）、插件设置读写（`kernel.settings.manage`，乐观版本、审计）、SPA 与静态文件（CSP nonce 注入 import map、哈希文件长期缓存、路径穿越拒绝）、插件前端静态路径、插槽登记检查（`catalog/slots.md`） | client-errors 上报、术语版本头、OpenAPI 聚合、CORS |
+| web（P5） | `@pt-studio/sdk`（CSRF 双提交、幂等键、problem+json → ApiError）、`terms`（术语 / 文案 / 插值）、`slots`（清单驱动的懒加载、list / single / tabs / columns、错误边界、PluginApi、批量合并、插件页面与自定义设置）、`ui-kit`（基础组件、Toast、`UserContent` 唯一 HTML 出口）、`schema-form`（JSON Schema 表单与无 eval 校验）、外壳与页面（首页、登录 / 注册、种子搜索与筛选面板、详情、发布、个人页、后台插件列表与设置、插件路由）、主题令牌（亮 / 暗）、插件前端：levels、bonus、hnr、promotion、invite | Group 页、个人设置、管理用户 / 种子页、Markdown 编辑与预览、外部 ID 拉取、虚拟滚动、i18n 资源包按需加载、SDK 由 OpenAPI 生成 |
 | hnr（WASM） | `traffic.snatch_completed` 建档（豁免谓词规则：体积、本人发布、部分下载、促销、等级、注册天数；重下处理）、分层评估（临期每 10 分钟，其余每小时按用户哈希 1/6 轮转；做种时长或单种分享率达标，分母取 max(下载量, 体积)）、预警、计入与有效计数、越线经 `ctx.users.apply_restriction` 限制下载并在回落后解除（员工受保护时记录跳过）、每日过期重算、免除、种子删除 / 下架豁免、`torrent.before_download` / `invite.before_issue`、`ctx.hnr`、HTTP | 规则编辑接口、批量免除、盒子判定（等 seedbox）、预警通知（等 notify）、MCP、用户删除处理 |
 | search-meilisearch | 贡献者 schema 合并（命名规则、保留 / 敏感字段、冲突记录）与设置生成、事件 → `pending_ops` → 延迟任务批量写入（文档哈希去重、删除优先、非拥有者失败降级）、发布名解析（`rel_*`）与标题规范化、swap 重建状态机（首次建索引、手动重建、双写与重放、文档数校验、取消）、查询（可见性基线、`search.before_query` 只追加且解析校验、结构化过滤、排序、facet、折叠、游标、高亮、Redis 结果缓存与代数失效）、联想、schema 视图、`ctx.search`、失败任务回收 | 语义 / 混合搜索、tenant token、多实例（replicas / network）、做种数部分更新、同义词管理与术语派生、一致性巡检、MCP、扩展索引注册、`users_admin` 等其他标准索引、熔断 |
 | torrent | 严格 bencode、v1 / v2 / hybrid 解析、规范化（private、source、白名单）、上传（钩子、重复检测）、详情、文件列表、下载（passkey 注入、钩子、下载记录）、`torrents` 索引搜索贡献（可见性映射） | 资源类型插件接入、Group、状态机、编辑与替换、签名链接、批量下载、NFO |
@@ -96,6 +108,10 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 - **hnr 种子标签**：豁免谓词的 `tags` 字段在 torrent 提供标签前恒为空数组；`is_seedbox` 恒为 false。
 - **钩子超时倍数**：`[kernel] hook_timeout_factor`（只在 dev 模式生效）放大钩子目录给出的超时，供调试构建与并行测试使用；生产保持目录预算。
 - **已知限制：嵌套调用占用连接**：服务调用与钩子处理者各自开独立工作单元（各占一个连接），调用方的连接在等待期间不释放；连接池须不小于“并发请求 × 嵌套深度”（测试配置用 20）。后续考虑同插件链路复用或为嵌套调用预留连接。
+- **前端选型调整**：构建用 esbuild（而非 Vite；内核直接提供构建产物，不需要开发服务器）；路由用 React Router 7（而非 TanStack Router）；包管理用 npm workspaces（而非 pnpm）；schema 表单校验用自写的无 eval 子集校验器（Ajv 依赖代码生成，严格 CSP 不允许 `unsafe-eval`）。
+- **共享依赖打包**：React / ReactDOM / client / jsx-runtime 打进一个 `react-all` 模块，各说明符为 ESM 门面再导出（CJS 互操作下保持单实例）；`@tanstack/react-query`、`react-router` 与 `@pt-studio/*` 各自为独立模块；均写入 import map，插件与宿主把它们标记为 external。
+- **插件前端位置**：源码在 `web/plugins/<id>/`，构建到 `web/dist/plugins/<id>/index.js`；清单 `[frontend] entry = "index.js"`，URL 为 `/static/plugins/<id>/<version>/index.js`（版本进路径，长期缓存）。
+- **插件设置 schema**：清单内联 `[settings_schema]`（hnr 已提供），后台按 schema 生成表单；未提供时退化为 JSON 编辑。
 - **手动运行 cron**：`Kernel::run_job_now` 在任务正在运行（如启动时 catch_up）时最多等待 30 s。
 
 ## 6. 进度记录
@@ -110,3 +126,4 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | 2026-10-07 | P4：search-meilisearch（Native）、内核搜索贡献者调用入口、torrent 搜索贡献 |
 | 2026-10-07 | P4：invite（WASM）、identity 限制与 `user.status_changed` |
 | 2026-10-07 | P4：hnr（WASM）；P4 计划中的插件全部完成 |
+| 2026-10-12 | P5：Web 前端（sdk / terms / slots / ui-kit / schema-form、外壳与页面、5 个插件前端）、内核前端支持、浏览器端到端测试 |

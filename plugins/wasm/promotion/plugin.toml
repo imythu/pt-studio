@@ -121,6 +121,12 @@ table = "history"
 by = "range_month"
 premake = 3
 
+[frontend]
+entry = "index.js"
+slots = ["torrent.list.row_badges", "torrent.detail.header"]
+routes = []
+settings_ui = "schema"
+
 [terms]
 "promotion.free" = { zh-CN = "免费", en = "Freeleech" }
 "promotion.double_up" = { zh-CN = "2x 上传", en = "2x Upload" }

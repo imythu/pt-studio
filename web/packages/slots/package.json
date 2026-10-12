@@ -1,0 +1,1 @@
+{ "name": "@pt-studio/slots", "version": "0.1.0", "private": true, "type": "module", "main": "src/index.tsx", "license": "MIT OR Apache-2.0" }

@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod cluster;
 pub mod config;
 pub mod events;
+pub mod frontend;
 pub mod gateway;
 pub mod kernel;
 pub mod limits;

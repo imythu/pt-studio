@@ -1,0 +1,45 @@
+/* 主题令牌（web LLD §6）：主题包只替换这些变量 */
+:root {
+  --pt-color-bg: #ffffff;
+  --pt-color-surface: #f7f7f8;
+  --pt-color-border: #e4e4e7;
+  --pt-color-fg: #18181b;
+  --pt-color-muted: #6b7280;
+  --pt-color-primary: #2563eb;
+  --pt-color-primary-fg: #ffffff;
+  --pt-color-danger: #dc2626;
+  --pt-color-success: #16a34a;
+  --pt-promo-free: #16a34a;
+  --pt-promo-double: #9333ea;
+  --pt-radius: 6px;
+  --pt-space-1: 4px;
+  --pt-space-2: 8px;
+  --pt-space-3: 12px;
+  --pt-space-4: 16px;
+  --pt-space-6: 24px;
+  --pt-font: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --pt-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --pt-color-bg: #0f1115;
+  --pt-color-surface: #171a21;
+  --pt-color-border: #2a2f3a;
+  --pt-color-fg: #e5e7eb;
+  --pt-color-muted: #9ca3af;
+  --pt-color-primary: #60a5fa;
+  --pt-color-primary-fg: #0f1115;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pt-color-bg: #0f1115;
+    --pt-color-surface: #171a21;
+    --pt-color-border: #2a2f3a;
+    --pt-color-fg: #e5e7eb;
+    --pt-color-muted: #9ca3af;
+    --pt-color-primary: #60a5fa;
+    --pt-color-primary-fg: #0f1115;
+    color-scheme: dark;
+  }
+}

@@ -122,6 +122,9 @@ pub struct HttpSection {
     pub trusted_proxies: Vec<String>,
     #[serde(default)]
     pub rate_limit: RateLimitSection,
+    /// 前端构建目录（`web/dist`）：SPA、`static/`、`plugins/<id>/`；不设置时不提供前端
+    #[serde(default)]
+    pub web_dir: Option<String>,
 }
 
 /// `[http.rate_limit]`：全站默认规则，与路由规则叠加
@@ -151,6 +154,7 @@ impl Default for HttpSection {
             max_body_kb: default_body_kb(),
             request_timeout_ms: default_timeout(),
             trusted_proxies: vec![],
+            web_dir: None,
         }
     }
 }

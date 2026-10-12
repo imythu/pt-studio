@@ -118,6 +118,62 @@ table = "records"
 by = "range_month"
 premake = 3
 
+[frontend]
+entry = "index.js"
+slots = ["user.profile.stats", "torrent.detail.header"]
+routes = []
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+additionalProperties = true
+
+[settings_schema.properties.window_days]
+type = "integer"
+minimum = 1
+maximum = 60
+default = 14
+title = "考核期（天）"
+
+[settings_schema.properties.min_seed_hours]
+type = "integer"
+minimum = 0
+maximum = 720
+default = 72
+title = "最低做种时长（小时）"
+
+[settings_schema.properties.min_torrent_ratio]
+type = "number"
+minimum = 0
+default = 1.0
+title = "单种分享率（0 = 不使用）"
+
+[settings_schema.properties.max_hnr]
+type = "integer"
+minimum = 1
+maximum = 1000
+default = 5
+title = "计入上限（达到后限制下载）"
+
+[settings_schema.properties.invite_block_at]
+type = "integer"
+minimum = 0
+default = 1
+title = "计入达到该数时禁止发邀（0 = 不限制）"
+
+[settings_schema.properties.expire_days]
+type = "integer"
+minimum = 1
+maximum = 365
+default = 90
+title = "计入有效期（天）"
+
+[settings_schema.properties.redownload_mode]
+type = "string"
+enum = ["ignore", "new_record"]
+default = "ignore"
+title = "重新下载已计入的种子"
+
 [terms]
 "hnr.name" = { zh-CN = "H&R", en = "H&R" }
 "hnr.active" = { zh-CN = "考核中", en = "In progress" }

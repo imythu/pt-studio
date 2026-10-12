@@ -56,6 +56,12 @@ memory_mb = 64
 max_concurrency = 32
 default_timeout_ms = 2000
 
+[frontend]
+entry = "index.js"
+slots = ["user.profile.stats"]
+routes = []
+settings_ui = "schema"
+
 [terms]
 "bonus.currency" = { zh-CN = "魔力值", en = "Bonus Points" }
 "bonus.seed_points" = { zh-CN = "做种积分", en = "Seeding Points" }

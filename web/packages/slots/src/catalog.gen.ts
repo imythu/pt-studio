@@ -1,0 +1,38 @@
+// 由 tools/gen-slots.mjs 从 docs/platform/catalog/slots.md 生成，请勿手改。
+export const SLOT_KINDS = {
+  'app.head': 'list',
+  'nav.main': 'list',
+  'nav.user_menu': 'list',
+  'nav.admin': 'list',
+  'home.announcements': 'list',
+  'home.widgets': 'list',
+  'user.profile.header': 'list',
+  'user.profile.stats': 'list',
+  'user.profile.badges': 'list',
+  'user.profile.tabs': 'tabs',
+  'user.settings.tabs': 'tabs',
+  'torrent.list.row_badges': 'list',
+  'torrent.list.columns': 'columns',
+  'torrent.list.filters': 'list',
+  'torrent.detail.header': 'list',
+  'torrent.detail.info': 'list',
+  'torrent.detail.sidebar': 'list',
+  'torrent.detail.actions': 'list',
+  'torrent.detail.tabs': 'tabs',
+  'torrent.upload.type_form': 'single',
+  'torrent.upload.extra': 'list',
+  'group.detail.header': 'list',
+  'group.detail.tabs': 'tabs',
+  'request.detail.sidebar': 'list',
+  'forum.post.footer': 'list',
+  'messages.compose.extra': 'list',
+  'admin.dashboard.widgets': 'list',
+  'admin.user.tabs': 'tabs',
+  'admin.torrent.tabs': 'tabs',
+  'user.name.decorations': 'list',
+  'auth.register.form_extra': 'list',
+  'auth.login.extra': 'list',
+} as const;
+
+export type SlotName = keyof typeof SLOT_KINDS;
+export type SlotKind = (typeof SLOT_KINDS)[SlotName];

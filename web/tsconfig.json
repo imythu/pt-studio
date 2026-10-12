@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@pt-studio/sdk": ["packages/sdk/src/index.ts"],
+      "@pt-studio/terms": ["packages/terms/src/index.ts"],
+      "@pt-studio/slots": ["packages/slots/src/index.tsx"],
+      "@pt-studio/ui-kit": ["packages/ui-kit/src/index.tsx"],
+      "@pt-studio/schema-form": ["packages/schema-form/src/index.tsx"]
+    }
+  },
+  "include": ["packages/*/src", "app/src", "plugins/*/src", "tools/*.d.ts"]
+}

@@ -61,7 +61,12 @@ pub fn router(shared: Arc<Shared>) -> Router {
             .layer(DefaultBodyLimit::max(max_kb * 1024));
         app = app.nest(&format!("/api/p/{id}"), r);
     }
-    app.fallback(|| async { PluginError::not_found("no such route") })
+    let sh = shared.clone();
+    app.merge(crate::frontend::routes(shared))
+        .fallback(move |method: Method, uri: axum::http::Uri| {
+            let sh = sh.clone();
+            async move { crate::frontend::fallback(sh, method, uri).await }
+        })
 }
 
 async fn readyz(State(sh): State<Arc<Shared>>) -> Response {
@@ -84,7 +89,7 @@ async fn list_plugins(State(sh): State<Arc<Shared>>) -> Response {
     AxJson(json!({ "items": items })).into_response()
 }
 
-fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub(crate) fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get_all(header::COOKIE)
         .iter()
@@ -96,7 +101,7 @@ fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         })
 }
 
-fn credential(headers: &HeaderMap) -> Option<Credential> {
+pub(crate) fn credential(headers: &HeaderMap) -> Option<Credential> {
     if let Some(auth) = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok())
         && let Some(tok) = auth.strip_prefix("Bearer ")
     {
@@ -105,7 +110,7 @@ fn credential(headers: &HeaderMap) -> Option<Credential> {
     cookie(headers, SESSION_COOKIE).map(|s| Credential::Session(s.to_owned()))
 }
 
-fn locale(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn locale(headers: &HeaderMap) -> Option<String> {
     let v = headers.get(header::ACCEPT_LANGUAGE)?.to_str().ok()?;
     let first = v.split(',').next()?.split(';').next()?.trim();
     (!first.is_empty() && first.len() <= 16).then(|| first.to_owned())
@@ -170,7 +175,7 @@ fn origin_of(url: &str) -> &str {
 }
 
 /// CSRF（§8.2 第 5 步）：仅会话凭据的非安全方法。
-fn csrf_ok(headers: &HeaderMap, base_url: &str) -> bool {
+pub(crate) fn csrf_ok(headers: &HeaderMap, base_url: &str) -> bool {
     let token = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
     let cookie_token = cookie(headers, CSRF_COOKIE);
     let tokens_ok = matches!((token, cookie_token), (Some(a), Some(b)) if !a.is_empty() && a == b);

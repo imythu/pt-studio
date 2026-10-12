@@ -277,6 +277,12 @@ default_roles = ["moderator"]
 [database]
 migrations = "migrations"
 
+[frontend]
+entry = "index.js"
+slots = ["auth.register.form_extra", "nav.user_menu"]
+routes = ["/p/invite/*"]
+settings_ui = "schema"
+
 [terms]
 "invite.name" = { zh-CN = "邀请", en = "Invites" }
 "invite.code" = { zh-CN = "邀请码", en = "Invite code" }
