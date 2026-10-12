@@ -101,6 +101,9 @@ pub struct Capabilities {
     pub sensitive_optional: Vec<String>,
     #[serde(default)]
     pub search_contributor: bool,
+    /// 实现 `content-type` 导出（资源类型插件；经 `ctx.content_types` 聚合调用）
+    #[serde(default)]
+    pub content_type: bool,
     #[serde(default)]
     pub scopes: BTreeMap<String, Vec<String>>,
 }

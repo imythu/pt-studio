@@ -1,6 +1,4 @@
-//! 发布名预处理（LLD §1.7）：标题规范化与发布名解析（纯函数）。
-
-use serde_json::{Value, json};
+//! 发布名解析与标题规范化（纯函数，无依赖）：search-meilisearch LLD §1.7 与资源类型共用设计 §3 共用。
 
 /// 解析结果，写入文档的 `rel_*` 字段
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -12,20 +10,11 @@ pub struct ReleaseInfo {
     pub hdr: Vec<String>,
     pub group: Option<String>,
     pub year: Option<i64>,
-}
-
-impl ReleaseInfo {
-    pub fn to_fields(&self) -> Vec<(&'static str, Value)> {
-        vec![
-            ("rel_resolution", json!(self.resolution)),
-            ("rel_source", json!(self.source)),
-            ("rel_video_codec", json!(self.video_codec)),
-            ("rel_audio_codec", json!(self.audio_codec)),
-            ("rel_hdr", json!(self.hdr)),
-            ("rel_group", json!(self.group)),
-            ("rel_year", json!(self.year)),
-        ]
-    }
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
+    pub episode_end: Option<i64>,
+    /// REPACK、PROPER、INTERNAL、3D、HYBRID
+    pub flags: Vec<String>,
 }
 
 fn is_cjk(c: char) -> bool {
@@ -175,6 +164,25 @@ pub fn parse_release(s: &str) -> ReleaseInfo {
             ("hlg", _) => push_unique(&mut r.hdr, "hlg"),
             _ => {}
         }
+        if let Some((s, e, e2)) = season_episode(tok) {
+            r.season = Some(s);
+            r.episode = e;
+            r.episode_end = e2.or(r.episode_end);
+        } else if r.season.is_some()
+            && r.episode.is_some()
+            && r.episode_end.is_none()
+            && let Some(e) = tok.strip_prefix('e').and_then(|n| n.parse().ok())
+            && i > 0
+        {
+            // S01E02-E03 中的 `e03`
+            r.episode_end = Some(e);
+        }
+        match tok.as_str() {
+            "repack" | "proper" | "internal" | "3d" | "hybrid" => {
+                push_unique(&mut r.flags, &tok.to_uppercase())
+            }
+            _ => {}
+        }
         if tok.len() == 4
             && (tok.starts_with("19") || tok.starts_with("20"))
             && tok.chars().all(|c| c.is_ascii_digit())
@@ -186,7 +194,100 @@ pub fn parse_release(s: &str) -> ReleaseInfo {
     if remux {
         r.source = Some("remux".into());
     }
+    if r.season.is_none()
+        && let Some(s) = chinese_number_after(s, "第", "季")
+    {
+        r.season = Some(s);
+    }
+    if r.episode.is_none()
+        && let Some(e) = chinese_number_after(s, "第", "集")
+    {
+        r.episode = Some(e);
+    }
     r
+}
+
+/// `s01e02`、`s01`、`s01e02e03` → (季, 集, 结束集)
+fn season_episode(tok: &str) -> Option<(i64, Option<i64>, Option<i64>)> {
+    let rest = tok.strip_prefix('s')?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() || digits.len() > 3 {
+        return None;
+    }
+    let season = digits.parse().ok()?;
+    let after = &rest[digits.len()..];
+    if after.is_empty() {
+        return Some((season, None, None));
+    }
+    let mut eps = after.split('e').filter(|x| !x.is_empty());
+    if !after.starts_with('e') {
+        return None;
+    }
+    let e1 = eps.next()?.parse().ok()?;
+    let e2 = eps.next().and_then(|x| x.parse().ok());
+    Some((season, Some(e1), e2))
+}
+
+fn cn_digit(c: char) -> Option<i64> {
+    "零一二三四五六七八九"
+        .chars()
+        .position(|x| x == c)
+        .map(|p| p as i64)
+}
+
+/// `第二季`、`第12集`、`第十一季`
+fn chinese_number_after(s: &str, pre: &str, post: &str) -> Option<i64> {
+    let start = s.find(pre)? + pre.len();
+    let end = start + s[start..].find(post)?;
+    let n = &s[start..end];
+    if let Ok(v) = n.parse() {
+        return Some(v);
+    }
+    let cs: Vec<char> = n.chars().collect();
+    match cs.as_slice() {
+        [c] if *c == '十' => Some(10),
+        [c] => cn_digit(*c),
+        ['十', u] => Some(10 + cn_digit(*u)?),
+        [t, '十'] => Some(cn_digit(*t)? * 10),
+        [t, '十', u] => Some(cn_digit(*t)? * 10 + cn_digit(*u)?),
+        _ => None,
+    }
+}
+
+/// 发布名中的作品标题：年份 / 季集 / 规格词之前的部分（`.`、`_` 视为空格）
+pub fn parse_title(s: &str) -> Option<String> {
+    let norm = normalize_title(s);
+    let mut words = Vec::new();
+    for w in norm.split(' ') {
+        let lw = w.to_lowercase();
+        let is_year = lw.len() == 4
+            && (lw.starts_with("19") || lw.starts_with("20"))
+            && lw.chars().all(|c| c.is_ascii_digit());
+        let stop = is_year
+            || season_episode(&lw).is_some()
+            || matches!(
+                lw.as_str(),
+                "2160p"
+                    | "1080p"
+                    | "1080i"
+                    | "720p"
+                    | "576p"
+                    | "480p"
+                    | "4k"
+                    | "uhd"
+                    | "bluray"
+                    | "web-dl"
+                    | "webrip"
+                    | "hdtv"
+                    | "remux"
+            );
+        if stop && !words.is_empty() {
+            break;
+        }
+        words.push(w);
+    }
+    let t = words.join(" ").trim().to_owned();
+    (!t.is_empty()).then_some(t)
 }
 
 #[cfg(test)]
@@ -244,6 +345,25 @@ mod tests {
         assert_eq!(r.source.as_deref(), Some("remux"));
         assert_eq!(r.audio_codec, v(&["dts_hd_ma"]));
         assert_eq!(parse_release("Movie.2020.WEB-DL").group, None);
+    }
+
+    #[test]
+    fn episodes_and_titles() {
+        let r = parse_release("The.Show.S01E02-E03.1080p.WEB-DL.REPACK.H.264-GRP");
+        assert_eq!((r.season, r.episode, r.episode_end), (Some(1), Some(2), Some(3)));
+        assert_eq!(r.flags, v(&["REPACK"]));
+        assert_eq!(parse_release("某剧.第二季.第12集.1080p").season, Some(2));
+        assert_eq!(parse_release("某剧.第十一季").season, Some(11));
+        assert_eq!(parse_release("某剧 第12集").episode, Some(12));
+        assert_eq!(
+            parse_title("The.Wandering.Earth.II.2023.2160p.WEB-DL").as_deref(),
+            Some("The Wandering Earth II")
+        );
+        assert_eq!(parse_title("Some.Show.S01.1080p").as_deref(), Some("Some Show"));
+        assert_eq!(
+            parse_title("2001.A.Space.Odyssey.1968.1080p").as_deref(),
+            Some("2001 A Space Odyssey")
+        );
     }
 
     #[test]

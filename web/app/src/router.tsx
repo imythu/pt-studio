@@ -5,7 +5,7 @@ import { AdminHome, AdminPluginRoute } from './pages/Admin';
 import { Login, Register } from './pages/Auth';
 import { PluginRoute } from './pages/PluginRoute';
 import { ProfilePage } from './pages/Profile';
-import { Home, TorrentList, TorrentPage, Upload } from './pages/Torrents';
+import { GroupPage, Home, TorrentList, TorrentPage, Upload } from './pages/Torrents';
 import { overrides, type PageId } from './overrides';
 import { Layout, RequireLogin } from './shell/Layout';
 import { useSession } from './session';
@@ -40,6 +40,7 @@ export const router = createBrowserRouter([
       { path: 'register', element: page('register', Register) },
       { path: 'torrents', element: <RequireLogin>{page('torrents', TorrentList)}</RequireLogin> },
       { path: 'torrents/:id', element: <RequireLogin>{page('torrent', TorrentPage)}</RequireLogin> },
+      { path: 'groups/:id', element: <RequireLogin>{page('group', GroupPage)}</RequireLogin> },
       { path: 'upload', element: <RequireLogin>{page('upload', Upload)}</RequireLogin> },
       { path: 'users/:id', element: <RequireLogin>{page('profile', ProfilePage)}</RequireLogin> },
       { path: 'p/:plugin/*', element: <PluginRoute /> },

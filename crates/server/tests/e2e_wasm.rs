@@ -129,7 +129,7 @@ async fn wasm_bonus_end_to_end() {
     body.extend(
         format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"meta\"\r\n\r\n{}\r\n",
-            json!({"type_id": "generic", "title": "Wasm Test"})
+            json!({"type_id": "generic", "title": "Wasm Test", "fields": {"kind": "software", "title": "Wasm Test", "platform": "windows"}})
         )
         .as_bytes(),
     );

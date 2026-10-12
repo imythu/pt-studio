@@ -2133,6 +2133,7 @@ dependencies = [
  "chrono",
  "hex",
  "pt-plugin-api",
+ "pt-release-parser",
  "reqwest",
  "serde",
  "serde_json",
@@ -2164,6 +2165,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-release-parser"
+version = "0.1.0"
+
+[[package]]
 name = "pt-server"
 version = "0.1.0"
 dependencies = [
@@ -2190,6 +2195,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "pt-type-kit"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

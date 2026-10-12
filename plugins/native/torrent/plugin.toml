@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "种子上传、规范化、存储与下载（ctx.torrents）"
 
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
-publishes = ["torrent.created", "torrent.downloaded"]
+publishes = ["torrent.created", "torrent.downloaded", "group.created"]
 
 [capabilities]
 kv = true
@@ -26,6 +26,20 @@ input_schema = "schemas/hooks/torrent.before_upload.json"
 [[hook_points]]
 name = "torrent.before_download"
 input_schema = "schemas/hooks/torrent.before_download.json"
+
+[[http.routes]]
+id = "list_types"
+method = "GET"
+path = "/v1/types"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "get_group"
+method = "GET"
+path = "/v1/groups/{id}"
+auth = "user"
+rate_limit = "user:300/m"
 
 [[http.routes]]
 id = "upload"
@@ -85,7 +99,7 @@ default_roles = ["admin"]
 
 [database]
 migrations = "migrations"
-views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent_fingerprint", "v_uploader_counts"]
+views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent_fingerprint", "v_uploader_counts", "v_group_public", "v_group_fields"]
 
 [terms]
 "torrent.status.approved" = { zh-CN = "已发布", en = "Approved" }

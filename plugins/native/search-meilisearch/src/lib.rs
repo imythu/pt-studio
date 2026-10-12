@@ -7,7 +7,6 @@
 
 pub mod filter;
 pub mod meili;
-pub mod release;
 pub mod schema;
 
 use std::{
@@ -466,9 +465,12 @@ async fn build_docs(ctx: &Ctx, m: &MergedIndex, ids: &[i64]) -> PResult<Built> {
             let Some(title) = doc.get(t).and_then(Value::as_str).map(str::to_owned) else {
                 continue;
             };
-            doc.insert(format!("{t}_norm"), json!(release::normalize_title(&title)));
+            doc.insert(
+                format!("{t}_norm"),
+                json!(pt_release_parser::normalize_title(&title)),
+            );
             if i == 0 {
-                for (k, v) in release::parse_release(&title).to_fields() {
+                for (k, v) in rel_fields(&pt_release_parser::parse_release(&title)) {
                     doc.entry(k).or_insert(v);
                 }
             }
@@ -482,6 +484,19 @@ async fn build_docs(ctx: &Ctx, m: &MergedIndex, ids: &[i64]) -> PResult<Built> {
         out.docs.push((*id, doc, hash, group));
     }
     Ok(out)
+}
+
+/// 发布名解析结果 → `rel_*` 字段
+fn rel_fields(r: &pt_release_parser::ReleaseInfo) -> Vec<(&'static str, Value)> {
+    vec![
+        ("rel_resolution", json!(r.resolution)),
+        ("rel_source", json!(r.source)),
+        ("rel_video_codec", json!(r.video_codec)),
+        ("rel_audio_codec", json!(r.audio_codec)),
+        ("rel_hdr", json!(r.hdr)),
+        ("rel_group", json!(r.group)),
+        ("rel_year", json!(r.year)),
+    ]
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1349,7 +1364,7 @@ async fn query(s: &Search, ctx: &Ctx, req: SearchRequest) -> PResult<Value> {
     }
     let limit = u64::from(req.limit.unwrap_or(20).clamp(1, cfg.max_limit));
     let filters = final_filters(ctx, &row, &viewer, &req.query, user, sort.clone()).await?;
-    let q = release::normalize_title(&req.query);
+    let q = pt_release_parser::normalize_title(&req.query);
     let strict = req.query.matches('.').count() >= 3;
     let mut hl: Vec<String> = m.title_fields.clone();
     hl.extend(m.title_fields.iter().map(|t| format!("{t}_norm")));
@@ -1496,7 +1511,7 @@ async fn suggest(s: &Search, ctx: &Ctx, index: &str, prefix: &str, limit: u32) -
     let filters = final_filters(ctx, &row, &viewer, prefix, vec![], vec![]).await?;
     let norm = format!("{title}_norm");
     let body = json!({
-        "q": release::normalize_title(prefix), "limit": limit.clamp(1, 10), "filter": filters,
+        "q": pt_release_parser::normalize_title(prefix), "limit": limit.clamp(1, 10), "filter": filters,
         "attributesToSearchOn": [title, norm], "attributesToRetrieve": ["id", title],
         "attributesToHighlight": [title], "highlightPreTag": HL_PRE.to_string(), "highlightPostTag": HL_POST.to_string(),
     });

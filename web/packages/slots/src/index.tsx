@@ -247,11 +247,11 @@ function Rendered({ e, ctx }: { e: ResolvedEntry; ctx: unknown }) {
   );
 }
 
-function SlotInner({ name, ctx, className }: { name: SlotName; ctx: unknown; className?: string }) {
+function SlotInner({ name, ctx, className, empty }: { name: SlotName; ctx: unknown; className?: string; empty?: ReactNode }) {
   const entries = useSlotEntries(name);
   const reg = useRegistry();
   const [tab, setTab] = useState(0);
-  if (entries.length === 0) return null;
+  if (entries.length === 0) return <>{empty ?? null}</>;
   const kind = SLOT_KINDS[name];
   if (kind === 'single') return <Rendered e={entries[0] as ResolvedEntry} ctx={ctx} />;
   if (kind === 'tabs') {
@@ -280,11 +280,11 @@ function SlotInner({ name, ctx, className }: { name: SlotName; ctx: unknown; cla
   );
 }
 
-/** `<Slot name="user.profile.stats" ctx={{ profile }} />` */
-export function Slot({ name, ctx, fallback, className }: { name: SlotName; ctx: unknown; fallback?: ReactNode; className?: string }) {
+/** `<Slot name="user.profile.stats" ctx={{ profile }} />`；`empty` 为没有插件注册时的宿主默认内容（single 插槽的默认实现） */
+export function Slot({ name, ctx, fallback, className, empty }: { name: SlotName; ctx: unknown; fallback?: ReactNode; className?: string; empty?: ReactNode }) {
   return (
     <Suspense fallback={fallback ?? null}>
-      <SlotInner name={name} ctx={ctx} className={className} />
+      <SlotInner name={name} ctx={ctx} className={className} empty={empty} />
     </Suspense>
   );
 }

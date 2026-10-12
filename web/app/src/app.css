@@ -27,3 +27,8 @@ mark { background: color-mix(in srgb, var(--pt-color-primary) 25%, transparent);
   .filters, .sidebar { width: 100%; }
   .topbar { flex-wrap: wrap; }
 }
+.wide { max-width: 720px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--pt-space-2) var(--pt-space-4); margin: 0; }
+.fields dt { color: var(--pt-color-muted); font-size: 12px; }
+.fields dd { margin: 0; }
+.pt-checks { display: flex; flex-wrap: wrap; gap: var(--pt-space-3); }

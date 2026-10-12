@@ -174,6 +174,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-release-parser"
+version = "0.1.0"
+
+[[package]]
+name = "pt-type-kit"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "pt-wasm-bonus"
 version = "0.1.0"
 dependencies = [
@@ -214,6 +225,27 @@ dependencies = [
 name = "pt-wasm-promotion"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
+name = "pt-wasm-type-generic"
+version = "0.1.0"
+dependencies = [
+ "pt-type-kit",
+ "serde",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
+name = "pt-wasm-type-movie"
+version = "0.1.0"
+dependencies = [
+ "pt-release-parser",
+ "pt-type-kit",
  "serde",
  "serde_json",
  "wit-bindgen",

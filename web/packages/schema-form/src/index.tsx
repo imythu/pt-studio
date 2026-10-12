@@ -24,6 +24,12 @@ export interface Schema {
   'x-pt-label-term'?: string;
   'x-pt-widget'?: string;
   'x-pt-secret'?: boolean;
+  'x-pt-enum-titles'?: string[];
+  /** 属性显示顺序（JSON 对象经服务端后不保证键序） */
+  'x-pt-order'?: string[];
+  'x-pt-filter'?: string;
+  const?: unknown;
+  oneOf?: Schema[];
 }
 
 export type Errors = Record<string, string>;
@@ -61,11 +67,19 @@ export function validate(schema: Schema, value: unknown, path = ''): Errors {
     const n = [...value].length;
     if (schema.minLength !== undefined && n < schema.minLength) put(path, `at least ${schema.minLength} characters`);
     if (schema.maxLength !== undefined && n > schema.maxLength) put(path, `at most ${schema.maxLength} characters`);
-    if (schema.pattern && !new RegExp(schema.pattern, 'u').test(value)) put(path, 'invalid format');
+    // 外部 ID 允许粘贴链接，由服务端提取
+    if (schema.pattern && schema['x-pt-widget'] !== 'external-id' && !new RegExp(schema.pattern, 'u').test(value)) put(path, 'invalid format');
   }
   if (Array.isArray(value) && schema.items) {
     value.forEach((v, i) => Object.assign(errs, validate(schema.items as Schema, v, `${path}/${i}`)));
   }
+  if (schema.oneOf) {
+    const b = branchOf(schema, value);
+    if (b) Object.assign(errs, validate(b, value, path));
+    else if (discriminator(schema)) put(`${path}/${discriminator(schema)}`, 'required');
+    return errs;
+  }
+  if (schema.const !== undefined && JSON.stringify(schema.const) !== JSON.stringify(value)) put(path, 'not an allowed value');
   if (typeOf(value) === 'object') {
     const obj = value as Record<string, unknown>;
     for (const r of schema.required ?? []) if (obj[r] === undefined) put(`${path}/${r}`, 'required');
@@ -115,9 +129,50 @@ function primary(schema: Schema): string {
   return (Array.isArray(schema.type) ? schema.type.find((t) => t !== 'null') : schema.type) ?? 'string';
 }
 
+/** 显示名：术语优先；术语缺失（t 原样返回键）时用 schema 的 title */
 function labelOf(name: string, s: Schema, t: (k: string) => string): string {
   const term = s['x-pt-label-term'];
-  return term ? t(`term:${term}`) : (s.title ?? name);
+  if (term) {
+    const v = t(`term:${term}`);
+    if (v !== term) return v;
+  }
+  return s.title ?? name;
+}
+
+/** `oneOf` 判别：按 `properties.<key>.const` 选分支（type-generic 的 kind） */
+export function discriminator(schema: Schema): string | null {
+  const first = schema.oneOf?.[0]?.properties;
+  if (!first) return null;
+  return Object.entries(first).find(([, s]) => s.const !== undefined)?.[0] ?? null;
+}
+
+export function branchOf(schema: Schema, value: unknown): Schema | undefined {
+  const d = discriminator(schema);
+  if (!d) return undefined;
+  const cur = (value as Record<string, unknown> | undefined)?.[d];
+  return schema.oneOf?.find((b) => b.properties?.[d]?.const === cur);
+}
+
+function enumLabel(schema: Schema, o: unknown, t: (k: string) => string): string {
+  const term = schema['x-pt-label-term'];
+  if (term) {
+    const k = `${term}.${String(o)}`;
+    const v = t(`term:${k}`);
+    if (v !== k) return v;
+  }
+  return String(o);
+}
+
+/** 按 `x-pt-order` 排列属性，其余按原顺序附后 */
+export function ordered(schema: Schema): [string, Schema][] {
+  const entries = Object.entries(schema.properties ?? {});
+  const order = schema['x-pt-order'];
+  if (!order) return entries;
+  const rank = (k: string) => {
+    const i = order.indexOf(k);
+    return i < 0 ? order.length : i;
+  };
+  return [...entries].sort((a, b) => rank(a[0]) - rank(b[0]));
 }
 
 function FieldWrap({ label, error, hint, children }: { label: string; error?: string; hint?: string; children: ReactNode }) {
@@ -135,11 +190,41 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   const err = errors[path];
   const ty = primary(schema);
   const id = `sf${path.replace(/\W/g, '_')}`;
+  if (schema.oneOf && discriminator(schema)) {
+    const d = discriminator(schema) as string;
+    const branch = branchOf(schema, value);
+    const sel = schema.properties?.[d] ?? { type: 'string', enum: schema.oneOf.map((b) => b.properties?.[d]?.const) };
+    const obj = (value as Record<string, unknown>) ?? {};
+    return (
+      <div className="pt-oneof">
+        <SchemaField
+          schema={sel}
+          path={`${path}/${d}`}
+          label={labelOf(d, sel, t)}
+          value={obj[d]}
+          onChange={(v) => onChange({ [d]: v })}
+          errors={errors}
+          t={t}
+        />
+        {branch && (
+          <SchemaField
+            schema={{ ...branch, properties: Object.fromEntries(Object.entries(branch.properties ?? {}).filter(([k]) => k !== d)) }}
+            path={path}
+            label=""
+            value={obj}
+            onChange={(v) => onChange({ ...(v as Record<string, unknown>), [d]: obj[d] })}
+            errors={errors}
+            t={t}
+          />
+        )}
+      </div>
+    );
+  }
   if (ty === 'object' && schema.properties) {
     return (
       <fieldset className="pt-fieldset">
         {path && <legend>{label}</legend>}
-        {Object.entries(schema.properties).map(([k, s]) => (
+        {ordered(schema).map(([k, s]) => (
           <SchemaField
             key={k}
             schema={s}
@@ -166,9 +251,9 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
       <FieldWrap label={label} error={err} hint={schema.description}>
         <select id={id} className="pt-input" value={value === undefined ? '' : JSON.stringify(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : JSON.parse(e.target.value))}>
           <option value="">—</option>
-          {schema.enum.map((o) => (
+          {schema.enum.map((o, i) => (
             <option key={JSON.stringify(o)} value={JSON.stringify(o)}>
-              {schema['x-pt-label-term'] ? t(`term:${schema['x-pt-label-term']}.${String(o)}`) : String(o)}
+              {schema['x-pt-enum-titles']?.[i] ?? enumLabel(schema, o, t)}
             </option>
           ))}
         </select>

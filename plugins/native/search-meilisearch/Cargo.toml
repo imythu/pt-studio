@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 pt-plugin-api.workspace = true
+pt-release-parser = { path = "../../../crates/release-parser" }
 async-trait.workspace = true
 axum.workspace = true
 base64 = "0.22"

@@ -7,6 +7,7 @@ const BASE = process.env.PT_BASE;
 const CODE = process.env.PT_INVITE_CODE;
 const TID = process.env.PT_TORRENT_ID;
 const ADMIN = process.env.PT_ADMIN_USER;
+const TORRENT_FILE = process.env.PT_TORRENT_FILE;
 const PASS = 'correct horse';
 
 const fallback = '/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome';
@@ -81,6 +82,29 @@ try {
   await p.getByText(/H&R|免 H&R/).first().waitFor();
   const dl = p.getByRole('link', { name: '下载种子' });
   if ((await dl.getAttribute('href')) !== `/api/p/torrent/v1/torrents/${TID}/download`) throw new Error('download link');
+
+  // 4b. 按资源类型发布：电影（发布名补全 + IMDb 链接）→ 详情字段 → 作品页
+  step('typed upload (movie) and group page');
+  await p.goto(`${BASE}/upload`);
+  await p.getByLabel('类型').selectOption('movie');
+  await p.locator('input[type=file]').setInputFiles(TORRENT_FILE);
+  await p.locator('input[name=title]').fill('Web.Movie.2024.2160p.WEB-DL.H265.DDP5.1-WEB');
+  await p.getByText('IMDb', { exact: true }).locator('..').locator('input').fill('https://www.imdb.com/title/tt1234567/');
+  await p.getByRole('button', { name: '发布' }).click();
+  await p.waitForURL(/\/torrents\/\d+$/);
+  await p.getByText('资源信息').waitFor();
+  await p.getByText('2160p', { exact: true }).waitFor();
+  await p.getByText('tt1234567', { exact: true }).waitFor();
+  await p.getByRole('link', { name: '查看作品' }).click();
+  await p.getByRole('heading', { name: /Web Movie/ }).waitFor();
+  await p.getByText(/全部版本（1）/).waitFor();
+  // 通用类型：kind 切换出对应字段
+  await p.goto(`${BASE}/upload`);
+  await p.getByLabel('类型').selectOption('generic');
+  await p.getByText('分类', { exact: true }).locator('..').locator('select').selectOption({ label: '游戏' });
+  await p.getByText('平台', { exact: true }).waitFor();
+  await p.getByText('分类', { exact: true }).locator('..').locator('select').selectOption({ label: '电子书' });
+  await p.getByText('ISBN', { exact: true }).waitFor();
 
   // 5. 插件页面路由
   step('plugin route /p/invite/');

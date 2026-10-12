@@ -311,6 +311,13 @@ impl Kernel {
             }
             let rg = RedisGateway::new(&m.id, m.capabilities.redis, redis.get("main").cloned(), globals);
             let native = spec.native.as_ref();
+            if m.capabilities.content_type != native.is_some_and(|n| n.content_type.is_some()) {
+                errors.push(LoadError::new(
+                    "E-LOAD-WORLD",
+                    &m.id,
+                    "capabilities.content_type must match the content-type export",
+                ));
+            }
             if m.capabilities.search_contributor != native.is_some_and(|n| n.search_contributor.is_some()) {
                 errors.push(LoadError::new(
                     "E-LOAD-WORLD",
@@ -392,6 +399,7 @@ impl Kernel {
                     .unwrap_or_default(),
                 http: native.and_then(|n| n.http.clone()),
                 search_contributor: native.and_then(|n| n.search_contributor.clone()),
+                content_type: native.and_then(|n| n.content_type.clone()),
                 redis: rg,
                 manifest: m,
             };

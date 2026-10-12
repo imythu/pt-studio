@@ -1,0 +1,41 @@
+id = "type-movie"
+name = "资源类型：电影"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "电影：字段 schema、从发布名补全规格、按 IMDb / TMDB / 豆瓣分组、规范标题、搜索字段"
+
+[capabilities]
+sql = true
+content_type = true
+search_contributor = true
+views = ["torrent.v_torrent_fields"]
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.title_template]
+type = "string"
+maxLength = 300
+title = "规范标题模板"
+default = "{title} {year} {edition?| }{resolution} {release_type?| }{source} {hdr?| }{video_codec} {audio_codecs?| }-{release_group}"
+
+[terms]
+"type-movie.name" = { zh-CN = "电影", en = "Movies" }
+"type-movie.field.title" = { zh-CN = "片名", en = "Title" }
+"type-movie.field.original_title" = { zh-CN = "原名", en = "Original title" }
+"type-movie.field.year" = { zh-CN = "年份", en = "Year" }
+"type-movie.field.imdb_id" = { zh-CN = "IMDb", en = "IMDb" }
+"type-movie.field.tmdb_id" = { zh-CN = "TMDB", en = "TMDB" }
+"type-movie.field.douban_id" = { zh-CN = "豆瓣", en = "Douban" }
+"type-movie.field.resolution" = { zh-CN = "分辨率", en = "Resolution" }
+"type-movie.field.source" = { zh-CN = "片源", en = "Source" }
+"type-movie.field.release_type" = { zh-CN = "发布类型", en = "Release type" }
+"type-movie.field.video_codec" = { zh-CN = "视频编码", en = "Video codec" }
+"type-movie.field.audio_codecs" = { zh-CN = "音频编码", en = "Audio codecs" }
+"type-movie.field.hdr" = { zh-CN = "HDR", en = "HDR" }
+"type-movie.field.release_group" = { zh-CN = "制作组", en = "Release group" }
+"type-movie.field.edition" = { zh-CN = "版本", en = "Edition" }
+"type-movie.field.release_name" = { zh-CN = "发布名", en = "Release name" }

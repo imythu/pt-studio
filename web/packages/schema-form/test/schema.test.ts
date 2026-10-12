@@ -28,3 +28,24 @@ describe('schema-form', () => {
     expect(serverErrors({ errors: [{ path: '/mode', message: 'nope' }] })).toEqual({ '/mode': 'nope' });
   });
 });
+
+describe('oneOf (type-generic kinds)', () => {
+  const generic: Schema = {
+    type: 'object',
+    required: ['kind'],
+    properties: { kind: { type: 'string', enum: ['game', 'ebook'] } },
+    oneOf: [
+      { type: 'object', required: ['kind', 'platform'], properties: { kind: { const: 'game' }, platform: { type: 'string', enum: ['windows', 'linux'] } } },
+      { type: 'object', required: ['kind', 'isbn'], properties: { kind: { const: 'ebook' }, isbn: { type: 'string', maxLength: 17 } } },
+    ],
+  };
+  it('validates the branch selected by the discriminator', async () => {
+    const { branchOf, discriminator } = await import('../src/index');
+    expect(discriminator(generic)).toBe('kind');
+    expect(branchOf(generic, { kind: 'ebook' })?.required).toEqual(['kind', 'isbn']);
+    expect(validate(generic, { kind: 'game', platform: 'windows' })).toEqual({});
+    expect(validate(generic, { kind: 'game' })).toEqual({ '/platform': 'required' });
+    expect(validate(generic, { kind: 'ebook', isbn: 'x'.repeat(20) })['/isbn']).toMatch(/at most/);
+    expect(validate(generic, {})).toEqual({ '/kind': 'required' });
+  });
+});

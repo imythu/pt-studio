@@ -184,6 +184,12 @@ async fn web_end_to_end() {
     }
     let code = code.expect("alice could not issue an invite");
 
+    let torrent_file = std::env::temp_dir().join(format!("pt-web-e2e-{}.torrent", std::process::id()));
+    std::fs::write(
+        &torrent_file,
+        pt_plugin_torrent::fixtures::sample_v1("Web.Movie", &[("m.mkv", 600 << 20)], true),
+    )
+    .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(async move {
@@ -198,6 +204,7 @@ async fn web_end_to_end() {
         .env("PT_INVITE_CODE", &code)
         .env("PT_TORRENT_ID", tid.to_string())
         .env("PT_ADMIN_USER", "web_admin")
+        .env("PT_TORRENT_FILE", &torrent_file)
         .output()
         .await
         .unwrap();

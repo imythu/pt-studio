@@ -53,6 +53,10 @@ pub trait KernelLink: Send + Sync {
         index: &str,
         entity_ids: &[u64],
     ) -> PResult<Vec<(u64, Option<Json>)>>;
+    /// 实现了 `content-type` 的插件（按激活顺序）
+    fn content_type_plugins(&self, caller: &Ctx) -> PResult<Vec<String>>;
+    /// 调用资源类型插件：`info`（fields 忽略）、`normalize`、`group_key`、`canonical_title`
+    async fn content_type_call(&self, caller: &Ctx, plugin: &str, op: &str, fields: Json) -> PResult<Json>;
 }
 
 /// JSON 分派的业务服务（pt:plugin@0.1 的 `services` / `service-provider`）。
@@ -191,6 +195,34 @@ impl Ctx {
         self.link
             .contributor_documents(self, plugin, index, entity_ids)
             .await
+    }
+
+    /// 资源类型插件列表（`ctx.content_types` 聚合，web / torrent 使用）。
+    pub fn content_type_plugins(&self) -> PResult<Vec<String>> {
+        self.link.content_type_plugins(self)
+    }
+
+    /// 资源类型信息：(插件 ID, TypeInfo)
+    pub async fn content_types(&self) -> PResult<Vec<(String, crate::TypeInfo)>> {
+        let mut out = Vec::new();
+        for p in self.content_type_plugins()? {
+            let v = self.link.content_type_call(self, &p, "info", Json::Null).await?;
+            out.push((
+                p,
+                crate::TypeInfo {
+                    type_id: v["type_id"].as_str().unwrap_or_default().to_owned(),
+                    name_term: v["name_term"].as_str().unwrap_or_default().to_owned(),
+                    field_schema: v["field_schema"].clone(),
+                    group_schema: (!v["group_schema"].is_null()).then(|| v["group_schema"].clone()),
+                },
+            ));
+        }
+        Ok(out)
+    }
+
+    /// 调用资源类型插件的 `normalize` / `group_key` / `canonical_title`
+    pub async fn content_type_call(&self, plugin: &str, op: &str, fields: Json) -> PResult<Json> {
+        self.link.content_type_call(self, plugin, op, fields).await
     }
 
     /// 以已认证用户的身份继续调用（只能切换一次）。

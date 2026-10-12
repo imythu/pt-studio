@@ -5,7 +5,10 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, apiFetch, parse } from '@pt-studio/sdk';
 import { Slot, useSlotColumns } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
+import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Schema } from '@pt-studio/schema-form';
 import { Badge, Button, Card, Empty, Field, Input, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
+import { ApiError } from '@pt-studio/sdk';
+import { fieldSchemas, useTypes, type TypeInfo } from '../types';
 import { ErrorText } from '../errors';
 
 export interface TorrentDoc {
@@ -107,6 +110,38 @@ function FilterPanel({ facets, params, setParams }: { facets: SearchResult['face
   );
 }
 
+export function TypeBadge({ typeId }: { typeId?: string }) {
+  const t = useT();
+  const types = useTypes();
+  const info = types.data?.find((x) => x.type_id === typeId);
+  return <Badge>{info ? t(`term:${info.name_term}`) : (typeId ?? '-')}</Badge>;
+}
+
+/** 类型字段的通用展示（显示名来自 schema 的术语或 title；枚举值按术语渲染） */
+export function FieldsView({ typeId, fields }: { typeId: string; fields: Record<string, unknown> }) {
+  const t = useT();
+  const types = useTypes();
+  const props = fieldSchemas(types.data?.find((x) => x.type_id === typeId), fields);
+  const rows = Object.entries(fields).filter(([k, v]) => k !== 'release_name' && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0));
+  if (rows.length === 0) return null;
+  const label = (k: string) => {
+    const s = props[k];
+    const term = s?.['x-pt-label-term'];
+    const v = term ? t(`term:${term}`) : null;
+    return v && v !== term ? v : (s?.title ?? k);
+  };
+  return (
+    <dl className="fields">
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <dt>{label(k)}</dt>
+          <dd>{Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? '✓' : '✗') : String(v)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlights?: Map<number, Record<string, string>> }) {
   const t = useT();
   const pluginCols = useSlotColumns('torrent.list.columns');
@@ -122,7 +157,7 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
         </div>
       ),
     },
-    { key: 'type', header: t('ui.torrent.type'), render: (r) => <Badge>{r.type_id ? t(`term:torrent.type.${r.type_id}`) : '-'}</Badge> },
+    { key: 'type', header: t('ui.torrent.type'), render: (r) => <TypeBadge typeId={r.type_id} /> },
     ...pluginCols.map((c) => ({ key: `p:${c.key}`, header: c.header, render: (r: TorrentDoc) => c.render({ torrent: r }) })),
     { key: 'size', header: t('ui.torrent.size'), render: (r) => formatBytes(r.size), className: 'num' },
     { key: 'created', header: t('ui.torrent.created'), render: (r) => (r.created_at ? new Date(r.created_at * 1000).toLocaleString() : '-'), className: 'nowrap' },
@@ -192,6 +227,7 @@ interface TorrentDetail {
   can_download: boolean;
   info_hash_v1: string | null;
   group_id: number | null;
+  fields: Record<string, unknown>;
 }
 
 export function TorrentPage() {
@@ -242,6 +278,11 @@ export function TorrentPage() {
               })}
             </ul>
           </Card>
+          {d.fields && Object.keys(d.fields).length > 0 && (
+            <Card title={t('ui.torrent.info')} actions={d.group_id ? <Link to={`/groups/${d.group_id}`}>{t('ui.group.view')}</Link> : null}>
+              <FieldsView typeId={d.type_id} fields={d.fields} />
+            </Card>
+          )}
           <Slot name="torrent.detail.info" ctx={ctx} />
           {d.description && (
             <Card title={t('ui.torrent.description')}>
@@ -258,59 +299,129 @@ export function TorrentPage() {
   );
 }
 
+function TypeForm({ info, value, onChange, errors }: { info: TypeInfo; value: Record<string, unknown>; onChange(v: Record<string, unknown>): void; errors: Errors }) {
+  const t = useT();
+  if (!info.field_schema) return null;
+  return <SchemaForm schema={info.field_schema} value={value} onChange={(v) => onChange((v as Record<string, unknown>) ?? {})} errors={errors} t={t} />;
+}
+
 export function Upload() {
   const t = useT();
   const nav = useNavigate();
-  const [meta, setMeta] = useState({ type_id: 'generic', title: '', subtitle: '', description: '', anonymous: false });
+  const types = useTypes();
+  const [typeId, setTypeId] = useState<string>('');
+  const [meta, setMeta] = useState({ title: '', subtitle: '', description: '', anonymous: false });
+  const [fields, setFields] = useState<Record<string, unknown>>({});
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
+  const list = types.data ?? [];
+  const info = list.find((x) => x.type_id === typeId) ?? list[0];
+  const pick = (id: string) => {
+    setTypeId(id);
+    const i = list.find((x) => x.type_id === id);
+    setFields(i?.field_schema ? ((withDefaults(i.field_schema as Schema, {}) as Record<string, unknown>) ?? {}) : {});
+    setErrors({});
+  };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file || !info) return;
+    // 客户端预校验（发布名可补全的字段由服务端判定，这里只查类型与范围）
+    const errs = info.field_schema ? Object.fromEntries(Object.entries(validate(info.field_schema, fields)).filter(([, m]) => m !== 'required')) : {};
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
     setBusy(true);
     setError(null);
     try {
       const fd = new FormData();
-      fd.append('meta', JSON.stringify({ ...meta, subtitle: meta.subtitle || undefined }));
+      fd.append('meta', JSON.stringify({ ...meta, type_id: info.type_id, fields, subtitle: meta.subtitle || undefined }));
       fd.append('torrent', file, file.name);
       const r = await parse<{ id: number }>(await apiFetch('/api/p/torrent/v1/torrents', { method: 'POST', body: fd, idempotent: true }));
       nav(`/torrents/${r.id}`);
     } catch (err) {
+      if (err instanceof ApiError) setErrors(serverErrors(err.details));
       setError(err);
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Card title={t('ui.upload.title')} className="narrow">
+    <Card title={t('ui.upload.title')} className="narrow wide">
       <form onSubmit={submit}>
         <Field label={t('ui.upload.file')}>
           <input name="torrent" type="file" accept=".torrent,application/x-bittorrent" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required />
         </Field>
         <Field label={t('ui.torrent.type')}>
-          <Input value={meta.type_id} onChange={(e) => setMeta({ ...meta, type_id: e.target.value })} required />
+          <select className="pt-input" name="type_id" value={info?.type_id ?? ''} onChange={(e) => pick(e.target.value)}>
+            {list.map((x) => (
+              <option key={x.type_id} value={x.type_id}>
+                {t(`term:${x.name_term}`)}
+              </option>
+            ))}
+          </select>
         </Field>
-        <Field label={t('ui.torrent.title')}>
-          <Input name="title" value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} required maxLength={300} />
+        <Field label={t('ui.torrent.title')} hint={info?.plugin ? t('ui.upload.title_hint') : undefined}>
+          <Input name="title" value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} required={!info?.plugin} maxLength={300} />
         </Field>
         <Field label={t('ui.upload.subtitle')}>
           <Input value={meta.subtitle} onChange={(e) => setMeta({ ...meta, subtitle: e.target.value })} maxLength={300} />
         </Field>
-        <Slot name="torrent.upload.type_form" ctx={{ type_id: meta.type_id, schema: null }} />
+        {info && (
+          <Slot
+            name="torrent.upload.type_form"
+            ctx={{ type_id: info.type_id, schema: info.field_schema, value: fields, onChange: setFields }}
+            fallback={<TypeForm info={info} value={fields} onChange={setFields} errors={errors} />}
+            empty={<TypeForm info={info} value={fields} onChange={setFields} errors={errors} />}
+          />
+        )}
         <Field label={t('ui.torrent.description')}>
           <textarea className="pt-input" rows={6} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
         </Field>
         <label className="pt-check">
           <input type="checkbox" checked={meta.anonymous} onChange={(e) => setMeta({ ...meta, anonymous: e.target.checked })} /> {t('ui.upload.anonymous')}
         </label>
-        <Slot name="torrent.upload.extra" ctx={{ draft: meta }} />
+        <Slot name="torrent.upload.extra" ctx={{ draft: { ...meta, type_id: info?.type_id, fields } }} />
         <ErrorText error={error} />
-        <Button type="submit" variant="primary" disabled={busy || !file}>
+        <Button type="submit" variant="primary" disabled={busy || !file || !info}>
           {t('ui.upload.submit')}
         </Button>
       </form>
     </Card>
+  );
+}
+
+interface GroupDetail {
+  id: number;
+  type_id: string;
+  title: string;
+  year: number | null;
+  fields: Record<string, unknown>;
+  torrent_count: number;
+  torrents: { id: number; title: string; subtitle: string | null; size: number; fields: Record<string, unknown>; created_at: string }[];
+}
+
+export function GroupPage() {
+  const t = useT();
+  const { id } = useParams();
+  const g = useQuery({ queryKey: ['group', id], queryFn: () => api<GroupDetail>(`/api/p/torrent/v1/groups/${id}`), staleTime: 60_000 });
+  if (g.isLoading) return <Spinner />;
+  if (g.error) return <ErrorText error={g.error} />;
+  const d = g.data as GroupDetail;
+  return (
+    <div className="group">
+      <h1>
+        {d.title} {d.year && <span className="pt-muted">({d.year})</span>} <TypeBadge typeId={d.type_id} />
+      </h1>
+      <Slot name="group.detail.header" ctx={{ group: d }} />
+      <Card>
+        <FieldsView typeId={d.type_id} fields={d.fields} />
+      </Card>
+      <Card title={t('ui.group.torrents', { n: d.torrents.length })}>
+        <TorrentTable rows={d.torrents.map((x) => ({ ...x, type_id: d.type_id, created_at: Date.parse(x.created_at) / 1000 }))} />
+      </Card>
+      <Slot name="group.detail.tabs" ctx={{ group: d }} />
+    </div>
   );
 }
 

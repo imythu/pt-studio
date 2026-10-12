@@ -1,0 +1,58 @@
+id = "type-generic"
+name = "资源类型：通用"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "通用资源类型：管理员定义 kind（字段描述语言编译为 JSON Schema），预设游戏、软件、电子书、课程"
+
+[capabilities]
+sql = true
+content_type = true
+search_contributor = true
+views = ["torrent.v_torrent_fields"]
+
+[[http.routes]]
+id = "list_kinds"
+method = "GET"
+path = "/v1/kinds"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "create_kind"
+method = "POST"
+path = "/v1/admin/kinds"
+auth = "admin"
+permission = "type-generic.manage"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "update_kind"
+method = "PATCH"
+path = "/v1/admin/kinds/{kind}"
+auth = "admin"
+permission = "type-generic.manage"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "disable_kind"
+method = "DELETE"
+path = "/v1/admin/kinds/{kind}"
+auth = "admin"
+permission = "type-generic.manage"
+rate_limit = "user:30/m"
+
+[[permissions]]
+name = "type-generic.manage"
+description_term = "type-generic.perm.manage"
+default_roles = ["admin"]
+
+[database]
+migrations = "migrations"
+
+[terms]
+"type-generic.name" = { zh-CN = "其他", en = "Other" }
+"type-generic.field.kind" = { zh-CN = "分类", en = "Kind" }
+"type-generic.perm.manage" = { zh-CN = "管理通用类型", en = "Manage generic kinds" }

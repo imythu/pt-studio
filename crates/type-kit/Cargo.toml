@@ -1,0 +1,13 @@
+[package]
+name = "pt-type-kit"
+description = "PT Studio helpers for content-type plugins: title templates, field errors, external id extraction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

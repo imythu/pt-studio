@@ -272,7 +272,9 @@ pub async fn upload(app: &Router, u: &User, title: &str, files: &[(&str, u64)]) 
     body.extend(
         format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"meta\"\r\n\r\n{}\r\n",
-            serde_json::json!({"type_id": "generic", "title": title})
+            // type-generic 加载时需要合法的 kind（未加载时 fields 原样保存）
+            serde_json::json!({"type_id": "generic", "title": title,
+                               "fields": {"kind": "software", "title": title, "platform": "windows"}})
         )
         .as_bytes(),
     );

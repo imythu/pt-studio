@@ -31,7 +31,10 @@ use sqlx::Row;
 use crate::meta::{HybridPolicy, Policy};
 
 pub const MANIFEST: &str = include_str!("../plugin.toml");
-pub const MIGRATIONS: &[(&str, &str)] = &[("0001_init.sql", include_str!("../migrations/0001_init.sql"))];
+pub const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    ("0002_groups.sql", include_str!("../migrations/0002_groups.sql")),
+];
 
 /// 静态配置（`site.toml [plugin.torrent]`，03 §4；运行时设置在后台接入前同样取自这里）。
 #[derive(Debug, Clone, Deserialize)]
@@ -102,12 +105,66 @@ impl Config {
     }
 }
 
+/// (插件 ID, TypeInfo) 列表
+pub type TypeList = Arc<Vec<(String, pt_plugin_api::TypeInfo)>>;
+
 #[derive(Debug, Default)]
 pub struct Torrent {
     cfg: OnceLock<Config>,
+    /// 资源类型信息缓存：(插件 ID, TypeInfo)，30 s 刷新（type-generic 的 kind 可在运行时变化）
+    types: tokio::sync::Mutex<Option<(std::time::Instant, TypeList)>>,
+}
+
+/// Group 字段：只保留 group_schema 中声明的属性
+fn group_fields(schema: Option<&serde_json::Value>, fields: &serde_json::Value) -> serde_json::Value {
+    let Some(props) = schema
+        .and_then(|s| s.get("properties"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return json!({});
+    };
+    let mut out = serde_json::Map::new();
+    for k in props.keys() {
+        if let Some(v) = fields.get(k).filter(|v| !v.is_null()) {
+            out.insert(k.clone(), v.clone());
+        }
+    }
+    serde_json::Value::Object(out)
 }
 
 impl Torrent {
+    /// 已加载的资源类型（插件 ID, TypeInfo）
+    pub async fn types(&self, ctx: &Ctx) -> PResult<TypeList> {
+        let mut g = self.types.lock().await;
+        if let Some((at, v)) = g.as_ref()
+            && at.elapsed() < std::time::Duration::from_secs(30)
+        {
+            return Ok(v.clone());
+        }
+        let all: Vec<_> = ctx
+            .content_types()
+            .await?
+            .into_iter()
+            .filter(|(_, i)| !i.type_id.is_empty())
+            .collect();
+        let v = Arc::new(all);
+        *g = Some((std::time::Instant::now(), v.clone()));
+        Ok(v)
+    }
+
+    async fn type_provider(
+        &self,
+        ctx: &Ctx,
+        type_id: &str,
+    ) -> PResult<Option<(String, pt_plugin_api::TypeInfo)>> {
+        Ok(self
+            .types(ctx)
+            .await?
+            .iter()
+            .find(|(_, i)| i.type_id == type_id)
+            .cloned())
+    }
+
     fn cfg(&self) -> PResult<&Config> {
         self.cfg
             .get()
@@ -232,6 +289,8 @@ pub struct UploadMeta {
     pub type_id: String,
     #[serde(default)]
     pub fields: serde_json::Value,
+    /// 为空时用资源类型的规范标题
+    #[serde(default)]
     pub title: String,
     #[serde(default)]
     pub subtitle: Option<String>,
@@ -265,13 +324,14 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
         return Err(PluginError::new("torrent.too_large", "torrent file is too large").with_status(413));
     }
     let (parsed, norm) = meta::process(&file, &cfg.policy())?;
-    if !cfg.types.iter().any(|x| x == &m.type_id) {
+    let provider = t.type_provider(ctx, &m.type_id).await?;
+    if provider.is_none() && !cfg.types.iter().any(|x| x == &m.type_id) {
         return Err(PluginError::new(
             "torrent.type_unknown",
             format!("unknown type `{}`", m.type_id),
         ));
     }
-    let fields = if m.fields.is_null() {
+    let mut fields = if m.fields.is_null() {
         json!({})
     } else {
         m.fields.clone()
@@ -282,7 +342,29 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
     if m.anonymous && !cfg.allow_anonymous {
         return Err(PluginError::validation("anonymous uploads are disabled"));
     }
-    let title = sanitize_title(&m.title)?;
+    // 资源类型（content-types-common §2）：规范化字段（发布名默认取标题）、规范标题、分组键
+    let mut group_key: Option<String> = None;
+    let mut title_in = m.title.trim().to_owned();
+    if let Some((p, _)) = &provider {
+        if let (Some(o), false) = (fields.as_object_mut(), title_in.is_empty()) {
+            o.entry("release_name").or_insert_with(|| json!(title_in));
+        }
+        fields = ctx.content_type_call(p, "normalize", fields).await?;
+        if title_in.is_empty() {
+            title_in = ctx
+                .content_type_call(p, "canonical_title", fields.clone())
+                .await?
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+        }
+        group_key = ctx
+            .content_type_call(p, "group_key", fields.clone())
+            .await?
+            .as_str()
+            .map(str::to_owned);
+    }
+    let title = sanitize_title(&title_in)?;
     let ih_v1 = norm.ih_v1.map(|h| h.to_vec());
     let ih_v2 = norm.ih_v2.map(|h| h.to_vec());
     {
@@ -349,10 +431,45 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
         .await?;
 
     let mut c = ctx.sql.conn().await?;
+    let mut new_group = false;
+    let group_id: Option<i64> = match &group_key {
+        Some(k) if k.chars().count() <= 256 => {
+            let gtitle = fields
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(|| title.clone(), |s| s.chars().take(300).collect());
+            let year = fields
+                .get("year")
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|y| i32::try_from(y).ok())
+                .filter(|y| (1800..=2200).contains(y));
+            let gfields = group_fields(
+                provider.as_ref().and_then(|(_, i)| i.group_schema.as_ref()),
+                &fields,
+            );
+            let r: (i64, bool) = sqlx::query_as(
+                "INSERT INTO groups (type_id, group_key, title, year, fields, torrent_count, last_upload_at)
+                 VALUES ($1, $2, $3, $4, $5, 1, now())
+                 ON CONFLICT (type_id, group_key) WHERE deleted_at IS NULL AND merged_into IS NULL
+                 DO UPDATE SET torrent_count = groups.torrent_count + 1, last_upload_at = now(), updated_at = now()
+                 RETURNING id, (xmax = 0)",
+            )
+            .bind(&m.type_id)
+            .bind(k)
+            .bind(&gtitle)
+            .bind(year)
+            .bind(&gfields)
+            .fetch_one(&mut *c)
+            .await?;
+            new_group = r.1;
+            Some(r.0)
+        }
+        _ => None,
+    };
     let id: i64 = match sqlx::query_scalar(
         "INSERT INTO torrents (type_id, title, subtitle, description, mediainfo, fields, size, file_count, piece_length,
-                               meta_version, info_hash_v1, info_hash_v2, content_fp, blob_key, uploader_id, is_anonymous, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id",
+                               meta_version, info_hash_v1, info_hash_v2, content_fp, blob_key, uploader_id, is_anonymous, status, group_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id",
     )
     .bind(&m.type_id)
     .bind(&title)
@@ -371,6 +488,7 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
     .bind(uploader)
     .bind(m.anonymous)
     .bind(&status)
+    .bind(group_id)
     .fetch_one(&mut *c)
     .await
     {
@@ -396,15 +514,26 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
         .execute(&mut *c)
         .await?;
     drop(c);
+    if let (Some(g), true) = (group_id, new_group) {
+        ctx.events
+            .publish(NewEvent::v1(
+                "group.created",
+                format!("group:{g}"),
+                json!({
+                    "group_id": g, "type_id": m.type_id, "group_key": group_key, "title": fields.get("title"),
+                }),
+            ))
+            .await?;
+    }
     ctx.events
         .publish(NewEvent::v1("torrent.created", format!("torrent:{id}"), json!({
-            "torrent_id": id, "group_id": null, "type_id": m.type_id, "uploader_id": uploader, "anonymous": m.anonymous,
+            "torrent_id": id, "group_id": group_id, "type_id": m.type_id, "uploader_id": uploader, "anonymous": m.anonymous,
             "size": parsed.total_size, "file_count": parsed.files.len(), "status": status,
             "info_hash_v1": ih_v1.as_ref().map(hex::encode), "info_hash_v2": ih_v2.as_ref().map(hex::encode),
             "meta_version": norm.meta as i16, "title": title, "created_at": chrono::Utc::now().timestamp_millis(),
         })))
         .await?;
-    Ok(json!({ "id": id, "group_id": null, "status": status,
+    Ok(json!({ "id": id, "group_id": group_id, "status": status,
                "info_hash_v1": ih_v1.as_ref().map(hex::encode), "info_hash_v2": ih_v2.as_ref().map(hex::encode),
                "need_redownload": true, "download_url": format!("/api/p/torrent/v1/torrents/{id}/download") }))
 }
@@ -597,6 +726,65 @@ async fn http_get(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
     .into_response())
 }
 
+/// 可上传的资源类型：资源类型插件提供 schema；只在配置中登记的类型没有 schema
+async fn http_types(State(t): State<Arc<Torrent>>, ctx: RequestCtx) -> PResult<Response> {
+    let cfg = t.cfg()?;
+    let mut items: Vec<serde_json::Value> = t
+        .types(&ctx)
+        .await?
+        .iter()
+        .map(|(p, i)| {
+            json!({ "type_id": i.type_id, "name_term": i.name_term, "plugin": p,
+                              "field_schema": i.field_schema, "group_schema": i.group_schema })
+        })
+        .collect();
+    for ty in &cfg.types {
+        if !items.iter().any(|i| i["type_id"] == ty.as_str()) {
+            items.push(
+                json!({ "type_id": ty, "name_term": format!("torrent.type.{ty}"), "plugin": null,
+                               "field_schema": null, "group_schema": null }),
+            );
+        }
+    }
+    Ok(Json(json!({ "items": items })).into_response())
+}
+
+/// Group 详情与其下已发布的种子（按体积排序）
+async fn http_group(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
+    if !has(&ctx, "torrent.download").await? {
+        return Err(PluginError::forbidden("not allowed"));
+    }
+    let mut c = ctx.sql.conn().await?;
+    let g = sqlx::query(
+        "SELECT id, type_id, group_key, title, year, fields, torrent_count, created_at FROM groups
+          WHERE id = $1 AND deleted_at IS NULL AND merged_into IS NULL",
+    )
+    .bind(id)
+    .fetch_optional(&mut *c)
+    .await?
+    .ok_or_else(|| PluginError::not_found("group not found"))?;
+    let rows = sqlx::query(
+        "SELECT id, title, subtitle, size, fields, created_at FROM torrents
+          WHERE group_id = $1 AND status = 'approved' AND deleted_at IS NULL ORDER BY size DESC, id LIMIT 500",
+    )
+    .bind(id)
+    .fetch_all(&mut *c)
+    .await?;
+    let torrents: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| json!({ "id": r.get::<i64, _>(0), "title": r.get::<String, _>(1), "subtitle": r.get::<Option<String>, _>(2),
+                         "size": r.get::<i64, _>(3), "fields": r.get::<serde_json::Value, _>(4),
+                         "created_at": r.get::<chrono::DateTime<chrono::Utc>, _>(5).to_rfc3339() }))
+        .collect();
+    Ok(Json(json!({
+        "id": g.get::<i64, _>(0), "type_id": g.get::<String, _>(1), "group_key": g.get::<String, _>(2),
+        "title": g.get::<String, _>(3), "year": g.get::<Option<i32>, _>(4), "fields": g.get::<serde_json::Value, _>(5),
+        "torrent_count": g.get::<i32, _>(6), "created_at": g.get::<chrono::DateTime<chrono::Utc>, _>(7).to_rfc3339(),
+        "torrents": torrents,
+    }))
+    .into_response())
+}
+
 async fn http_files(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
     let t = load(&ctx, id)
         .await?
@@ -644,6 +832,8 @@ impl HttpRoutes for Routes {
     fn router(&self) -> Router {
         Router::new()
             .route("/v1/torrents", post(http_upload))
+            .route("/v1/types", get(http_types))
+            .route("/v1/groups/{id}", get(http_group))
             .route("/v1/torrents/{id}", get(http_get))
             .route("/v1/torrents/{id}/files", get(http_files))
             .route("/v1/torrents/{id}/download", get(http_download))

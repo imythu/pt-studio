@@ -93,6 +93,7 @@ pub struct WasmPlugin {
     http: Option<ex::http_handler::GuestIndices>,
     service: Option<ex::service_provider::GuestIndices>,
     search: Option<ex::search_contributor::GuestIndices>,
+    content: Option<ex::content_type::GuestIndices>,
 }
 
 impl std::fmt::Debug for WasmPlugin {
@@ -334,6 +335,66 @@ impl SearchContributor for Adapter {
             out.push((*id, doc));
         }
         Ok(out)
+    }
+}
+
+fn parse_json(s: &str) -> PResult<serde_json::Value> {
+    serde_json::from_str(s).map_err(|_| PluginError::internal("content-type returned invalid JSON"))
+}
+
+#[async_trait]
+impl pt_plugin_api::ContentType for Adapter {
+    async fn info(&self, ctx: &Ctx) -> pt_plugin_api::TypeInfo {
+        let r: PResult<ex::content_type::TypeInfo> = async {
+            let p = &self.0;
+            let idx = p
+                .content
+                .as_ref()
+                .ok_or_else(|| PluginError::internal("content-type not exported"))?;
+            let (mut store, inst, _permit) = p.instantiate(ctx).await?;
+            let g = idx.load(&mut store, &inst).map_err(|e| trap_error(&p.id, &e))?;
+            g.call_info(&mut store).await.map_err(|e| trap_error(&p.id, &e))
+        }
+        .await;
+        match r {
+            Ok(i) => pt_plugin_api::TypeInfo {
+                type_id: i.type_id,
+                name_term: i.name_term,
+                field_schema: serde_json::from_str(&i.field_schema).unwrap_or_default(),
+                group_schema: i.group_schema.and_then(|g| serde_json::from_str(&g).ok()),
+            },
+            Err(e) => {
+                tracing::warn!(plugin = %self.0.id, error = %e, "content-type info failed");
+                pt_plugin_api::TypeInfo {
+                    type_id: String::new(),
+                    name_term: String::new(),
+                    field_schema: serde_json::Value::Null,
+                    group_schema: None,
+                }
+            }
+        }
+    }
+
+    async fn normalize(&self, ctx: &Ctx, fields: serde_json::Value) -> PResult<serde_json::Value> {
+        let f = fields.to_string();
+        let out = call_export!(self.0, ctx, content, |g, store| g
+            .call_normalize(&mut store, &f)
+            .await)?;
+        parse_json(&out)
+    }
+
+    async fn group_key(&self, ctx: &Ctx, fields: &serde_json::Value) -> PResult<Option<String>> {
+        let f = fields.to_string();
+        call_export!(self.0, ctx, content, |g, store| g
+            .call_group_key(&mut store, &f)
+            .await)
+    }
+
+    async fn canonical_title(&self, ctx: &Ctx, fields: &serde_json::Value) -> PResult<String> {
+        let f = fields.to_string();
+        call_export!(self.0, ctx, content, |g, store| g
+            .call_canonical_title(&mut store, &f)
+            .await)
     }
 }
 
@@ -639,6 +700,7 @@ fn load_one(
         http: ex::http_handler::GuestIndices::new(&pre).ok(),
         service: ex::service_provider::GuestIndices::new(&pre).ok(),
         search: ex::search_contributor::GuestIndices::new(&pre).ok(),
+        content: ex::content_type::GuestIndices::new(&pre).ok(),
         pre,
     });
     // 导出与清单一致（plugin-api.md §2.1）
@@ -667,6 +729,7 @@ fn load_one(
             wp.search.is_some(),
             m.capabilities.search_contributor,
         ),
+        ("content-type", wp.content.is_some(), m.capabilities.content_type),
     ];
     for (iface, exported, declared) in checks {
         if exported != declared {
@@ -711,6 +774,10 @@ fn load_one(
             .search
             .is_some()
             .then(|| adapter.clone() as Arc<dyn SearchContributor>),
+        content_type: wp
+            .content
+            .is_some()
+            .then(|| adapter.clone() as Arc<dyn pt_plugin_api::ContentType>),
         json_services,
         ..Default::default()
     })

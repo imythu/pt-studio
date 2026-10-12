@@ -1,0 +1,16 @@
+[package]
+name = "pt-wasm-type-generic"
+description = "PT Studio generic content type (WASM): admin-defined kinds compiled to JSON Schema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wit-bindgen = "0.62"
+pt-type-kit = { path = "../../../crates/type-kit" }

@@ -52,6 +52,7 @@ pub struct PluginRuntime {
     pub workers: Vec<(String, Arc<dyn pt_plugin_api::PartitionWorker>)>,
     pub http: Option<Arc<dyn HttpRoutes>>,
     pub search_contributor: Option<Arc<dyn SearchContributor>>,
+    pub content_type: Option<Arc<dyn pt_plugin_api::ContentType>>,
     pub redis: RedisGateway,
 }
 
@@ -342,6 +343,9 @@ impl Shared {
     }
 }
 
+/// 资源类型导出（content-types-common §2：normalize 为纯函数，p99 < 5 ms）
+const CONTENT_TYPE_TIMEOUT_MS: i64 = 1_000;
+
 /// 贡献者导出调用的超时（search-meilisearch LLD §1.6.1）
 const CONTRIBUTOR_SCHEMA_TIMEOUT_MS: i64 = 2_000;
 const CONTRIBUTOR_DOCS_TIMEOUT_MS: i64 = 5_000;
@@ -505,6 +509,59 @@ impl KernelLink for Shared {
             Box::pin(async move { imp.to_documents(c, &index, &ids).await })
         })
         .await
+    }
+
+    fn content_type_plugins(&self, _caller: &Ctx) -> PResult<Vec<String>> {
+        Ok(self
+            .order
+            .iter()
+            .filter(|id| self.plugins.get(*id).is_some_and(|rt| rt.content_type.is_some()))
+            .cloned()
+            .collect())
+    }
+
+    async fn content_type_call(&self, caller: &Ctx, plugin: &str, op: &str, fields: Json) -> PResult<Json> {
+        let imp = self
+            .plugins
+            .get(plugin)
+            .and_then(|rt| rt.content_type.clone())
+            .ok_or_else(|| PluginError::not_found(format!("plugin `{plugin}` is not a content type")))?;
+        let op = op.to_owned();
+        let spec = self.child_spec(
+            caller,
+            InvocationKind::ContentType,
+            plugin,
+            CONTENT_TYPE_TIMEOUT_MS,
+        )?;
+        let (ctx, uow) = self.make_ctx(plugin, spec)?;
+        let budget = std::time::Duration::from_millis(
+            u64::try_from((ctx.invocation.deadline - now_ms()).max(0)).unwrap_or(0),
+        );
+        let fut = async {
+            match op.as_str() {
+                "info" => {
+                    let i = imp.info(&ctx).await;
+                    Ok(
+                        serde_json::json!({ "type_id": i.type_id, "name_term": i.name_term,
+                                           "field_schema": i.field_schema, "group_schema": i.group_schema }),
+                    )
+                }
+                "normalize" => imp.normalize(&ctx, fields).await,
+                "group_key" => imp.group_key(&ctx, &fields).await.map(|k| serde_json::json!(k)),
+                "canonical_title" => imp.canonical_title(&ctx, &fields).await.map(Json::String),
+                other => Err(PluginError::bad_request(format!(
+                    "unknown content-type op `{other}`"
+                ))),
+            }
+        };
+        let r = match tokio::time::timeout(budget, fut).await {
+            Ok(r) => r,
+            Err(_) => Err(
+                PluginError::new("kernel.timeout", format!("content type `{plugin}` timed out")).retryable(),
+            ),
+        };
+        uow.finish(r.is_ok()).await?;
+        r
     }
 
     async fn authenticate(&self, caller: &Ctx, credential: Credential) -> PResult<Option<Principal>> {
