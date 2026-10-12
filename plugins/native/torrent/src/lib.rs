@@ -459,6 +459,7 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
             let year = fields
                 .get("year")
                 .or_else(|| fields.get("first_air_year"))
+                .or_else(|| fields.get("original_year"))
                 .and_then(serde_json::Value::as_i64)
                 .and_then(|y| i32::try_from(y).ok())
                 .filter(|y| (1800..=2200).contains(y));
@@ -948,6 +949,7 @@ async fn http_update(
                         let year = fields
                             .get("year")
                             .or_else(|| fields.get("first_air_year"))
+                            .or_else(|| fields.get("original_year"))
                             .and_then(serde_json::Value::as_i64)
                             .and_then(|y| i32::try_from(y).ok());
                         let r: (i64, bool) = sqlx::query_as(
@@ -1201,6 +1203,48 @@ impl pt_plugin_api::JsonService for TorrentsSvc {
                         "group.updated",
                         format!("group:{gid}"),
                         json!({ "group_id": gid, "fields": keys }),
+                    ))
+                    .await?;
+                Ok(json!({ "updated": true }))
+            }
+            // 资源类型插件写回种子字段（如 type-music 的 log 分数；作用域 write:fields，只能更新本类型的种子）
+            "update_fields" => {
+                if !ctx.invocation.has_scope("write:fields") {
+                    return Err(PluginError::forbidden("scope write:fields required"));
+                }
+                let patch = a.get("fields").cloned().unwrap_or_else(|| json!({}));
+                let Some(obj) = patch.as_object() else {
+                    return Err(PluginError::validation("fields must be an object"));
+                };
+                let caller_type = ctx
+                    .invocation
+                    .caller_plugin
+                    .strip_prefix("type-")
+                    .unwrap_or("")
+                    .to_owned();
+                let mut c = ctx.sql.conn().await?;
+                let n = sqlx::query(
+                    "UPDATE torrents SET fields = fields || $2, updated_at = now(), version = version + 1
+                      WHERE id = $1 AND type_id = $3 AND deleted_at IS NULL",
+                )
+                .bind(gid)
+                .bind(&patch)
+                .bind(&caller_type)
+                .execute(&mut *c)
+                .await?
+                .rows_affected();
+                drop(c);
+                if n == 0 {
+                    return Err(PluginError::not_found("torrent not found for this content type"));
+                }
+                let mut keys: Vec<String> = obj.keys().map(|k| format!("fields.{k}")).collect();
+                keys.sort();
+                keys.insert(0, "fields".into());
+                ctx.events
+                    .publish(NewEvent::v1(
+                        "torrent.updated",
+                        format!("torrent:{gid}"),
+                        json!({ "torrent_id": gid, "fields": keys, "by_plugin": ctx.invocation.caller_plugin }),
                     ))
                     .await?;
                 Ok(json!({ "updated": true }))

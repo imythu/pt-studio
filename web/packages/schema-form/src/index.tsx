@@ -28,6 +28,8 @@ export interface Schema {
   /** 属性显示顺序（JSON 对象经服务端后不保证键序） */
   'x-pt-order'?: string[];
   'x-pt-filter'?: string;
+  /** 只由服务端写入（如 log 分数），表单不显示 */
+  readOnly?: boolean;
   const?: unknown;
   oneOf?: Schema[];
 }
@@ -224,7 +226,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
     return (
       <fieldset className="pt-fieldset">
         {path && <legend>{label}</legend>}
-        {ordered(schema).map(([k, s]) => (
+        {ordered(schema).filter(([, s]) => !s.readOnly).map(([k, s]) => (
           <SchemaField
             key={k}
             schema={s}
@@ -274,6 +276,9 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
       </FieldWrap>
     );
   }
+  if (ty === 'array' && schema['x-pt-widget'] === 'log-files') {
+    return <LogFiles label={label} error={err} hint={schema.description} value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />;
+  }
   if (ty === 'array' && (!schema.items || primary(schema.items) === 'string')) {
     const cur = Array.isArray(value) ? (value as string[]) : [];
     return (
@@ -313,6 +318,41 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   }
   // 未覆盖的结构：JSON 文本编辑
   return <JsonField label={label} value={value} onChange={onChange} error={err} />;
+}
+
+/** 文本文件解码：UTF-16 LE / BE（BOM）或 UTF-8（EAC 日志常为 UTF-16 LE） */
+export function decodeText(buf: ArrayBuffer): string {
+  const b = new Uint8Array(buf);
+  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder('utf-16le').decode(b.subarray(2));
+  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder('utf-16be').decode(b.subarray(2));
+  return new TextDecoder('utf-8').decode(b);
+}
+
+/** 日志文件：选择多个 .log / .txt，读成文本数组 */
+function LogFiles({ label, error, hint, value, onChange }: { label: string; error?: string; hint?: string; value: string[]; onChange(v: unknown): void }) {
+  return (
+    <FieldWrap label={label} error={error} hint={hint}>
+      <input
+        type="file"
+        multiple
+        accept=".log,.txt,text/plain"
+        onChange={async (e) => {
+          const files = Array.from(e.target.files ?? []);
+          const texts = await Promise.all(files.map(async (f) => decodeText(await f.arrayBuffer())));
+          onChange(texts.length > 0 ? [...value, ...texts].slice(0, 5) : value);
+          e.target.value = '';
+        }}
+      />
+      {value.length > 0 && (
+        <span className="pt-field-hint">
+          {value.map((l, i) => `#${i + 1} ${(l.length / 1024).toFixed(1)} KiB`).join(' · ')}{' '}
+          <button type="button" className="pt-btn pt-btn-ghost" onClick={() => onChange(undefined)}>
+            ✕
+          </button>
+        </span>
+      )}
+    </FieldWrap>
+  );
 }
 
 export function JsonField({ label, value, onChange, error }: { label: string; value: unknown; onChange(v: unknown): void; error?: string }) {

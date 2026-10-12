@@ -274,6 +274,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-type-music"
+version = "0.1.0"
+dependencies = [
+ "pt-type-kit",
+ "serde",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "pt-wasm-type-tv"
 version = "0.1.0"
 dependencies = [

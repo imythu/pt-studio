@@ -1,0 +1,121 @@
+id = "type-music"
+name = "资源类型：音乐"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "音乐：艺人与专辑分组、版本（介质 / 年份 / 厂牌 / 目录号）、格式与编码规则、文件检查、抓轨日志评分、搜索字段"
+
+requires = ["ctx.torrents@^0.1"]
+
+[capabilities]
+sql = true
+content_type = true
+search_contributor = true
+views = ["torrent.v_torrent_fields"]
+
+[capabilities.scopes]
+"ctx.torrents" = ["write:fields"]
+
+[[hooks]]
+hook = "torrent.before_upload"
+priority = 22
+
+[[http.routes]]
+id = "log_check"
+method = "POST"
+path = "/v1/log-check"
+auth = "user"
+rate_limit = "user:30/m"
+max_body_kb = 600
+
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+
+[[subscriptions]]
+name = "on_torrent_updated"
+event = "torrent.updated"
+
+[[jobs]]
+name = "check_logs"
+timeout_secs = 60
+
+[database]
+migrations = "migrations"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.title_template]
+type = "string"
+maxLength = 300
+title = "规范标题模板"
+default = "{artist_credit} - {album} {original_year?[|]} {edition_title?(|)} [{media} {format} {encoding}{log? |}]"
+
+[settings_schema.properties.log_check_enabled]
+type = "boolean"
+title = "上传后检查抓轨日志"
+default = true
+
+[terms]
+"type-music.name" = { zh-CN = "音乐", en = "Music" }
+"type-music.field.release_name" = { zh-CN = "发布名", en = "Release name" }
+"type-music.field.album" = { zh-CN = "专辑", en = "Album" }
+"type-music.field.artists" = { zh-CN = "艺人", en = "Artists" }
+"type-music.field.guest_artists" = { zh-CN = "客座艺人", en = "Guest artists" }
+"type-music.field.composers" = { zh-CN = "作曲", en = "Composers" }
+"type-music.field.conductors" = { zh-CN = "指挥", en = "Conductors" }
+"type-music.field.producers" = { zh-CN = "制作人", en = "Producers" }
+"type-music.field.remixers" = { zh-CN = "混音", en = "Remixers" }
+"type-music.field.djs" = { zh-CN = "DJ", en = "DJs" }
+"type-music.field.release_type" = { zh-CN = "发行类型", en = "Release type" }
+"type-music.field.original_year" = { zh-CN = "原始年份", en = "Original year" }
+"type-music.field.mb_release_group_id" = { zh-CN = "MusicBrainz", en = "MusicBrainz" }
+"type-music.field.media" = { zh-CN = "介质", en = "Media" }
+"type-music.field.edition_year" = { zh-CN = "版本年份", en = "Edition year" }
+"type-music.field.edition_label" = { zh-CN = "厂牌", en = "Label" }
+"type-music.field.edition_catalog" = { zh-CN = "目录号", en = "Catalog number" }
+"type-music.field.edition_title" = { zh-CN = "版本名", en = "Edition title" }
+"type-music.field.format" = { zh-CN = "格式", en = "Format" }
+"type-music.field.encoding" = { zh-CN = "编码", en = "Encoding" }
+"type-music.field.has_log" = { zh-CN = "有 log", en = "Has log" }
+"type-music.field.has_cue" = { zh-CN = "有 cue", en = "Has cue" }
+"type-music.field.scene" = { zh-CN = "Scene", en = "Scene" }
+"type-music.field.logs" = { zh-CN = "抓轨日志", en = "Rip logs" }
+"type-music.field.log_score" = { zh-CN = "log 分数", en = "Log score" }
+"type-music.field.cover" = { zh-CN = "封面", en = "Cover" }
+"type-music.field.genres" = { zh-CN = "风格", en = "Genres" }
+"type-music.field.description" = { zh-CN = "简介", en = "Description" }
+"type-music.field.release_type.album" = { zh-CN = "专辑", en = "Album" }
+"type-music.field.release_type.ep" = { zh-CN = "EP", en = "EP" }
+"type-music.field.release_type.single" = { zh-CN = "单曲", en = "Single" }
+"type-music.field.release_type.compilation" = { zh-CN = "合辑", en = "Compilation" }
+"type-music.field.release_type.soundtrack" = { zh-CN = "原声", en = "Soundtrack" }
+"type-music.field.release_type.live" = { zh-CN = "现场", en = "Live album" }
+"type-music.field.release_type.remix" = { zh-CN = "混音", en = "Remix" }
+"type-music.field.release_type.anthology" = { zh-CN = "精选集", en = "Anthology" }
+"type-music.field.release_type.mixtape" = { zh-CN = "混音带", en = "Mixtape" }
+"type-music.field.release_type.bootleg" = { zh-CN = "非官方", en = "Bootleg" }
+"type-music.field.release_type.interview" = { zh-CN = "访谈", en = "Interview" }
+"type-music.field.release_type.other" = { zh-CN = "其他", en = "Other" }
+"type-music.field.encoding.lossless" = { zh-CN = "无损", en = "Lossless" }
+"type-music.field.encoding.lossless_24" = { zh-CN = "24bit 无损", en = "24bit Lossless" }
+"type-music.field.media.vinyl" = { zh-CN = "黑胶", en = "Vinyl" }
+"type-music.field.media.cassette" = { zh-CN = "磁带", en = "Cassette" }
+"type-music.field.media.soundboard" = { zh-CN = "调音台录音", en = "Soundboard" }
+"type-music.field.media.other" = { zh-CN = "其他", en = "Other" }
+"type-music.log_issue.unknown_ripper" = { zh-CN = "无法识别的抓轨软件", en = "Unknown ripper" }
+"type-music.log_issue.insecure_mode" = { zh-CN = "未使用安全模式", en = "Not ripped in secure mode" }
+"type-music.log_issue.zero_offset" = { zh-CN = "读取偏移为 0", en = "Read offset is zero" }
+"type-music.log_issue.audio_cache" = { zh-CN = "未禁用音频缓存", en = "Audio cache not defeated" }
+"type-music.log_issue.gaps_not_detected" = { zh-CN = "未检测空隙", en = "Gaps not detected" }
+"type-music.log_issue.normalized" = { zh-CN = "使用了归一化", en = "Normalization was applied" }
+"type-music.log_issue.no_checksum" = { zh-CN = "缺少日志校验和", en = "Log checksum missing" }
+"type-music.log_issue.checksum_unverified" = { zh-CN = "日志校验和未验证", en = "Log checksum not verified" }
+"type-music.log_issue.no_tracks" = { zh-CN = "未找到音轨", en = "No tracks found" }
+"type-music.log_issue.crc_mismatch" = { zh-CN = "测试与拷贝 CRC 不一致", en = "Test and copy CRC mismatch" }
+"type-music.log_issue.read_errors" = { zh-CN = "有读取错误", en = "Read errors" }
+"type-music.log_issue.not_accurate" = { zh-CN = "AccurateRip 未匹配", en = "Not accurately ripped" }
+"type-music.log_issue.no_test_copy" = { zh-CN = "未进行测试拷贝", en = "No test copy" }

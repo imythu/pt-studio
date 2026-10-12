@@ -99,5 +99,11 @@
 | `type-anime.external_id_required` | 422 | type-anime | 标题与外部 ID 至少填一项 |
 | `type-anime.subtitle_invalid` | 422 | type-anime | 字幕语言 / 方式无法识别 |
 | `type-anime.scope_mismatch` | 422 | type-anime | 种子文件列表与声明的范围不符 |
+| `type-music.format_encoding_invalid` | 422 | type-music | 格式与编码组合不合法 |
+| `type-music.no_audio_files` | 422 | type-music | 种子中没有与格式对应的音频文件 |
+| `type-music.log_missing` | 422 | type-music | 声明有 log 但种子中没有 .log 文件 |
+| `type-music.cue_missing` | 422 | type-music | 声明有 cue 但种子中没有 .cue 文件 |
+| `type-music.forbidden_file` | 422 | type-music | 种子中含可执行文件 |
+| `type-music.log_too_large` | 413 | type-music | log 超过 512 KiB |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `llm-claude.upstream_error`、`llm-openai-compat.upstream_error` | 502 | llm-* | 模型服务出错 |

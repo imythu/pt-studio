@@ -49,3 +49,15 @@ describe('oneOf (type-generic kinds)', () => {
     expect(validate(generic, {})).toEqual({ '/kind': 'required' });
   });
 });
+
+describe('decodeText (rip logs)', () => {
+  it('decodes UTF-16 LE with BOM and plain UTF-8', async () => {
+    const { decodeText } = await import('../src/index');
+    const s = 'Exact Audio Copy V1.6';
+    const le = new Uint8Array(2 + s.length * 2);
+    le.set([0xff, 0xfe]);
+    for (let i = 0; i < s.length; i++) le[2 + i * 2] = s.charCodeAt(i);
+    expect(decodeText(le.buffer)).toBe(s);
+    expect(decodeText(new TextEncoder().encode('日志').buffer as ArrayBuffer)).toBe('日志');
+  });
+});

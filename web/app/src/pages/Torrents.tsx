@@ -123,7 +123,7 @@ export function TypeBadge({ typeId }: { typeId?: string }) {
 }
 
 /** 由元数据面板展示的字段，不在通用字段表中重复 */
-const HIDDEN_FIELDS = ['release_name', 'poster', 'overview', 'group_title'];
+const HIDDEN_FIELDS = ['release_name', 'poster', 'overview', 'group_title', 'edition_key', 'logs', 'cover', 'description'];
 
 /** 作品元数据：海报、简介、类型、评分（来自元数据插件写入的 Group 字段） */
 export function GroupMeta({ fields }: { fields: Record<string, unknown> }) {
