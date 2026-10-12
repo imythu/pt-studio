@@ -13,7 +13,7 @@ use std::sync::{Arc, OnceLock};
 use async_trait::async_trait;
 use axum::{
     Json, Router,
-    extract::{Multipart, Path, State},
+    extract::{Multipart, Path, Query, State},
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -826,6 +826,289 @@ async fn http_download(
     Ok(resp)
 }
 
+// ---------------- 编辑、状态、删除（03 §1.6～§1.8 子集） ----------------
+
+/// merge-patch：字段缺省 → None；显式 null → Some(None)
+fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+#[derive(Debug, Deserialize)]
+struct TorrentPatch {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    subtitle: Option<Option<String>>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    fields: Option<serde_json::Value>,
+}
+
+/// 编辑：本人（候选 / 待审 / 已发布）或 `torrent.update`；fields 经资源类型重新规范化，分组键变化时移到新 Group
+async fn http_update(
+    State(t): State<Arc<Torrent>>,
+    ctx: RequestCtx,
+    Path(id): Path<i64>,
+    Json(p): Json<TorrentPatch>,
+) -> PResult<Response> {
+    let row = load(&ctx, id)
+        .await?
+        .filter(|r| r.status != "deleted")
+        .ok_or_else(|| PluginError::not_found("torrent not found"))?;
+    if !(is_owner(&ctx, &row) || has(&ctx, "torrent.update").await?) {
+        return Err(PluginError::forbidden("not allowed to edit this torrent"));
+    }
+    let mut changed: Vec<&str> = Vec::new();
+    let title = match &p.title {
+        Some(x) => {
+            changed.push("title");
+            sanitize_title(x)?
+        }
+        None => row.title.clone(),
+    };
+    let subtitle = match p.subtitle {
+        Some(x) => {
+            changed.push("subtitle");
+            x.map(|s| s.trim().chars().take(300).collect::<String>())
+                .filter(|s| !s.is_empty())
+        }
+        None => row.subtitle.clone(),
+    };
+    let description = match p.description {
+        Some(d) if d.chars().count() <= 65536 => {
+            changed.push("description");
+            d
+        }
+        Some(_) => return Err(PluginError::validation("description is too long")),
+        None => row.description.clone(),
+    };
+    let mut fields = row.fields.clone();
+    let mut group_id = row.group_id;
+    if let Some(f) = p.fields {
+        if !f.is_object() {
+            return Err(PluginError::validation("fields must be an object"));
+        }
+        changed.push("fields");
+        fields = f;
+        if let Some((plugin, info)) = t.type_provider(&ctx, &row.type_id).await? {
+            fields = ctx.content_type_call(&plugin, "normalize", fields).await?;
+            let key = ctx
+                .content_type_call(&plugin, "group_key", fields.clone())
+                .await?
+                .as_str()
+                .map(str::to_owned);
+            let mut c = ctx.sql.conn().await?;
+            let cur_key: Option<String> = match row.group_id {
+                Some(g) => {
+                    sqlx::query_scalar("SELECT group_key FROM groups WHERE id = $1")
+                        .bind(g)
+                        .fetch_optional(&mut *c)
+                        .await?
+                }
+                None => None,
+            };
+            if key != cur_key {
+                if let Some(old) = row.group_id {
+                    sqlx::query("UPDATE groups SET torrent_count = greatest(torrent_count - 1, 0), updated_at = now() WHERE id = $1")
+                        .bind(old)
+                        .execute(&mut *c)
+                        .await?;
+                }
+                group_id = match &key {
+                    Some(k) => {
+                        let gtitle = fields
+                            .get("title")
+                            .and_then(serde_json::Value::as_str)
+                            .map_or_else(|| title.clone(), str::to_owned);
+                        let year = fields
+                            .get("year")
+                            .and_then(serde_json::Value::as_i64)
+                            .and_then(|y| i32::try_from(y).ok());
+                        let r: (i64, bool) = sqlx::query_as(
+                            "INSERT INTO groups (type_id, group_key, title, year, fields, torrent_count, last_upload_at)
+                             VALUES ($1, $2, $3, $4, $5, 1, now())
+                             ON CONFLICT (type_id, group_key) WHERE deleted_at IS NULL AND merged_into IS NULL
+                             DO UPDATE SET torrent_count = groups.torrent_count + 1, updated_at = now()
+                             RETURNING id, (xmax = 0)",
+                        )
+                        .bind(&row.type_id)
+                        .bind(k)
+                        .bind(&gtitle)
+                        .bind(year)
+                        .bind(group_fields(info.group_schema.as_ref(), &fields))
+                        .fetch_one(&mut *c)
+                        .await?;
+                        if r.1 {
+                            drop(c);
+                            ctx.events
+                                .publish(NewEvent::v1(
+                                    "group.created",
+                                    format!("group:{}", r.0),
+                                    json!({
+                                    "group_id": r.0, "type_id": row.type_id, "group_key": k }),
+                                ))
+                                .await?;
+                        }
+                        Some(r.0)
+                    }
+                    None => None,
+                };
+                changed.push("group_id");
+            }
+        }
+    }
+    if changed.is_empty() {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    let mut c = ctx.sql.conn().await?;
+    sqlx::query(
+        "UPDATE torrents SET title = $2, subtitle = $3, description = $4, fields = $5, group_id = $6,
+                updated_at = now(), version = version + 1 WHERE id = $1",
+    )
+    .bind(id)
+    .bind(&title)
+    .bind(&subtitle)
+    .bind(&description)
+    .bind(&fields)
+    .bind(group_id)
+    .execute(&mut *c)
+    .await?;
+    drop(c);
+    ctx.events
+        .publish(NewEvent::v1(
+            "torrent.updated",
+            format!("torrent:{id}"),
+            json!({
+            "torrent_id": id, "fields": changed, "group_id": group_id, "old_group_id": row.group_id }),
+        ))
+        .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusBody {
+    to: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// 审核状态（`torrent.update`）：candidate / pending / approved / rejected / disabled
+async fn http_set_status(
+    ctx: RequestCtx,
+    Path(id): Path<i64>,
+    Json(b): Json<StatusBody>,
+) -> PResult<Response> {
+    if !matches!(
+        b.to.as_str(),
+        "candidate" | "pending" | "approved" | "rejected" | "disabled"
+    ) {
+        return Err(PluginError::validation("unknown status"));
+    }
+    let reason = b.reason.map(|r| r.chars().take(500).collect::<String>());
+    let by = ctx.user_id();
+    let mut c = ctx.sql.conn().await?;
+    let from: Option<String> =
+        sqlx::query_scalar("SELECT status FROM torrents WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
+            .bind(id)
+            .fetch_optional(&mut *c)
+            .await?;
+    let from = from.ok_or_else(|| PluginError::not_found("torrent not found"))?;
+    if from == b.to {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    sqlx::query("UPDATE torrents SET status = $2, status_reason = $3, updated_at = now(), version = version + 1 WHERE id = $1")
+        .bind(id)
+        .bind(&b.to)
+        .bind(&reason)
+        .execute(&mut *c)
+        .await?;
+    drop(c);
+    ctx.events
+        .publish(NewEvent::v1(
+            "torrent.status_changed",
+            format!("torrent:{id}"),
+            json!({
+            "torrent_id": id, "from": from, "to": b.to, "reason": reason, "by_user_id": by }),
+        ))
+        .await?;
+    ctx.audit
+        .write(pt_plugin_api::AuditEntry {
+            action: "torrent.status_change".into(),
+            target: format!("torrent:{id}"),
+            details: json!({ "from": from, "to": b.to, "reason": reason }),
+        })
+        .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteQuery {
+    reason: Option<String>,
+}
+
+/// 软删除（`torrent.delete`）：status = deleted、deleted_at；Group 计数减一
+async fn http_delete(
+    ctx: RequestCtx,
+    Path(id): Path<i64>,
+    Query(q): Query<DeleteQuery>,
+) -> PResult<Response> {
+    let reason = q
+        .reason
+        .unwrap_or_else(|| "admin".into())
+        .chars()
+        .take(32)
+        .collect::<String>();
+    let mut c = ctx.sql.conn().await?;
+    let row: Option<(String, Option<i64>)> = sqlx::query_as(
+        "SELECT status, group_id FROM torrents WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(&mut *c)
+    .await?;
+    let (from, group) = row.ok_or_else(|| PluginError::not_found("torrent not found"))?;
+    sqlx::query("UPDATE torrents SET status = 'deleted', deleted_at = now(), delete_reason = $2, updated_at = now(), version = version + 1 WHERE id = $1")
+        .bind(id)
+        .bind(&reason)
+        .execute(&mut *c)
+        .await?;
+    if let Some(g) = group {
+        sqlx::query("UPDATE groups SET torrent_count = greatest(torrent_count - 1, 0), updated_at = now() WHERE id = $1")
+            .bind(g)
+            .execute(&mut *c)
+            .await?;
+    }
+    drop(c);
+    let by = ctx.user_id();
+    ctx.events
+        .publish(NewEvent::v1(
+            "torrent.status_changed",
+            format!("torrent:{id}"),
+            json!({
+            "torrent_id": id, "from": from, "to": "deleted", "reason": reason, "by_user_id": by }),
+        ))
+        .await?;
+    ctx.events
+        .publish(NewEvent::v1(
+            "torrent.deleted",
+            format!("torrent:{id}"),
+            json!({ "torrent_id": id, "reason": reason, "by_user_id": by }),
+        ))
+        .await?;
+    ctx.audit
+        .write(pt_plugin_api::AuditEntry {
+            action: "torrent.delete".into(),
+            target: format!("torrent:{id}"),
+            details: json!({ "reason": reason }),
+        })
+        .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 struct Routes(Arc<Torrent>);
 
 impl HttpRoutes for Routes {
@@ -834,7 +1117,9 @@ impl HttpRoutes for Routes {
             .route("/v1/torrents", post(http_upload))
             .route("/v1/types", get(http_types))
             .route("/v1/groups/{id}", get(http_group))
-            .route("/v1/torrents/{id}", get(http_get))
+            .route("/v1/torrents/{id}", get(http_get).patch(http_update))
+            .route("/v1/admin/torrents/{id}/status", post(http_set_status))
+            .route("/v1/admin/torrents/{id}", axum::routing::delete(http_delete))
             .route("/v1/torrents/{id}/files", get(http_files))
             .route("/v1/torrents/{id}/download", get(http_download))
             .with_state(self.0.clone())

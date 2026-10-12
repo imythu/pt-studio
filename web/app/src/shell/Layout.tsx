@@ -41,6 +41,7 @@ export function Layout() {
               <Link to={`/users/${s.me.id}`} className="username">
                 {s.me.username}
               </Link>
+              <NavLink to="/settings">{t('ui.nav.settings')}</NavLink>
               <Button
                 variant="ghost"
                 onClick={async () => {

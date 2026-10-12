@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "账号、会话、鉴权（ctx.auth）、权限（ctx.rbac）、用户资料（ctx.users）"
 
 provides = ["ctx.auth@0.1.0", "ctx.rbac@0.1.0", "ctx.users@0.1.0"]
-publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed"]
+publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset"]
 
 [capabilities]
 kv = true
@@ -104,6 +104,99 @@ path = "/v1/admin/users/{id}/restrictions/{rid}"
 auth = "admin"
 permission = "identity.users.ban"
 rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "list_sessions"
+method = "GET"
+path = "/v1/sessions"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "revoke_session"
+method = "DELETE"
+path = "/v1/sessions/{sid}"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "revoke_other_sessions"
+method = "POST"
+path = "/v1/sessions/revocations"
+auth = "user"
+rate_limit = "user:10/m"
+idempotent = true
+
+[[http.routes]]
+id = "get_profile"
+method = "GET"
+path = "/v1/users/me/profile"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "update_me"
+method = "PATCH"
+path = "/v1/users/me"
+auth = "user"
+permission = "identity.profile.update_own"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "change_password"
+method = "PUT"
+path = "/v1/users/me/password"
+auth = "user"
+permission = "identity.profile.update_own"
+rate_limit = "user:5/h"
+
+[[http.routes]]
+id = "reset_passkey"
+method = "POST"
+path = "/v1/users/me/passkey-resets"
+auth = "user"
+permission = "identity.passkey.reset_own"
+rate_limit = "user:3/d"
+
+[[http.routes]]
+id = "admin_list_users"
+method = "GET"
+path = "/v1/admin/users"
+auth = "admin"
+permission = "identity.users.read"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_get_user"
+method = "GET"
+path = "/v1/admin/users/{id}"
+auth = "admin"
+permission = "identity.users.read"
+
+[[http.routes]]
+id = "admin_update_user"
+method = "PATCH"
+path = "/v1/admin/users/{id}"
+auth = "admin"
+permission = "identity.users.update"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_revoke_sessions"
+method = "POST"
+path = "/v1/admin/users/{id}/session-revocations"
+auth = "admin"
+permission = "identity.users.ban"
+rate_limit = "user:30/h"
+idempotent = true
+
+[[http.routes]]
+id = "admin_user_roles_revoke"
+method = "DELETE"
+path = "/v1/admin/users/{id}/roles/{role}"
+auth = "admin"
+permission = "identity.roles.assign"
+rate_limit = "user:60/h"
 
 [[cron]]
 name = "restriction_sweep"

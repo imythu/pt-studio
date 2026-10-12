@@ -2,6 +2,8 @@ import type { ComponentType } from 'react';
 import { createBrowserRouter, Link } from 'react-router';
 import { useT } from '@pt-studio/terms';
 import { AdminHome, AdminPluginRoute } from './pages/Admin';
+import { AdminUser, AdminUsers } from './pages/AdminUsers';
+import { SettingsPage } from './pages/Settings';
 import { Login, Register } from './pages/Auth';
 import { PluginRoute } from './pages/PluginRoute';
 import { ProfilePage } from './pages/Profile';
@@ -43,7 +45,28 @@ export const router = createBrowserRouter([
       { path: 'groups/:id', element: <RequireLogin>{page('group', GroupPage)}</RequireLogin> },
       { path: 'upload', element: <RequireLogin>{page('upload', Upload)}</RequireLogin> },
       { path: 'users/:id', element: <RequireLogin>{page('profile', ProfilePage)}</RequireLogin> },
+      { path: 'settings', element: <RequireLogin>{page('settings', SettingsPage)}</RequireLogin> },
       { path: 'p/:plugin/*', element: <PluginRoute /> },
+      {
+        path: 'admin/users',
+        element: (
+          <RequireLogin>
+            <RequireStaff>
+              <AdminUsers />
+            </RequireStaff>
+          </RequireLogin>
+        ),
+      },
+      {
+        path: 'admin/users/:id',
+        element: (
+          <RequireLogin>
+            <RequireStaff>
+              <AdminUser />
+            </RequireStaff>
+          </RequireLogin>
+        ),
+      },
       {
         path: 'admin',
         element: (

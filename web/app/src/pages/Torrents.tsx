@@ -9,6 +9,10 @@ import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Sch
 import { Badge, Button, Card, Empty, Field, Input, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
 import { ApiError } from '@pt-studio/sdk';
 import { fieldSchemas, useTypes, type TypeInfo } from '../types';
+import { useSession } from '../session';
+import { useQueryClient } from '@tanstack/react-query';
+import { useToast } from '@pt-studio/ui-kit';
+import { useErrorText } from '../errors';
 import { ErrorText } from '../errors';
 
 export interface TorrentDoc {
@@ -230,6 +234,95 @@ interface TorrentDetail {
   fields: Record<string, unknown>;
 }
 
+/** 编辑（本人或 torrent.update）与审核（torrent.update / torrent.delete） */
+function ManageTorrent({ d }: { d: TorrentDetail }) {
+  const t = useT();
+  const s = useSession();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const errText = useErrorText();
+  const nav = useNavigate();
+  const [edit, setEdit] = useState<{ title: string; subtitle: string; description: string } | null>(null);
+  const [status, setStatus] = useState({ to: d.status, reason: '' });
+  const owner = s.me?.id === d.uploader.id;
+  const canEdit = owner || s.can('torrent.update');
+  if (!canEdit && !s.can('torrent.delete')) return null;
+  const key = ['torrent', String(d.id)];
+  const act = async (f: () => Promise<unknown>) => {
+    try {
+      await f();
+      toast(t('ui.admin.saved'), 'success');
+      await qc.invalidateQueries({ queryKey: key });
+    } catch (e) {
+      toast(errText(e), 'error');
+    }
+  };
+  return (
+    <Card title={t('ui.torrent.manage')}>
+      {canEdit &&
+        (edit ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void act(async () => {
+                await api(`/api/p/torrent/v1/torrents/${d.id}`, { method: 'PATCH', json: { ...edit, subtitle: edit.subtitle || null } });
+                setEdit(null);
+              });
+            }}
+          >
+            <Field label={t('ui.torrent.title')}>
+              <Input name="edit_title" value={edit.title} maxLength={300} onChange={(e) => setEdit({ ...edit, title: e.target.value })} required />
+            </Field>
+            <Field label={t('ui.upload.subtitle')}>
+              <Input value={edit.subtitle} maxLength={300} onChange={(e) => setEdit({ ...edit, subtitle: e.target.value })} />
+            </Field>
+            <Field label={t('ui.torrent.description')}>
+              <textarea className="pt-input" rows={6} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
+            </Field>
+            <Button type="submit" variant="primary">
+              {t('ui.admin.save')}
+            </Button>{' '}
+            <Button onClick={() => setEdit(null)}>{t('ui.common.cancel')}</Button>
+          </form>
+        ) : (
+          <Button onClick={() => setEdit({ title: d.title, subtitle: d.subtitle ?? '', description: d.description })}>{t('ui.torrent.edit')}</Button>
+        ))}
+      {s.can('torrent.update') && (
+        <form
+          className="searchbar moderation"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act(() => api(`/api/p/torrent/v1/admin/torrents/${d.id}/status`, { json: { to: status.to, reason: status.reason || undefined } }));
+          }}
+        >
+          <select className="pt-input" name="status" value={status.to} onChange={(e) => setStatus({ ...status, to: e.target.value })}>
+            {['candidate', 'pending', 'approved', 'rejected', 'disabled'].map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </select>
+          <Input placeholder={t('ui.admin.reason')} value={status.reason} maxLength={500} onChange={(e) => setStatus({ ...status, reason: e.target.value })} />
+          <Button type="submit">{t('ui.torrent.set_status')}</Button>
+        </form>
+      )}
+      {s.can('torrent.delete') && (
+        <Button
+          variant="danger"
+          onClick={() => {
+            if (!window.confirm(t('ui.torrent.delete_confirm'))) return;
+            void act(async () => {
+              await api(`/api/p/torrent/v1/admin/torrents/${d.id}?reason=admin`, { method: 'DELETE' });
+              nav('/torrents');
+            });
+          }}
+        >
+          {t('ui.torrent.delete')}
+        </Button>
+      )}
+      {s.isStaff && <Slot name="admin.torrent.tabs" ctx={{ torrent: d }} />}
+    </Card>
+  );
+}
+
 export function TorrentPage() {
   const t = useT();
   const { id } = useParams();
@@ -247,6 +340,7 @@ export function TorrentPage() {
     <div className="torrent">
       <h1>{d.title}</h1>
       {d.subtitle && <p className="pt-muted">{d.subtitle}</p>}
+      {d.status !== 'approved' && <Badge tone="danger">{d.status}</Badge>}
       <Slot name="torrent.detail.header" ctx={ctx} />
       <div className="with-sidebar reverse">
         <div className="main">
@@ -292,6 +386,7 @@ export function TorrentPage() {
           <Slot name="torrent.detail.tabs" ctx={ctx} />
         </div>
         <aside className="sidebar">
+          <ManageTorrent d={d} />
           <Slot name="torrent.detail.sidebar" ctx={ctx} />
         </aside>
       </div>

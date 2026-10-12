@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "种子上传、规范化、存储与下载（ctx.torrents）"
 
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
-publishes = ["torrent.created", "torrent.downloaded", "group.created"]
+publishes = ["torrent.created", "torrent.updated", "torrent.status_changed", "torrent.deleted", "torrent.downloaded", "group.created"]
 
 [capabilities]
 kv = true
@@ -71,6 +71,29 @@ path = "/v1/torrents/{id}/download"
 auth = "user"
 permission = "torrent.download"
 rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "update_torrent"
+method = "PATCH"
+path = "/v1/torrents/{id}"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_set_status"
+method = "POST"
+path = "/v1/admin/torrents/{id}/status"
+auth = "admin"
+permission = "torrent.update"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_delete"
+method = "DELETE"
+path = "/v1/admin/torrents/{id}"
+auth = "admin"
+permission = "torrent.delete"
+rate_limit = "user:60/m"
 
 [[permissions]]
 name = "torrent.upload"

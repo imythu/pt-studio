@@ -15,15 +15,36 @@ use serde::Deserialize;
 use crate::{
     Identity, accounts,
     accounts::{Origin, RegisterRequest},
-    auth, rbac, status,
+    auth, rbac, settings, status,
 };
 
 pub fn router(id: Arc<Identity>) -> Router {
     Router::new()
-        .route("/v1/sessions", post(login))
         .route("/v1/sessions/current", delete(logout))
         .route("/v1/users", post(register))
-        .route("/v1/users/me", get(me))
+        .route("/v1/users/me", get(me).patch(settings::patch_me))
+        .route("/v1/users/me/profile", get(settings::get_profile))
+        .route(
+            "/v1/users/me/password",
+            axum::routing::put(settings::change_password),
+        )
+        .route("/v1/users/me/passkey-resets", post(settings::reset_passkey))
+        .route("/v1/sessions", get(settings::list_sessions).post(login))
+        .route("/v1/sessions/revocations", post(settings::revoke_others))
+        .route("/v1/sessions/{sid}", delete(settings::revoke_session))
+        .route("/v1/admin/users", get(settings::admin_list))
+        .route(
+            "/v1/admin/users/{id}",
+            get(settings::admin_get).patch(settings::admin_patch),
+        )
+        .route(
+            "/v1/admin/users/{id}/session-revocations",
+            post(settings::admin_revoke_sessions),
+        )
+        .route(
+            "/v1/admin/users/{id}/roles/{role}",
+            delete(settings::admin_remove_role),
+        )
         .route("/v1/users/me/permissions", get(my_permissions))
         .route("/v1/users/me/passkey", get(my_passkey))
         .route("/v1/users/{id}", get(get_user))

@@ -20,6 +20,7 @@ async function newPage() {
   const ctx = await browser.newContext({ locale: 'zh-CN' });
   const page = await ctx.newPage();
   pages.push(page);
+  page.on('dialog', (d) => void d.accept());
   page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     const t = m.text();
@@ -142,6 +143,46 @@ try {
   await a.getByText('已保存').first().waitFor();
   const hs = await a.evaluate(async () => (await fetch('/api/kernel/v1/admin/plugins/hnr/settings')).json());
   if (hs.settings.max_hnr !== 3 || hs.settings.window_days !== 14) throw new Error(`hnr settings: ${JSON.stringify(hs.settings)}`);
+
+  // 6c. 个人设置：资料、会话、passkey
+  step('settings page');
+  await p.goto(`${BASE}/settings`);
+  await p.locator('input[name=title]').fill('Seeder');
+  await p.getByRole('button', { name: '保存' }).click();
+  await p.getByText('已保存').first().waitFor();
+  await p.getByRole('tab', { name: '安全' }).click();
+  await p.getByText('当前', { exact: true }).waitFor();
+  await p.getByRole('tab', { name: 'Passkey' }).click();
+  const passkeyText = () => p.getByTestId('passkey').innerText().then((x) => x.trim());
+  await p.getByRole('button', { name: '显示' }).click();
+  await p.waitForFunction(() => /^[0-9a-f]{32}$/.test(document.querySelector('[data-testid=passkey]')?.textContent?.trim() ?? ''));
+  const shown = await passkeyText();
+  if (!/^[0-9a-f]{32}$/.test(shown.trim())) throw new Error(`passkey not shown: ${shown}`);
+  await p.getByRole('button', { name: '重置 passkey' }).click();
+  await p.getByText('passkey 已重置').waitFor();
+  const reset = await passkeyText();
+  if (reset === shown || !/^[0-9a-f]{32}$/.test(reset)) throw new Error('passkey was not reset');
+
+  // 6d. 后台用户：查找、施加 / 解除限制
+  step('admin users');
+  await a.goto(`${BASE}/admin/users`);
+  await a.locator('input[name=username_prefix]').fill('web_bob');
+  await a.getByRole('button', { name: '查询' }).click();
+  await a.getByRole('link', { name: 'web_bob' }).click();
+  await a.getByRole('heading', { name: /web_bob/ }).waitFor();
+  await a.locator('input[name=reason_code]').fill('e2e');
+  await a.locator('select[name=kind]').selectOption('leech_disabled');
+  await a.getByRole('button', { name: '施加限制' }).click();
+  await a.getByRole('heading', { name: /leech_disabled/ }).waitFor();
+  await a.getByRole('button', { name: '解除' }).click();
+  await a.getByRole('heading', { name: /active/ }).waitFor();
+
+  // 6e. 种子审核：管理员设为 disabled
+  step('torrent moderation');
+  await a.goto(`${BASE}/torrents/${TID}`);
+  await a.locator('select[name=status]').selectOption('disabled');
+  await a.getByRole('button', { name: '设置状态' }).click();
+  await a.getByText('disabled', { exact: true }).first().waitFor();
 
   // 7. 普通用户进不了后台
   step('non-staff admin access');

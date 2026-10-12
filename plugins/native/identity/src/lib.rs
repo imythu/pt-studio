@@ -9,6 +9,7 @@ pub mod auth;
 pub mod crypto;
 mod http;
 pub mod rbac;
+mod settings;
 pub mod status;
 
 use std::sync::{Arc, OnceLock};
@@ -38,6 +39,8 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
 #[derive(Debug, Default)]
 pub struct Identity {
     keys: OnceLock<crypto::Keyring>,
+    /// 允许的界面语言（`[plugin.identity] locales`，空 = 不限制）
+    locales: OnceLock<Vec<String>>,
 }
 
 impl Identity {
@@ -45,6 +48,10 @@ impl Identity {
         self.keys
             .get()
             .ok_or_else(|| PluginError::unavailable("identity is not initialised"))
+    }
+
+    pub fn locales(&self) -> Vec<String> {
+        self.locales.get().cloned().unwrap_or_default()
     }
 
     pub async fn summary(&self, ctx: &Ctx, uid: i64) -> PResult<Option<UserSummary>> {
@@ -101,6 +108,12 @@ impl Lifecycle for Identity {
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| PluginError::validation("site.toml [plugin.identity] secret_key is required"))?;
         let _ = self.keys.set(crypto::Keyring::from_secret(secret)?);
+        let locales = cfg
+            .get("locales")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default();
+        let _ = self.locales.set(locales);
         Ok(())
     }
 }
