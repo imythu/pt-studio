@@ -299,3 +299,70 @@ pub async fn upload(app: &Router, u: &User, title: &str, files: &[(&str, u64)]) 
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     r.body["id"].as_i64().unwrap()
 }
+
+use axum::response::IntoResponse as _;
+
+pub const JPEG: &[u8] = &[
+    0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1, 0xFF, 0xD9,
+];
+
+/// 本地模拟的 TMDB（api 与 image 同一地址；api_key = testkey）
+pub async fn mock_tmdb(hits: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> String {
+    let h = hits.clone();
+    let auth = |q: &std::collections::HashMap<String, String>| {
+        q.get("api_key").map(String::as_str) == Some("testkey")
+    };
+    let app = axum::Router::new()
+        .route(
+            "/3/find/{id}",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<String>, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>| async move {
+                if !auth(&q) {
+                    return (axum::http::StatusCode::UNAUTHORIZED, "{}").into_response();
+                }
+                if id == "tt0133093" { axum::Json(serde_json::json!({ "movie_results": [{ "id": 603 }], "tv_results": [] })).into_response() } else { axum::Json(serde_json::json!({ "movie_results": [], "tv_results": [] })).into_response() }
+            }),
+        )
+        .route(
+            "/3/movie/{id}",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<u64>, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>| {
+                let h = h.clone();
+                async move {
+                    h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if !auth(&q) {
+                        return (axum::http::StatusCode::UNAUTHORIZED, "{}").into_response();
+                    }
+                    if id != 603 {
+                        return (axum::http::StatusCode::NOT_FOUND, "{}").into_response();
+                    }
+                    let zh = q.get("language").map(String::as_str) == Some("zh-CN");
+                    axum::Json(serde_json::json!({
+                        "id": 603, "title": if zh { "黑客帝国" } else { "The Matrix" }, "original_title": "The Matrix",
+                        "release_date": "1999-03-30", "imdb_id": "tt0133093", "runtime": 136, "vote_average": 8.2, "vote_count": 25000,
+                        "genres": [{ "id": 28 }, { "id": 878 }], "production_countries": [{ "iso_3166_1": "US" }], "original_language": "en",
+                        "overview": "一名黑客发现了世界的真相。", "poster_path": "/matrix.jpg",
+                        "credits": { "crew": [{ "job": "Director", "name": "Lana Wachowski" }], "cast": [{ "name": "Keanu Reeves" }] },
+                        "external_ids": { "imdb_id": "tt0133093" },
+                    }))
+                    .into_response()
+                }
+            }),
+        )
+        .route(
+            "/3/search/movie",
+            axum::routing::get(|axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>| async move {
+                axum::Json(serde_json::json!({ "results": if q.get("query").map(String::as_str) == Some("matrix") {
+                    serde_json::json!([{ "id": 603, "title": "黑客帝国", "original_title": "The Matrix", "release_date": "1999-03-30", "poster_path": "/matrix.jpg" }])
+                } else { serde_json::json!([]) } }))
+            }),
+        )
+        .route(
+            "/t/p/w500/{file}",
+            axum::routing::get(|axum::extract::Path(file): axum::extract::Path<String>| async move {
+                if file == "matrix.jpg" { ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], JPEG).into_response() } else { axum::http::StatusCode::NOT_FOUND.into_response() }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}

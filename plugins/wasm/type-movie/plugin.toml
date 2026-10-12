@@ -7,11 +7,25 @@ license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "电影：字段 schema、从发布名补全规格、按 IMDb / TMDB / 豆瓣分组、规范标题、搜索字段"
 
+requires = ["ctx.torrents@^0.1"]
+optional_requires = ["ctx.metadata@^0.1"]
+
 [capabilities]
 sql = true
 content_type = true
 search_contributor = true
 views = ["torrent.v_torrent_fields"]
+
+[capabilities.scopes]
+"ctx.torrents" = ["write:group"]
+
+[[subscriptions]]
+name = "on_group_created"
+event = "group.created"
+
+[[jobs]]
+name = "fetch_metadata"
+timeout_secs = 60
 
 [settings_schema]
 type = "object"
@@ -21,6 +35,12 @@ type = "string"
 maxLength = 300
 title = "规范标题模板"
 default = "{title} {year} {edition?| }{resolution} {release_type?| }{source} {hdr?| }{video_codec} {audio_codecs?| }-{release_group}"
+
+[settings_schema.properties.metadata_locale]
+type = "string"
+maxLength = 16
+title = "元数据语言"
+default = "zh-CN"
 
 [terms]
 "type-movie.name" = { zh-CN = "电影", en = "Movies" }
@@ -39,3 +59,10 @@ default = "{title} {year} {edition?| }{resolution} {release_type?| }{source} {hd
 "type-movie.field.release_group" = { zh-CN = "制作组", en = "Release group" }
 "type-movie.field.edition" = { zh-CN = "版本", en = "Edition" }
 "type-movie.field.release_name" = { zh-CN = "发布名", en = "Release name" }
+"type-movie.field.poster" = { zh-CN = "海报", en = "Poster" }
+"type-movie.field.overview" = { zh-CN = "简介", en = "Overview" }
+"type-movie.field.genres" = { zh-CN = "类型", en = "Genres" }
+"type-movie.field.runtime_min" = { zh-CN = "片长（分钟）", en = "Runtime (min)" }
+"type-movie.field.rating" = { zh-CN = "TMDB 评分", en = "TMDB rating" }
+"type-movie.field.countries" = { zh-CN = "国家 / 地区", en = "Countries" }
+"type-movie.field.is_3d" = { zh-CN = "3D", en = "3D" }

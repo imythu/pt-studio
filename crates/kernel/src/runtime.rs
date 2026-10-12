@@ -11,7 +11,7 @@ use pt_plugin_api::{
     Actor, Credential, Ctx, HookCall, HookDecision, Hooks, HttpRoutes, IndexSchema, InvocationInfo,
     InvocationKind, Json, KernelLink, Lifecycle, OnCron, OnEvent, PResult, PluginError, Principal,
     SearchContributor,
-    host::{Config, HookOutcome, HookRunner, HttpClient, Metrics, Random, Term, Terms, Time},
+    host::{Config, HookOutcome, HookRunner, Metrics, Random, Term, Terms, Time},
     manifest::Manifest,
     services::{AUTH, AuthService},
 };
@@ -53,6 +53,8 @@ pub struct PluginRuntime {
     pub http: Option<Arc<dyn HttpRoutes>>,
     pub search_contributor: Option<Arc<dyn SearchContributor>>,
     pub content_type: Option<Arc<dyn pt_plugin_api::ContentType>>,
+    /// 出站 HTTP 策略（清单 `http_outbound` + 静态配置）
+    pub outbound: Arc<crate::http_client::OutboundPolicy>,
     pub redis: RedisGateway,
 }
 
@@ -174,6 +176,12 @@ impl Shared {
             client_ip: spec.client_ip,
             user_agent: spec.user_agent,
         };
+        let outbound = self
+            .plugins
+            .get(plugin)
+            .map(|rt| rt.outbound.clone())
+            .unwrap_or_default();
+        let kind = spec.kind;
         let (role, schema, caps, redis, static_config, terms) = match self.plugins.get(plugin) {
             Some(rt) => {
                 let m = &rt.manifest;
@@ -234,7 +242,11 @@ impl Shared {
             sql: uow.clone(),
             redis: Arc::new(redis),
             events: uow.clone(),
-            http: Arc::new(Unavailable("ctx.http")),
+            http: Arc::new(crate::http_client::KernelHttp {
+                plugin: plugin.to_owned(),
+                policy: outbound,
+                kind,
+            }),
             blob: Arc::new(crate::storage::blob::FsBlob::new(
                 self.plugins
                     .get(plugin)
@@ -419,11 +431,18 @@ impl KernelLink for Shared {
     }
 
     async fn enter_service(&self, caller: &Ctx, provider: &str, service: &str) -> PResult<Ctx> {
+        // 提供方可声明更长的默认超时（如出站取数的元数据插件，`[wasm] default_timeout_ms`），仍受调用方剩余时间限制
+        let own = self
+            .plugins
+            .get(provider)
+            .and_then(|rt| rt.manifest.wasm.as_ref())
+            .and_then(|w| w.default_timeout_ms)
+            .map_or(0, i64::from);
         let mut spec = self.child_spec(
             caller,
             InvocationKind::Service,
             provider,
-            self.cfg.kernel.service_timeout_ms,
+            self.cfg.kernel.service_timeout_ms.max(own),
         )?;
         spec.caller_scopes = self
             .plugins
@@ -449,14 +468,38 @@ impl KernelLink for Shared {
                 caller.plugin_id
             )));
         }
-        let (provider, imp) = self
-            .json_services
-            .get(service)
-            .and_then(|v| v.first())
-            .cloned()
-            .ok_or_else(|| {
+        let providers = self.json_services.get(service).cloned().unwrap_or_default();
+        // 多实现服务（如 ctx.metadata）：按 `provider`（插件 ID）或 `source`（`metadata-<source>`）路由
+        let multi = crate::loader::MULTI_SERVICES.contains(&service);
+        let (provider, imp) = if multi {
+            if method == "providers" {
+                return Ok(serde_json::json!(
+                    providers.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>()
+                ));
+            }
+            let want = args
+                .get("provider")
+                .and_then(Json::as_str)
+                .map(str::to_owned)
+                .or_else(|| {
+                    args.get("source")
+                        .and_then(Json::as_str)
+                        .map(|s| format!("metadata-{s}"))
+                })
+                .ok_or_else(|| {
+                    PluginError::validation(format!(
+                        "{service} is a multi-provider service: pass `source` or `provider`"
+                    ))
+                })?;
+            providers
+                .into_iter()
+                .find(|(p, _)| *p == want)
+                .ok_or_else(|| PluginError::unavailable(format!("{service} has no provider `{want}`")))?
+        } else {
+            providers.into_iter().next().ok_or_else(|| {
                 PluginError::unavailable(format!("service {service} has no JSON-callable provider"))
-            })?;
+            })?
+        };
         let callee = self.enter_service(caller, &provider, service).await?;
         let remaining = callee.invocation.deadline - now_ms();
         let budget = std::time::Duration::from_millis(u64::try_from(remaining.max(0)).unwrap_or(0));
@@ -771,22 +814,6 @@ impl HookRunner for PipelineRunner {
 }
 
 // ---------------- 尚未接入的宿主能力与简单实现 ----------------
-
-struct Unavailable(&'static str);
-
-#[async_trait]
-impl HttpClient for Unavailable {
-    async fn send(
-        &self,
-        _req: http::Request<bytes::Bytes>,
-        _timeout: std::time::Duration,
-    ) -> PResult<http::Response<bytes::Bytes>> {
-        Err(PluginError::unavailable(format!(
-            "{} is not available in this build",
-            self.0
-        )))
-    }
-}
 
 struct StaticConfig {
     plugin: String,

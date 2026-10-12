@@ -1,0 +1,46 @@
+id = "metadata-tmdb"
+name = "元数据：TMDB"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "TMDB 电影 / 剧集元数据：查询、搜索、归一化、缓存、海报转存（需在 site.toml 配置 API key）"
+
+provides = ["ctx.metadata@0.1.0"]
+publishes = ["metadata.fetched"]
+
+[capabilities]
+sql = true
+kv = true
+blob = true
+http_outbound = [
+  "api.themoviedb.org",
+  "image.tmdb.org",
+  { config = "api_base_url", allow_private = true },
+  { config = "image_base_url", allow_private = true },
+]
+
+[[http.routes]]
+id = "lookup"
+method = "GET"
+path = "/v1/lookup"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "search"
+method = "GET"
+path = "/v1/search"
+auth = "user"
+rate_limit = "user:30/m"
+
+[wasm]
+memory_mb = 64
+default_timeout_ms = 20000
+
+[database]
+migrations = "migrations"
+
+[terms]
+"metadata-tmdb.name" = { zh-CN = "TMDB", en = "TMDB" }

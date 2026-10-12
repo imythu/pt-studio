@@ -7,8 +7,9 @@ license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "种子上传、规范化、存储与下载（ctx.torrents）"
 
+provides = ["ctx.torrents@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
-publishes = ["torrent.created", "torrent.updated", "torrent.status_changed", "torrent.deleted", "torrent.downloaded", "group.created"]
+publishes = ["torrent.created", "torrent.updated", "torrent.status_changed", "torrent.deleted", "torrent.downloaded", "group.created", "group.updated"]
 
 [capabilities]
 kv = true

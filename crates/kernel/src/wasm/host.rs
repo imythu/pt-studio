@@ -342,10 +342,40 @@ impl w::events::Host for HostState {
 impl w::http_client::Host for HostState {
     async fn send(
         &mut self,
-        _req: w::http_client::OutboundRequest,
+        req: w::http_client::OutboundRequest,
     ) -> WResult<w::http_client::OutboundResponse> {
-        // 出站 HTTP 与 SSRF 防护（评审 R1 B-04）尚未实现
-        Err(unavailable("http-client"))
+        let mut b = http::Request::builder()
+            .method(req.method.as_str())
+            .uri(req.url.as_str());
+        for h in &req.headers {
+            b = b.header(h.name.as_str(), h.value.as_str());
+        }
+        let r = match b.body(bytes::Bytes::from(req.body.unwrap_or_default())) {
+            Ok(r) => r,
+            Err(e) => {
+                return wr(Err(pt_plugin_api::PluginError::bad_request(format!(
+                    "invalid request: {e}"
+                ))));
+            }
+        };
+        let timeout = std::time::Duration::from_millis(u64::from(req.timeout_ms.clamp(1, 30_000)));
+        wr(self.ctx.http.send(r, timeout).await.map(|resp| {
+            let (parts, body) = resp.into_parts();
+            w::http_client::OutboundResponse {
+                status: parts.status.as_u16(),
+                headers: parts
+                    .headers
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        v.to_str().ok().map(|v| w::http_client::Header {
+                            name: k.as_str().into(),
+                            value: v.into(),
+                        })
+                    })
+                    .collect(),
+                body: body.to_vec(),
+            }
+        }))
     }
 }
 

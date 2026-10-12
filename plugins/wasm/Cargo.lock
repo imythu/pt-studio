@@ -222,6 +222,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-metadata-tmdb"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "pt-wasm-promotion"
 version = "0.1.0"
 dependencies = [

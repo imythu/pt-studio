@@ -99,7 +99,41 @@ pub fn group_schema() -> Value {
     ] {
         props.insert(k.into(), f["properties"][k].clone());
     }
-    json!({ "type": "object", "x-pt-order": ["title", "original_title", "year", "imdb_id", "tmdb_id", "douban_id"], "properties": props })
+    let meta = |ty: Value, f: &str| {
+        let mut v = ty;
+        v["x-pt-label-term"] = json!(label(f));
+        v["x-pt-from-metadata"] = json!(true);
+        v
+    };
+    props.insert(
+        "poster".into(),
+        meta(json!({ "type": "string", "x-pt-widget": "image" }), "poster"),
+    );
+    props.insert(
+        "overview".into(),
+        meta(json!({ "type": "string", "x-pt-widget": "textarea" }), "overview"),
+    );
+    props.insert(
+        "genres".into(),
+        meta(
+            json!({ "type": "array", "items": { "type": "string" } }),
+            "genres",
+        ),
+    );
+    props.insert(
+        "runtime_min".into(),
+        meta(json!({ "type": "integer" }), "runtime_min"),
+    );
+    props.insert("rating".into(), meta(json!({ "type": "number" }), "rating"));
+    props.insert(
+        "countries".into(),
+        meta(
+            json!({ "type": "array", "items": { "type": "string" } }),
+            "countries",
+        ),
+    );
+    json!({ "type": "object", "properties": props,
+            "x-pt-order": ["poster", "title", "original_title", "year", "genres", "runtime_min", "rating", "countries", "imdb_id", "tmdb_id", "douban_id", "overview"] })
 }
 
 /// 用户输入的同义写法 → 规范值
@@ -398,6 +432,43 @@ pub fn canonical_title(f: &Value, template: Option<&str>) -> String {
     tpl.map(|t| t.render(f, &display)).unwrap_or_default()
 }
 
+/// 元数据（统一模型）→ Group 字段补丁（只含 group_schema 中 `x-pt-from-metadata` 与外部 ID 字段）
+pub fn metadata_patch(data: &Value, locale: &str) -> Value {
+    let mut p = Map::new();
+    if let Some(v) = data["titles"]["original"].as_str() {
+        p.insert("original_title".into(), json!(v));
+    }
+    if let Some(v) = data["images"]["poster"].as_str() {
+        p.insert("poster".into(), json!(v));
+    }
+    let ov = &data["overview"];
+    if let Some(v) = ov[locale].as_str().or_else(|| {
+        ov.as_object()
+            .and_then(|o| o.values().next())
+            .and_then(Value::as_str)
+    }) {
+        p.insert("overview".into(), json!(v));
+    }
+    for k in ["genres", "countries"] {
+        if let Some(a) = data[k].as_array().filter(|a| !a.is_empty()) {
+            p.insert(k.into(), json!(a));
+        }
+    }
+    if let Some(v) = data["runtime_min"].as_i64() {
+        p.insert("runtime_min".into(), json!(v));
+    }
+    if let Some(v) = data["ratings"]["tmdb"]["value"].as_f64() {
+        p.insert("rating".into(), json!(v));
+    }
+    if let Some(v) = data["ids"]["tmdb"].as_u64() {
+        p.insert("tmdb_id".into(), json!(v));
+    }
+    if let Some(v) = data["ids"]["imdb"].as_str() {
+        p.insert("imdb_id".into(), json!(v));
+    }
+    Value::Object(p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,5 +542,18 @@ mod tests {
         );
         // 原盘不要求视频编码
         assert!(normalize(&json!({ "title": "X", "year": 2000, "resolution": "2160p", "source": "UHD BluRay", "release_type": "原盘" })).is_ok());
+    }
+
+    #[test]
+    fn metadata_to_group_fields() {
+        let data = json!({ "titles": { "original": "The Matrix" }, "images": { "poster": "/media/metadata-tmdb/images/a.jpg" },
+                           "overview": { "en-US": "Neo" }, "genres": ["scifi"], "countries": [], "runtime_min": 136,
+                           "ratings": { "tmdb": { "value": 8.2 } }, "ids": { "tmdb": 603, "imdb": "tt0133093" } });
+        let p = metadata_patch(&data, "zh-CN");
+        assert_eq!(
+            p,
+            json!({ "original_title": "The Matrix", "poster": "/media/metadata-tmdb/images/a.jpg", "overview": "Neo",
+                              "genres": ["scifi"], "runtime_min": 136, "rating": 8.2, "tmdb_id": 603, "imdb_id": "tt0133093" })
+        );
     }
 }

@@ -258,6 +258,8 @@ fn content_type(path: &str) -> &'static str {
         "json" | "map" => "application/json",
         "svg" => "image/svg+xml",
         "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
         "ico" => "image/x-icon",
         "woff2" => "font/woff2",
         "txt" => "text/plain; charset=utf-8",
@@ -342,6 +344,21 @@ pub async fn fallback(sh: Arc<Shared>, method: Method, uri: Uri) -> Response {
     let path = uri.path();
     if path.starts_with("/api/") || !matches!(method, Method::GET | Method::HEAD) {
         return PluginError::not_found("no such route").into_response();
+    }
+    // 插件公开媒体（如元数据插件转存的海报）：/media/<plugin>/<key> → blob `plugins/<plugin>/public/<key>`
+    if let Some(rest) = path.strip_prefix("/media/") {
+        let Some((id, key)) = rest.split_once('/') else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        let root = sh.cfg.blob.dir.as_deref().map(PathBuf::from);
+        return match (root, safe_rel(key), sh.plugins.contains_key(id)) {
+            (Some(root), Some(rel), true) => {
+                serve_file(root.join("plugins").join(id).join("public").join(rel), true)
+                    .await
+                    .unwrap_or_else(|| StatusCode::NOT_FOUND.into_response())
+            }
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
     }
     let Some(dir) = web_dir(&sh) else {
         return PluginError::not_found("no such route").into_response();

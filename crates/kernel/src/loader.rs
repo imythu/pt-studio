@@ -30,7 +30,7 @@ pub const KERNEL_SERVICES: &[&str] = &[
 ];
 
 /// 多实现服务（catalog/services.md 的 `multi` 行）。
-pub const MULTI_SERVICES: &[&str] = &[];
+pub const MULTI_SERVICES: &[&str] = &["ctx.metadata"];
 
 /// 内核隐式依赖的服务：提供方先激活（§2.3 第 4 步）。
 pub const KERNEL_DEPENDS_ON: &[&str] = &["ctx.auth", "ctx.rbac", "ctx.terms"];

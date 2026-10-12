@@ -88,5 +88,9 @@
 | `newbie-exam.restricted` | 403 | newbie-exam | 考核期限制 |
 | `levels.class_required` | 403 | levels | 等级不足 |
 | `search-meilisearch.unavailable` | 503 | search-meilisearch | 搜索后端不可用 |
+| `metadata-tmdb.not_configured` | 503 | metadata-tmdb | 未配置 TMDB API key |
+| `metadata-tmdb.id_invalid` | 422 | metadata-tmdb | ID 格式错误 |
+| `metadata-tmdb.not_found` | 404 | metadata-tmdb | TMDB 条目不存在 |
+| `metadata-tmdb.upstream_error` | 502 | metadata-tmdb | TMDB 上游错误 |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `llm-claude.upstream_error`、`llm-openai-compat.upstream_error` | 502 | llm-* | 模型服务出错 |

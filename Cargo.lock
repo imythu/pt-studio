@@ -2021,6 +2021,7 @@ dependencies = [
  "pt-plugin-api",
  "rand 0.9.5",
  "redis",
+ "reqwest",
  "semver",
  "serde",
  "serde_json",

@@ -10,6 +10,7 @@ import { Badge, Button, Card, Empty, Field, Input, Spinner, Table, UserContent, 
 import { ApiError } from '@pt-studio/sdk';
 import { fieldSchemas, useTypes, type TypeInfo } from '../types';
 import { useSession } from '../session';
+import { useInstalled } from '../manifest';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@pt-studio/ui-kit';
 import { useErrorText } from '../errors';
@@ -121,12 +122,50 @@ export function TypeBadge({ typeId }: { typeId?: string }) {
   return <Badge>{info ? t(`term:${info.name_term}`) : (typeId ?? '-')}</Badge>;
 }
 
+/** 由元数据面板展示的字段，不在通用字段表中重复 */
+const HIDDEN_FIELDS = ['release_name', 'poster', 'overview'];
+
+/** 作品元数据：海报、简介、类型、评分（来自元数据插件写入的 Group 字段） */
+export function GroupMeta({ fields }: { fields: Record<string, unknown> }) {
+  const t = useT();
+  const poster = typeof fields.poster === 'string' && fields.poster.startsWith('/media/') ? fields.poster : null;
+  const overview = typeof fields.overview === 'string' ? fields.overview : null;
+  if (!poster && !overview) return null;
+  const genres = Array.isArray(fields.genres) ? (fields.genres as string[]) : [];
+  return (
+    <div className="group-meta">
+      {poster && <img className="poster" src={poster} alt="" loading="lazy" />}
+      <div>
+        {genres.length > 0 && (
+          <p>
+            {genres.map((g) => (
+              <Badge key={g}>{g}</Badge>
+            ))}
+          </p>
+        )}
+        {typeof fields.rating === 'number' && <p>TMDB ★ {fields.rating.toFixed(1)}</p>}
+        {overview && <UserContent text={overview} />}
+        {typeof fields.tmdb_id === 'number' && (
+          <p className="pt-muted small attribution">
+            {t('ui.group.attribution')}{' '}
+            <a href={`https://www.themoviedb.org/movie/${fields.tmdb_id}`} target="_blank" rel="noopener noreferrer nofollow">
+              TMDB
+            </a>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 类型字段的通用展示（显示名来自 schema 的术语或 title；枚举值按术语渲染） */
 export function FieldsView({ typeId, fields }: { typeId: string; fields: Record<string, unknown> }) {
   const t = useT();
   const types = useTypes();
   const props = fieldSchemas(types.data?.find((x) => x.type_id === typeId), fields);
-  const rows = Object.entries(fields).filter(([k, v]) => k !== 'release_name' && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0));
+  const rows = Object.entries(fields).filter(
+    ([k, v]) => !HIDDEN_FIELDS.includes(k) && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0),
+  );
   if (rows.length === 0) return null;
   const label = (k: string) => {
     const s = props[k];
@@ -394,6 +433,53 @@ export function TorrentPage() {
   );
 }
 
+interface MetaHit {
+  external_id: string;
+  title: string | null;
+  original: string | null;
+  year: number | null;
+}
+
+/** 上传表单：从 TMDB 搜索并预填（metadata-tmdb 已安装且类型为电影时） */
+function MetadataSearch({ onPick }: { onPick(h: MetaHit): void }) {
+  const t = useT();
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<MetaHit[]>([]);
+  const [error, setError] = useState<unknown>(null);
+  const run = async () => {
+    setError(null);
+    try {
+      setHits((await api<{ items: MetaHit[] }>(`/api/p/metadata-tmdb/v1/search?q=${encodeURIComponent(q)}&type=movie`)).items);
+    } catch (e) {
+      setError(e);
+    }
+  };
+  return (
+    <div className="meta-search">
+      <div className="searchbar">
+        <Input name="meta_q" placeholder={t('ui.upload.meta_search')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <Button onClick={() => void run()} disabled={!q.trim()}>
+          TMDB
+        </Button>
+      </div>
+      <ErrorText error={error} />
+      {hits.map((h) => (
+        <button
+          type="button"
+          key={h.external_id}
+          className="pt-btn pt-btn-ghost meta-hit"
+          onClick={() => {
+            onPick(h);
+            setHits([]);
+          }}
+        >
+          {h.title} {h.original && h.original !== h.title && <span className="pt-muted">/ {h.original}</span>} {h.year && `(${h.year})`}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function TypeForm({ info, value, onChange, errors }: { info: TypeInfo; value: Record<string, unknown>; onChange(v: Record<string, unknown>): void; errors: Errors }) {
   const t = useT();
   if (!info.field_schema) return null;
@@ -413,6 +499,7 @@ export function Upload() {
   const [busy, setBusy] = useState(false);
   const list = types.data ?? [];
   const info = list.find((x) => x.type_id === typeId) ?? list[0];
+  const hasTmdb = useInstalled('metadata-tmdb');
   const pick = (id: string) => {
     setTypeId(id);
     const i = list.find((x) => x.type_id === id);
@@ -462,6 +549,14 @@ export function Upload() {
         <Field label={t('ui.upload.subtitle')}>
           <Input value={meta.subtitle} onChange={(e) => setMeta({ ...meta, subtitle: e.target.value })} maxLength={300} />
         </Field>
+        {info?.type_id === 'movie' && hasTmdb && (
+          <MetadataSearch
+            onPick={(h) => {
+              const id = Number(h.external_id.split(':')[1]);
+              setFields({ ...fields, tmdb_id: id, ...(h.title ? { title: h.original ?? h.title } : {}), ...(h.year ? { year: h.year } : {}) });
+            }}
+          />
+        )}
         {info && (
           <Slot
             name="torrent.upload.type_form"
@@ -510,6 +605,7 @@ export function GroupPage() {
       </h1>
       <Slot name="group.detail.header" ctx={{ group: d }} />
       <Card>
+        <GroupMeta fields={d.fields} />
         <FieldsView typeId={d.type_id} fields={d.fields} />
       </Card>
       <Card title={t('ui.group.torrents', { n: d.torrents.length })}>

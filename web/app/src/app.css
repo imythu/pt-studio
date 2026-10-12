@@ -32,3 +32,9 @@ mark { background: color-mix(in srgb, var(--pt-color-primary) 25%, transparent);
 .fields dt { color: var(--pt-color-muted); font-size: 12px; }
 .fields dd { margin: 0; }
 .pt-checks { display: flex; flex-wrap: wrap; gap: var(--pt-space-3); }
+.group-meta { display: flex; gap: var(--pt-space-4); margin-bottom: var(--pt-space-4); }
+.group-meta .poster { width: 160px; height: auto; border-radius: var(--pt-radius); flex-shrink: 0; }
+.attribution { margin-top: var(--pt-space-3); }
+.meta-search { margin-bottom: var(--pt-space-3); }
+.meta-hit { display: block; text-align: left; width: 100%; }
+@media (max-width: 800px) { .group-meta { flex-direction: column; } }

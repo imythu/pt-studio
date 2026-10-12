@@ -99,6 +99,29 @@ try {
   await p.getByRole('link', { name: '查看作品' }).click();
   await p.getByRole('heading', { name: /Web Movie/ }).waitFor();
   await p.getByText(/全部版本（1）/).waitFor();
+  // 从 TMDB 搜索预填 → 上传 → 作品页显示转存海报与简介（type-movie 拉取元数据）
+  step('tmdb prefill and group metadata');
+  await p.goto(`${BASE}/upload`);
+  await p.getByLabel('类型').selectOption('movie');
+  await p.locator('input[name=meta_q]').fill('matrix');
+  await p.getByRole('button', { name: 'TMDB' }).click();
+  await p.getByRole('button', { name: /黑客帝国/ }).click();
+  await p.locator('input[type=file]').setInputFiles(process.env.PT_TORRENT_FILE2);
+  await p.locator('input[name=title]').fill('The.Matrix.1999.1080p.BluRay.x264-GRP');
+  await p.getByRole('button', { name: '发布' }).click();
+  await p.waitForURL(/\/torrents\/\d+$/);
+  await p.getByRole('link', { name: '查看作品' }).click();
+  await p.getByRole('heading', { name: /The Matrix/ }).waitFor();
+  for (let i = 0; i < 30 && (await p.locator('img.poster').count()) === 0; i++) {
+    await p.waitForTimeout(500);
+    await p.reload();
+  }
+  const src = await p.locator('img.poster').getAttribute('src');
+  if (!src?.startsWith('/media/metadata-tmdb/images/')) throw new Error(`poster: ${src}`);
+  const loaded = await p.locator('img.poster').evaluate((img) => img.complete && img.naturalWidth >= 0);
+  if (!loaded) throw new Error('poster did not load');
+  await p.getByText('一名黑客发现了世界的真相。').waitFor();
+
   // 通用类型：kind 切换出对应字段
   await p.goto(`${BASE}/upload`);
   await p.getByLabel('类型').selectOption('generic');

@@ -374,15 +374,32 @@ impl Kernel {
                         timeout_ms: h.timeout_ms.unwrap_or(point_timeout).min(point_timeout),
                     });
             }
+            let static_config = cfg
+                .plugin
+                .get(&m.id)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let outbound = match crate::http_client::OutboundPolicy::parse(
+                &m.capabilities.http_outbound,
+                &static_config,
+                cfg.kernel.mode == crate::config::Mode::Dev,
+            ) {
+                Ok(p) => Arc::new(p),
+                Err(e) => {
+                    errors.push(LoadError::new(
+                        "E-LOAD-MANIFEST",
+                        &m.id,
+                        format!("http_outbound: {e}"),
+                    ));
+                    Arc::default()
+                }
+            };
             let rt = PluginRuntime {
                 id: m.id.clone(),
+                outbound,
                 schema,
                 role,
-                static_config: cfg
-                    .plugin
-                    .get(&m.id)
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({})),
+                static_config,
                 sensitive: effective_sensitive(&cfg, &m),
                 scopes: effective_scopes(&cfg, &m),
                 lifecycle: native.and_then(|n| n.lifecycle.clone()),

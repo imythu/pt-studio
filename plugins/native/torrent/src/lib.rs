@@ -1109,6 +1109,88 @@ async fn http_delete(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+// ---------------- ctx.torrents（JSON 分派） ----------------
+
+struct TorrentsSvc;
+
+#[async_trait]
+impl pt_plugin_api::JsonService for TorrentsSvc {
+    async fn call(&self, ctx: &Ctx, method: &str, a: serde_json::Value) -> PResult<serde_json::Value> {
+        let gid = a
+            .get("id")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| PluginError::validation("id"))?;
+        match method {
+            "get_group" => {
+                let mut c = ctx.sql.conn().await?;
+                let r = sqlx::query("SELECT id, type_id, group_key, title, year, fields, torrent_count FROM groups WHERE id = $1 AND deleted_at IS NULL")
+                    .bind(gid)
+                    .fetch_optional(&mut *c)
+                    .await?;
+                Ok(r.map_or(serde_json::Value::Null, |r| json!({
+                    "id": r.get::<i64, _>(0), "type_id": r.get::<String, _>(1), "group_key": r.get::<String, _>(2),
+                    "title": r.get::<String, _>(3), "year": r.get::<Option<i32>, _>(4), "fields": r.get::<serde_json::Value, _>(5),
+                    "torrent_count": r.get::<i32, _>(6) })))
+            }
+            // 资源类型插件按元数据更新 Group（作用域 write:group，只能更新本类型的 Group）
+            "update_group" => {
+                if !ctx.invocation.has_scope("write:group") {
+                    return Err(PluginError::forbidden("scope write:group required"));
+                }
+                let patch = a.get("fields").cloned().unwrap_or_else(|| json!({}));
+                let Some(obj) = patch.as_object() else {
+                    return Err(PluginError::validation("fields must be an object"));
+                };
+                let title = a
+                    .get("title")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|t| t.chars().take(300).collect::<String>());
+                let year = a
+                    .get("year")
+                    .and_then(serde_json::Value::as_i64)
+                    .and_then(|y| i32::try_from(y).ok())
+                    .filter(|y| (1800..=2200).contains(y));
+                let caller_type = ctx
+                    .invocation
+                    .caller_plugin
+                    .strip_prefix("type-")
+                    .unwrap_or("")
+                    .to_owned();
+                let mut c = ctx.sql.conn().await?;
+                let n = sqlx::query(
+                    "UPDATE groups SET fields = fields || $2, title = coalesce($3, title), year = coalesce($4, year), updated_at = now()
+                      WHERE id = $1 AND type_id = $5 AND deleted_at IS NULL",
+                )
+                .bind(gid)
+                .bind(&patch)
+                .bind(&title)
+                .bind(year)
+                .bind(&caller_type)
+                .execute(&mut *c)
+                .await?
+                .rows_affected();
+                drop(c);
+                if n == 0 {
+                    return Err(PluginError::not_found("group not found for this content type"));
+                }
+                let mut keys: Vec<&String> = obj.keys().collect();
+                keys.sort();
+                ctx.events
+                    .publish(NewEvent::v1(
+                        "group.updated",
+                        format!("group:{gid}"),
+                        json!({ "group_id": gid, "fields": keys }),
+                    ))
+                    .await?;
+                Ok(json!({ "updated": true }))
+            }
+            other => Err(PluginError::not_found(format!(
+                "ctx.torrents has no method `{other}`"
+            ))),
+        }
+    }
+}
+
 struct Routes(Arc<Torrent>);
 
 impl HttpRoutes for Routes {
@@ -1134,6 +1216,7 @@ pub fn plugin() -> NativePlugin {
         lifecycle: Some(t.clone()),
         http: Some(Arc::new(Routes(t))),
         search_contributor: Some(Arc::new(search::Contributor)),
+        json_services: vec![("ctx.torrents", Arc::new(TorrentsSvc))],
         ..Default::default()
     }
 }

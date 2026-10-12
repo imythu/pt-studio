@@ -14,10 +14,11 @@ wit_bindgen::generate!({
 
 pub mod movie;
 
-use exports::pt::plugin::{content_type, search_contributor};
+use exports::pt::plugin::{content_type, on_cron, on_event, search_contributor};
 use pt::plugin::{
-    config,
+    config, jobs, services,
     sql::{self, SqlValue},
+    time,
     types::PluginError,
 };
 use serde_json::{Value, json};
@@ -135,6 +136,69 @@ impl search_contributor::Guest for TypeMovie {
             }
         }
         Ok(Some(json!(doc).to_string()))
+    }
+}
+
+// ---------------- 元数据联动（content-types-common §8） ----------------
+
+fn svc(service: &str, method: &str, args: &Value) -> Result<Value, PluginError> {
+    let out = services::call(service, method, &args.to_string())?;
+    serde_json::from_str(&out)
+        .map_err(|_| err("type-movie.bad_service_reply", "invalid JSON from service", None))
+}
+
+impl on_event::Guest for TypeMovie {
+    fn handle(evt: on_event::EventEnvelope, _d: on_event::DeliveryInfo) -> Result<(), PluginError> {
+        let p: Value = serde_json::from_str(&evt.payload).unwrap_or(Value::Null);
+        if evt.event_type == "group.created" && p["type_id"] == "movie" {
+            let gid = p["group_id"].as_i64().unwrap_or(0);
+            jobs::schedule_once(
+                "fetch_metadata",
+                time::now(),
+                &json!({ "group_id": gid }).to_string(),
+                Some(&format!("meta:{gid}")),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl on_cron::Guest for TypeMovie {
+    fn run(job: on_cron::JobInvocation) -> Result<(), PluginError> {
+        if job.name != "fetch_metadata" {
+            return Err(err("kernel.not_found", "unknown job", None));
+        }
+        let p: Value = serde_json::from_str(&job.payload).unwrap_or(Value::Null);
+        let gid = p["group_id"].as_i64().unwrap_or(0);
+        let g = svc("ctx.torrents", "get_group", &json!({ "id": gid }))?;
+        let f = &g["fields"];
+        let external = match (f["tmdb_id"].as_u64(), f["imdb_id"].as_str()) {
+            (Some(t), _) => format!("movie:{t}"),
+            (None, Some(i)) => format!("imdb:{i}"),
+            _ => return Ok(()),
+        };
+        let settings: Value = serde_json::from_str(&config::get_settings()).unwrap_or(Value::Null);
+        let locale = settings["metadata_locale"].as_str().unwrap_or("zh-CN").to_owned();
+        let r = match svc(
+            "ctx.metadata",
+            "lookup",
+            &json!({ "source": "tmdb", "external_id": external, "locale": locale }),
+        ) {
+            Ok(r) => r,
+            // 未安装 / 未配置元数据源：不重试
+            Err(e) if !e.retryable => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        if r.is_null() {
+            return Ok(());
+        }
+        let patch = movie::metadata_patch(&r["data"], &locale);
+        svc(
+            "ctx.torrents",
+            "update_group",
+            &json!({ "id": gid, "fields": patch }),
+        )?;
+        Ok(())
     }
 }
 

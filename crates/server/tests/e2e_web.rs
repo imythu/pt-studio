@@ -18,11 +18,14 @@ fn web_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web")
 }
 
-fn config(plugins: &std::path::Path) -> SiteConfig {
+fn config(plugins: &std::path::Path, tmdb: &str) -> SiteConfig {
     let mut t = common::config_text();
     t.push_str(&format!(
         "\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n",
         plugins.display()
+    ));
+    t.push_str(&format!(
+        "\n[plugin.metadata-tmdb]\napi_key = \"testkey\"\napi_base_url = \"{tmdb}\"\nimage_base_url = \"{tmdb}\"\n"
     ));
     // [http] 段放在 config_text 之后追加
     t.push_str(&format!(
@@ -55,7 +58,8 @@ async fn web_end_to_end() {
     assert!(st.success(), "web build failed");
     let dir = common::package_wasm_plugins();
     reset().await;
-    let kernel = Kernel::start(config(&dir), pt_server::native_plugins())
+    let tmdb = common::mock_tmdb(std::sync::Arc::default()).await;
+    let kernel = Kernel::start(config(&dir, &tmdb), pt_server::native_plugins())
         .await
         .unwrap_or_else(|e| panic!("{e}"));
     let app = kernel.router();
@@ -184,6 +188,12 @@ async fn web_end_to_end() {
     }
     let code = code.expect("alice could not issue an invite");
 
+    let torrent_file2 = std::env::temp_dir().join(format!("pt-web-e2e-{}-2.torrent", std::process::id()));
+    std::fs::write(
+        &torrent_file2,
+        pt_plugin_torrent::fixtures::sample_v1("Matrix", &[("x.mkv", 600 << 20)], true),
+    )
+    .unwrap();
     let torrent_file = std::env::temp_dir().join(format!("pt-web-e2e-{}.torrent", std::process::id()));
     std::fs::write(
         &torrent_file,
@@ -205,6 +215,7 @@ async fn web_end_to_end() {
         .env("PT_TORRENT_ID", tid.to_string())
         .env("PT_ADMIN_USER", "web_admin")
         .env("PT_TORRENT_FILE", &torrent_file)
+        .env("PT_TORRENT_FILE2", &torrent_file2)
         .output()
         .await
         .unwrap();
