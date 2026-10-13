@@ -736,7 +736,17 @@ async fn http_get(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
         return Err(PluginError::not_found("torrent not found"));
     }
     let uploader = if reveal_uploader(&ctx, &t).await? {
-        json!({ "id": t.uploader_id })
+        let name = match t.uploader_id.and_then(|u| u64::try_from(u).ok()) {
+            Some(uid) => ctx
+                .service::<dyn UsersService>(USERS)?
+                .call(move |s, c| s.get(c, uid))
+                .await
+                .ok()
+                .flatten()
+                .map(|u| u.username),
+            None => None,
+        };
+        json!({ "id": t.uploader_id, "username": name })
     } else {
         json!({ "anonymous": true })
     };

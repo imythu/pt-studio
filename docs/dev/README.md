@@ -28,6 +28,27 @@ redis-server --port 56379 --daemonize yes --save '' --appendonly no
 
 ## 2. 运行
 
+### 2.1 一键运行站点
+
+```bash
+deploy/dev/run-site.sh                 # 检查 / 启动依赖、建库、构建服务端 + WASM 插件 + 前端、打包插件、生成配置、迁移、启动
+PT_PROFILE=debug PT_SKIP_BUILD=1 deploy/dev/run-site.sh   # 已构建过时直接启动（debug 构建）
+```
+
+数据与配置在 `.dev/site/`（`site.toml` 由 `deploy/site.example.toml` 生成，随机密钥）。打开 http://localhost:8080 注册账号后：
+
+```bash
+target/release/pt-server --config .dev/site/site.toml user grant-role <用户名> admin
+```
+
+冒烟检查（浏览器走一遍注册、发布、下载、后台）：
+
+```bash
+PT_BASE=http://localhost:8080 PT_SERVER=target/release/pt-server PT_CONFIG=.dev/site/site.toml node web/tests/smoke.mjs [截图目录]
+```
+
+### 2.2 手动运行
+
 ```bash
 cargo run -p pt-server -- --config site.toml check     # 只做清单与依赖检查
 cargo run -p pt-server -- --config site.toml migrate   # 只执行迁移

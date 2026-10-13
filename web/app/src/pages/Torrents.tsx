@@ -9,6 +9,7 @@ import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Sch
 import { Badge, Button, Card, Empty, Field, Input, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
 import { ApiError } from '@pt-studio/sdk';
 import { fieldSchemas, useTypes, type TypeInfo } from '../types';
+import { useManifest } from '../manifest';
 import { useSession } from '../session';
 import { useInstalled } from '../manifest';
 import { useQueryClient } from '@tanstack/react-query';
@@ -272,7 +273,7 @@ interface TorrentDetail {
   size: number;
   file_count: number;
   status: string;
-  uploader: { id?: number; anonymous?: boolean };
+  uploader: { id?: number; username?: string | null; anonymous?: boolean };
   description: string;
   created_at: string;
   can_download: boolean;
@@ -336,7 +337,7 @@ function ManageTorrent({ d }: { d: TorrentDetail }) {
         ))}
       {s.can('torrent.update') && (
         <form
-          className="searchbar moderation"
+          className="pt-stack moderation"
           onSubmit={(e) => {
             e.preventDefault();
             void act(() => api(`/api/p/torrent/v1/admin/torrents/${d.id}/status`, { json: { to: status.to, reason: status.reason || undefined } }));
@@ -344,7 +345,9 @@ function ManageTorrent({ d }: { d: TorrentDetail }) {
         >
           <select className="pt-input" name="status" value={status.to} onChange={(e) => setStatus({ ...status, to: e.target.value })}>
             {['candidate', 'pending', 'approved', 'rejected', 'disabled'].map((x) => (
-              <option key={x}>{x}</option>
+              <option key={x} value={x}>
+                {statusName(t, x)}
+              </option>
             ))}
           </select>
           <Input placeholder={t('ui.admin.reason')} value={status.reason} maxLength={500} onChange={(e) => setStatus({ ...status, reason: e.target.value })} />
@@ -387,7 +390,7 @@ export function TorrentPage() {
     <div className="torrent">
       <h1>{d.title}</h1>
       {d.subtitle && <p className="pt-muted">{d.subtitle}</p>}
-      {d.status !== 'approved' && <Badge tone="danger">{d.status}</Badge>}
+      {d.status !== 'approved' && <Badge tone="danger">{statusName(t, d.status)}</Badge>}
       <Slot name="torrent.detail.header" ctx={ctx} />
       <div className="with-sidebar reverse">
         <div className="main">
@@ -403,7 +406,7 @@ export function TorrentPage() {
           >
             <p>
               {formatBytes(d.size)} · {d.file_count} · {t('ui.torrent.uploader')}:{' '}
-              {d.uploader.anonymous ? t('ui.torrent.anonymous') : <Link to={`/users/${d.uploader.id}`}>#{d.uploader.id}</Link>} ·{' '}
+              {d.uploader.anonymous ? t('ui.torrent.anonymous') : <Link to={`/users/${d.uploader.id}`}>{d.uploader.username ?? `#${d.uploader.id}`}</Link>} ·{' '}
               {new Date(d.created_at).toLocaleString()}
             </p>
             <Slot name="torrent.detail.actions" ctx={ctx} />
@@ -624,7 +627,39 @@ export function GroupPage() {
   );
 }
 
+/** 种子状态的显示名（术语 torrent.status.<状态>，缺失时显示原值） */
+function statusName(t: (k: string, a?: Record<string, unknown>) => string, st: string): string {
+  const k = `torrent.status.${st}`;
+  const v = t(`term:${k}`);
+  return v === k ? st : v;
+}
+
 export function Home() {
+  const t = useT();
+  const s = useSession();
+  const m = useManifest();
+  if (!s.loading && !s.me) {
+    // 私有站点：未登录时只显示欢迎与登录 / 注册入口
+    return (
+      <div className="pt-welcome">
+        <Card title={t('ui.home.guest_title', { site: m.site.name })}>
+          <p>{t('ui.home.guest_body')}</p>
+          <div className="pt-row">
+            <Link className="pt-btn pt-btn-primary" to="/login">
+              {t('ui.nav.login')}
+            </Link>
+            <Link className="pt-btn" to="/register">
+              {t('ui.nav.register')}
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+  return <HomeFeed />;
+}
+
+function HomeFeed() {
   const t = useT();
   const res = useQuery({
     queryKey: ['search', 'home-latest'],
@@ -645,7 +680,7 @@ export function Home() {
           </Card>
         </div>
         <aside className="sidebar">
-          <Slot name="home.widgets" ctx={{}} fallback={<Empty>…</Empty>} />
+          <Slot name="home.widgets" ctx={{}} />
         </aside>
       </div>
     </div>

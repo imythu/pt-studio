@@ -59,6 +59,7 @@ default = "zh-CN"
 "type-movie.field.release_group" = { zh-CN = "制作组", en = "Release group" }
 "type-movie.field.edition" = { zh-CN = "版本", en = "Edition" }
 "type-movie.field.release_name" = { zh-CN = "发布名", en = "Release name" }
+"type-movie.field.release_name.hint" = { zh-CN = "场景发布名；未填写的规格会从中自动补全", en = "Scene release name; missing specs are filled from it" }
 "type-movie.field.poster" = { zh-CN = "海报", en = "Poster" }
 "type-movie.field.overview" = { zh-CN = "简介", en = "Overview" }
 "type-movie.field.genres" = { zh-CN = "类型", en = "Genres" }

@@ -215,7 +215,7 @@ try {
   await a.goto(`${BASE}/torrents/${TID}`);
   await a.locator('select[name=status]').selectOption('disabled');
   await a.getByRole('button', { name: '设置状态' }).click();
-  await a.getByText('disabled', { exact: true }).first().waitFor();
+  await a.getByText('已禁用', { exact: true }).first().waitFor();
 
   // 6f. AI 客户端（mcp）：设置页签发 token → 客户端发起写操作 → 待确认页确认执行
   step('mcp tokens and confirmations');

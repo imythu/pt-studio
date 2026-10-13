@@ -24,11 +24,22 @@ enum Cmd {
     Check,
     /// 只执行迁移
     Migrate,
+    /// 用户管理（直接操作数据库；用于首个管理员等运维场景）
+    User {
+        #[command(subcommand)]
+        cmd: UserCmd,
+    },
     /// 插件开发工具（不读取 site.toml、不连接数据库）
     Plugin {
         #[command(subcommand)]
         cmd: PluginCmd,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum UserCmd {
+    /// 授予角色，如 `pt-server user grant-role alice admin`（用户须已注册；需先执行过迁移）
+    GrantRole { username: String, role: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -116,7 +127,31 @@ async fn main() -> ExitCode {
                 }
             }
         }
-        Cmd::Plugin { .. } => unreachable!("handled above"),
+        Cmd::Plugin { .. } => ExitCode::from(2),
+        Cmd::User {
+            cmd: UserCmd::GrantRole { username, role },
+        } => {
+            let sql = "INSERT INTO user_roles (user_id, role, granted_by)
+                       SELECT u.id, r.name, 'cli' FROM users u JOIN roles r ON r.name = $2
+                        WHERE u.username_canonical = lower($1) AND u.deleted_at IS NULL
+                       ON CONFLICT (user_id, role) DO NOTHING";
+            match pt_kernel::storage::migrate::exec_as_plugin(&cfg, "identity", sql, &[&username, &role])
+                .await
+            {
+                Ok(1) => {
+                    println!("ok: granted `{role}` to `{username}`");
+                    ExitCode::SUCCESS
+                }
+                Ok(_) => {
+                    eprintln!("error: no such user / role, or the role was already granted");
+                    ExitCode::from(2)
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         Cmd::Serve => {
             let bind = cfg.http.bind.clone();
             let kernel = match Kernel::start(cfg, pt_server::native_plugins()).await {

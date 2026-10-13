@@ -397,6 +397,29 @@ async fn sync_view_grants(
     Ok(())
 }
 
+/// 运维命令：以某插件的数据库角色执行一条语句（参数均为文本），返回受影响行数。
+/// 只供 `pt-server` 的管理子命令使用（如为首个管理员授予角色），不经过插件与审计。
+pub async fn exec_as_plugin(
+    cfg: &SiteConfig,
+    schema: &str,
+    sql: &str,
+    params: &[&str],
+) -> Result<u64, sqlx::Error> {
+    let mut conn = PgConnection::connect(&cfg.database.admin_url).await?;
+    let mut tx = conn.begin().await?;
+    tx.execute(format!("SET LOCAL ROLE {}", qi(&role_of(cfg, schema))).as_str())
+        .await?;
+    tx.execute(format!("SET LOCAL search_path TO {}", qi(schema)).as_str())
+        .await?;
+    let mut q = sqlx::query(sql);
+    for p in params {
+        q = q.bind(*p);
+    }
+    let n = q.execute(&mut *tx).await?.rows_affected();
+    tx.commit().await?;
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

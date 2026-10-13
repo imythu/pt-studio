@@ -38,3 +38,7 @@ mark { background: color-mix(in srgb, var(--pt-color-primary) 25%, transparent);
 .meta-search { margin-bottom: var(--pt-space-3); }
 .meta-hit { display: block; text-align: left; width: 100%; }
 @media (max-width: 800px) { .group-meta { flex-direction: column; } }
+
+/* 未登录首页 */
+.pt-welcome { max-width: 560px; margin: var(--pt-space-6, 3rem) auto; }
+.pt-welcome .pt-row { gap: var(--pt-space-2); }

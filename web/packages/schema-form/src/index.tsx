@@ -141,6 +141,17 @@ function labelOf(name: string, s: Schema, t: (k: string) => string): string {
   return s.title ?? name;
 }
 
+/** 说明文字：术语 `<label-term>.hint` 优先，缺失时用 schema 的 description */
+function hintOf(s: Schema, t: (k: string) => string): string | undefined {
+  const term = s['x-pt-label-term'];
+  if (term) {
+    const k = `${term}.hint`;
+    const v = t(`term:${k}`);
+    if (v !== k) return v;
+  }
+  return s.description;
+}
+
 /** `oneOf` 判别：按 `properties.<key>.const` 选分支（type-generic 的 kind） */
 export function discriminator(schema: Schema): string | null {
   const first = schema.oneOf?.[0]?.properties;
@@ -243,14 +254,14 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   }
   if (ty === 'boolean') {
     return (
-      <FieldWrap label={label} error={err} hint={schema.description}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
         <input id={id} type="checkbox" checked={value === true} onChange={(e) => onChange(e.target.checked)} />
       </FieldWrap>
     );
   }
   if (schema.enum) {
     return (
-      <FieldWrap label={label} error={err} hint={schema.description}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
         <select id={id} className="pt-input" value={value === undefined ? '' : JSON.stringify(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : JSON.parse(e.target.value))}>
           <option value="">—</option>
           {schema.enum.map((o, i) => (
@@ -265,7 +276,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   if (ty === 'array' && schema.items?.enum) {
     const cur = Array.isArray(value) ? value : [];
     return (
-      <FieldWrap label={label} error={err} hint={schema.description}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
         <div className="pt-checks">
           {schema.items.enum.map((o) => (
             <label key={String(o)} className="pt-check">
@@ -277,19 +288,19 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
     );
   }
   if (ty === 'array' && schema['x-pt-widget'] === 'log-files') {
-    return <LogFiles label={label} error={err} hint={schema.description} value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />;
+    return <LogFiles label={label} error={err} hint={hintOf(schema, t)} value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />;
   }
   if (ty === 'array' && (!schema.items || primary(schema.items) === 'string')) {
     const cur = Array.isArray(value) ? (value as string[]) : [];
     return (
-      <FieldWrap label={label} error={err} hint={schema.description ?? 'comma separated'}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t) ?? 'comma separated'}>
         <input id={id} className="pt-input" value={cur.join(', ')} onChange={(e) => onChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
       </FieldWrap>
     );
   }
   if (ty === 'integer' || ty === 'number') {
     return (
-      <FieldWrap label={label} error={err} hint={schema.description}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
         <input
           id={id}
           className="pt-input"
@@ -307,7 +318,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
     const multiline = schema['x-pt-widget'] === 'markdown' || schema['x-pt-widget'] === 'mediainfo' || schema['x-pt-widget'] === 'textarea';
     const type = schema['x-pt-secret'] ? 'password' : schema.format === 'date' ? 'date' : schema.format === 'date-time' ? 'datetime-local' : 'text';
     return (
-      <FieldWrap label={label} error={err} hint={schema.description}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
         {multiline ? (
           <textarea id={id} className={`pt-input${schema['x-pt-widget'] === 'mediainfo' ? ' pt-mono' : ''}`} rows={6} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />
         ) : (

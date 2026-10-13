@@ -60,7 +60,7 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["nav.user_menu"]
+slots = ["nav.user_menu", "home.widgets"]
 routes = ["/p/checkin/*"]
 settings_ui = "schema"
 

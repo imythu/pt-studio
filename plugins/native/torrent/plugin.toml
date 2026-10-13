@@ -133,5 +133,10 @@ migrations = "migrations"
 views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent_fingerprint", "v_uploader_counts", "v_group_public", "v_group_fields", "v_torrent_review"]
 
 [terms]
+"torrent.field.type_id" = { zh-CN = "类型", en = "Type" }
 "torrent.status.approved" = { zh-CN = "已发布", en = "Approved" }
 "torrent.status.pending" = { zh-CN = "待审核", en = "Pending" }
+"torrent.status.candidate" = { zh-CN = "候选", en = "Candidate" }
+"torrent.status.rejected" = { zh-CN = "已拒绝", en = "Rejected" }
+"torrent.status.disabled" = { zh-CN = "已禁用", en = "Disabled" }
+"torrent.status.deleted" = { zh-CN = "已删除", en = "Deleted" }

@@ -1,4 +1,4 @@
-// checkin 前端：用户菜单的签到入口（未签到时一键签到并显示奖励）、签到页（/p/checkin/：连续天数、本月日历、排行）。
+// checkin 前端：用户菜单的签到入口（未签到时一键签到并显示奖励）、首页小部件、签到页（/p/checkin/：连续天数、本月日历、排行）。
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
@@ -19,6 +19,7 @@ registerMessages('zh-CN', {
   'checkin.ui.calendar': '本月',
   'checkin.ui.leaderboard': '连续签到排行',
   'checkin.ui.user': '用户',
+  'checkin.ui.done_today': '今天已签到',
 });
 registerMessages('en', {
   'checkin.ui.menu': 'Check in',
@@ -34,6 +35,7 @@ registerMessages('en', {
   'checkin.ui.calendar': 'This month',
   'checkin.ui.leaderboard': 'Streak leaderboard',
   'checkin.ui.user': 'User',
+  'checkin.ui.done_today': 'Checked in today',
 });
 
 interface Status {
@@ -100,9 +102,46 @@ function MenuItem({ api }: SlotProps) {
       </a>
     );
   return (
-    <Button variant="ghost" onClick={() => void go()}>
+    <a
+      href="/p/checkin/"
+      onClick={(e) => {
+        e.preventDefault();
+        void go();
+      }}
+    >
       {api.t('checkin.ui.menu')}
-    </Button>
+    </a>
+  );
+}
+
+/** 首页小部件：今日状态与一键签到 */
+function Widget({ api }: SlotProps) {
+  const [st, setSt] = useState<Status | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(async () => setSt(await api.json<Status>('/api/p/checkin/v1/me')), [api]);
+  useEffect(() => {
+    if (api.user()) void load().catch(() => undefined);
+  }, [api, load]);
+  if (!api.user() || !st) return null;
+  async function go() {
+    try {
+      setMsg(resultText(api, await api.json<Result>('/api/p/checkin/v1/check-ins', { method: 'POST', json: {} })));
+      await load();
+    } catch (e) {
+      setMsg(errText(api, e));
+    }
+  }
+  return (
+    <Card title={api.t('checkin.ui.title')}>
+      <div className="pt-row">
+        <Stat label={api.t('checkin.ui.streak')} value={st.streak} />
+        <Stat label={api.t('checkin.ui.next')} value={st.next_reward.daily + (st.next_reward.milestone?.amount ?? 0)} />
+      </div>
+      <Button variant="primary" disabled={st.checked_in_today} onClick={() => void go()}>
+        {api.t(st.checked_in_today ? 'checkin.ui.done_today' : 'checkin.ui.check_in')}
+      </Button>
+      {msg && <p className="pt-muted">{msg}</p>}
+    </Card>
   );
 }
 
@@ -171,6 +210,7 @@ function Page({ api }: { api: PluginApi }) {
 export default {
   slots: {
     'nav.user_menu': { component: MenuItem, order: 1 },
+    'home.widgets': { component: Widget, order: 10 },
   },
   routes: [{ path: '/p/checkin/*', component: Page }],
 } satisfies PluginFrontend;

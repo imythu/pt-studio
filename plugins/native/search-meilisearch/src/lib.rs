@@ -527,7 +527,7 @@ async fn record_task(
     Ok(())
 }
 
-/// 把生成结果写入目标索引并更新 indexed_docs（flush 与重建共用）
+/// 把生成结果写入目标索引并更新 indexed_docs（flush 与重建共用）；返回 Meilisearch 任务 ID
 async fn write_built(
     ctx: &Ctx,
     meili: &Meili,
@@ -535,16 +535,19 @@ async fn write_built(
     targets: &[&str],
     b: &Built,
     lane: Option<&str>,
-) -> PResult<()> {
+) -> PResult<Vec<u64>> {
+    let mut tasks = Vec::new();
     let docs: Vec<Value> = b.docs.iter().map(|d| d.1.clone()).collect();
     let doc_ids: Vec<i64> = b.docs.iter().map(|d| d.0).collect();
     for uid in targets {
         if !docs.is_empty() {
             let t = meili.update_documents(uid, &docs).await?;
+            tasks.push(t);
             record_task(ctx, meili, t, uid, "docs", lane, idx, &doc_ids).await?;
         }
         if !b.deletes.is_empty() {
             let t = meili.delete_documents(uid, &b.deletes).await?;
+            tasks.push(t);
             record_task(ctx, meili, t, uid, "delete", lane, idx, &b.deletes).await?;
         }
     }
@@ -574,7 +577,7 @@ async fn write_built(
             .execute(&mut *c)
             .await?;
     }
-    Ok(())
+    Ok(tasks)
 }
 
 async fn bump_cache_gen(ctx: &Ctx, index: &str) {
@@ -639,13 +642,15 @@ async fn flush(s: &Search, ctx: &Ctx, index: &str, lane: &str) -> PResult<usize>
         drop(c);
         let mut b = build_docs(ctx, &row.merged, &upserts).await?;
         b.deletes.extend(deletes);
+        // 新文档（新发布的种子）要立即出现在列表中：此时也让查询缓存失效
+        let has_new = b.docs.iter().any(|d| !known.contains_key(&d.0));
         // 文档未变：跳过写入（仍删除待写行）
         b.docs.retain(|d| known.get(&d.0) != Some(&d.2));
         let mut targets = vec![row.live_uid.as_str()];
         if let Some(d) = row.dual_write_uid.as_deref() {
             targets.push(d);
         }
-        write_built(ctx, meili, index, &targets, &b, Some(lane)).await?;
+        let tasks = write_built(ctx, meili, index, &targets, &b, Some(lane)).await?;
         let mut c = ctx.sql.conn().await?;
         sqlx::query(
             "DELETE FROM pending_ops p USING unnest($2::bigint[], $3::bigint[]) AS x(id, seq)
@@ -657,7 +662,11 @@ async fn flush(s: &Search, ctx: &Ctx, index: &str, lane: &str) -> PResult<usize>
         .execute(&mut *c)
         .await?;
         drop(c);
-        if lane == "priority" || !b.deletes.is_empty() {
+        if lane == "priority" || has_new || !b.deletes.is_empty() {
+            // 等索引任务完成再让缓存失效，否则失效后立即到来的查询会把旧结果重新缓存
+            for t in &tasks {
+                let _ = meili.wait(*t, Duration::from_secs(3)).await;
+            }
             bump_cache_gen(ctx, index).await;
         }
         total += seqs.len();
