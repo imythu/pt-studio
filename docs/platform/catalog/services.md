@@ -78,12 +78,12 @@ WASM 插件通过 `pt:plugin` 的宿主接口使用；Native 插件通过 `Ctx` 
 | `ctx.mediainfo` | mediainfo | single | `parse(text) -> MediaInfo`、`parse_nfo(text) -> Nfo` | — | 0.1.0 |
 | `ctx.comments` | comments | single | `count(target) -> u64`、`count_many(targets)`、`exists(id)`（目标、作者、状态、摘要）、`get(id)`（原文与纯文本，需 `read:raw`）、`create(author_id, target, body)`、`delete(id, reason)` | `read:raw`、`write` | 0.1.0 |
 | `ctx.forum` | forum | single | `create_topic(forum_id, author_id, title, body) -> topic_id`、`get_topic(id)`、`link_topic(target, topic_id)` | `write` | 0.1.0 |
-| `ctx.messages` | messages | single | `send_system(user_id, subject_term, body_template, args)`、`unread_count(user_id)` | `send` | 0.1.0 |
+| `ctx.messages` | messages | single | `send_system(user_id, subject, body)`（Markdown）、`unread_count(user_id)` | `send` | 0.1.0 |
 | `ctx.requests` | requests | single | `get(id)`、`fill(request_id, torrent_id, filler_id)` | `write` | 0.1.0 |
 | `ctx.subtitles` | subtitles | single | `list_for(torrent_id)` | — | 0.1.0 |
 | `ctx.moderation` | moderation | single | `submit(target, reason)`、`decide(target, Decision, note)`、`queue_stats()` | `write` | 0.1.0 |
 | `ctx.reports` | reports | single | `create(reporter_id, target, reason_code, note) -> id`、`resolve(id, resolution)` | `write` | 0.1.0 |
-| `ctx.notify` | notify | single | `send(user_id, template_key, args, channels: Option<Vec>)`、`send_many(user_ids, ...)`、`channels_of(user_id)` | `send` | 0.1.0 |
+| `ctx.notify` | notify | single | `send(user_id, template_key, category, args, title, body, link?, idempotency_key)`（模板键前缀为调用方；标题正文为回退文本，前端按 `<key>.title` / `<key>.body` 术语渲染）、`send_many(user_ids, ...)`、`channels_of(user_id)` | `send` | 0.1.0 |
 | `ctx.llm` | llm-claude / llm-openai-compat | single（另支持 `profiles`，见下） | `complete(LlmRequest) -> LlmResponse`、`stream` 不提供（v0.1）、`embed(texts, model) -> Vec<Vec<f32>>`、`models()` | `use`、`profile:<name>` | 0.1.0 |
 | `ctx.mcp` | mcp | single | `pending_confirmations(user_id)`、`confirm(confirmation_id, user_id)`、`reject(confirmation_id, user_id)` | — | 0.1.0 |
 | `ctx.ai_upload_review` | ai-upload-review | single | `review(torrent_id) -> ReviewReport` | — | 0.1.0 |

@@ -72,6 +72,25 @@ fn has(uid: i64, perm: &str) -> bool {
     svc("ctx.rbac", "check", &json!({ "user": uid, "permission": perm })).is_ok_and(|v| v == true)
 }
 
+/// 发送站内通知（notify 未安装或失败时忽略）
+#[allow(clippy::too_many_arguments)]
+fn notify(
+    user: i64,
+    key: &str,
+    category: &str,
+    args: Value,
+    title: &str,
+    body: &str,
+    link: &str,
+    idem: &str,
+) {
+    let _ = services::call(
+        "ctx.notify",
+        "send",
+        &json!({ "user_id": user, "template_key": key, "category": category, "args": args, "title": title, "body": body, "link": link, "idempotency_key": idem }).to_string(),
+    );
+}
+
 fn publish(event: &str, key: &str, payload: Value) -> R<()> {
     events::publish(&events::NewEvent {
         event_type: event.into(),
@@ -438,6 +457,25 @@ fn decide(target: &str, uid: Option<i64>, decision: &str, note: &str, actor: &st
         target,
         json!({ "target": target, "decision": decision, "moderator_id": uid, "by_ai": false, "note": note }),
     )?;
+    // 通知上传者
+    if let Some(up) = snap["uploader_id"].as_i64() {
+        let title = snap["title"].as_str().unwrap_or("").to_owned();
+        let zh = match decision {
+            "approve" => format!("你的种子已通过审核：{title}"),
+            "reject" => format!("你的种子未通过审核：{title}"),
+            _ => format!("你的种子需要修改：{title}"),
+        };
+        notify(
+            up,
+            &format!("moderation.decision.{decision}"),
+            "content",
+            json!({ "title": title, "note": note }),
+            &zh,
+            note,
+            &format!("/torrents/{id}"),
+            &format!("{target}:{decision}:{}", pt::plugin::time::now()),
+        );
+    }
     Ok(json!({ "target": target, "decision": decision }))
 }
 

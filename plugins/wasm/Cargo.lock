@@ -255,6 +255,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-messages"
+version = "0.1.0"
+dependencies = [
+ "pt-markup",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "pt-wasm-metadata-tmdb"
 version = "0.1.0"
 dependencies = [
@@ -266,6 +275,14 @@ dependencies = [
 
 [[package]]
 name = "pt-wasm-moderation"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
+name = "pt-wasm-notify"
 version = "0.1.0"
 dependencies = [
  "serde_json",

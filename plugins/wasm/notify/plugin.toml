@@ -1,0 +1,64 @@
+id = "notify"
+name = "通知"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "站内通知中心：插件经 ctx.notify 发送，按类别的接收偏好，未读数与已读（邮件 / Telegram / Discord 渠道待接入）"
+
+provides = ["ctx.notify@0.1.0"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public"]
+
+[[cron]]
+name = "cleanup"
+schedule = "25 4 * * *"
+timeout_secs = 300
+
+[[http.routes]]
+id = "inbox"
+method = "GET"
+path = "/v1/inbox"
+auth = "user"
+
+[[http.routes]]
+id = "unread"
+method = "GET"
+path = "/v1/unread"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "read"
+method = "POST"
+path = "/v1/inbox/read"
+auth = "user"
+
+[[http.routes]]
+id = "get_prefs"
+method = "GET"
+path = "/v1/preferences"
+auth = "user"
+
+[[http.routes]]
+id = "put_prefs"
+method = "PUT"
+path = "/v1/preferences"
+auth = "user"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu", "user.settings.tabs"]
+routes = ["/p/notify/*"]
+
+[terms]
+"notify.name" = { zh-CN = "通知", en = "Notifications" }
+"notify.category.security" = { zh-CN = "账号安全", en = "Security" }
+"notify.category.account" = { zh-CN = "账号", en = "Account" }
+"notify.category.social" = { zh-CN = "互动（回复、@提醒）", en = "Social (replies, mentions)" }
+"notify.category.content" = { zh-CN = "内容（审核、举报结果）", en = "Content (reviews, reports)" }
+"notify.category.economy" = { zh-CN = "魔力值与交易", en = "Economy" }
+"notify.category.system" = { zh-CN = "系统", en = "System" }

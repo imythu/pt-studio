@@ -9,7 +9,7 @@ description = "举报与工单：按目标合并、优先级、认领、处理�
 
 provides = ["ctx.reports@0.1.0"]
 requires = ["ctx.rbac@^0.1"]
-optional_requires = ["ctx.comments@^0.1", "ctx.torrents@^0.1", "ctx.users@^0.1"]
+optional_requires = ["ctx.comments@^0.1", "ctx.torrents@^0.1", "ctx.users@^0.1", "ctx.notify@^0.1"]
 publishes = ["report.created", "report.resolved"]
 
 [capabilities]
@@ -21,6 +21,7 @@ views = ["torrent.v_torrent_public", "torrent.v_group_public", "identity.v_user_
 "ctx.comments" = ["write"]
 "ctx.torrents" = ["write:status"]
 "ctx.users" = ["write:status"]
+"ctx.notify" = ["send"]
 
 [[http.routes]]
 id = "reasons"
@@ -159,3 +160,11 @@ default = 7
 "reports.reason.user.other" = { zh-CN = "其他", en = "Other" }
 "reports.reason.group.wrong_info" = { zh-CN = "信息错误", en = "Wrong information" }
 "reports.reason.group.other" = { zh-CN = "其他", en = "Other" }
+"reports.reason.message.spam" = { zh-CN = "垃圾内容", en = "Spam" }
+"reports.reason.message.abuse" = { zh-CN = "辱骂 / 骚扰", en = "Abuse" }
+"reports.reason.message.scam" = { zh-CN = "诈骗", en = "Scam" }
+"reports.reason.message.other" = { zh-CN = "其他", en = "Other" }
+"reports.resolved.resolved.title" = { zh-CN = "你的举报已处理", en = "Your report was handled" }
+"reports.resolved.resolved.body" = { zh-CN = "{note}", en = "{note}" }
+"reports.resolved.invalid.title" = { zh-CN = "你的举报经核实不成立", en = "Your report was found invalid" }
+"reports.resolved.invalid.body" = { zh-CN = "{note}", en = "{note}" }

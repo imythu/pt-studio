@@ -1,0 +1,164 @@
+id = "messages"
+name = "站内信"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "站内信：会话、回复、系统消息、拉黑与接收设置、举报某条消息（ctx.messages）"
+
+provides = ["ctx.messages@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+optional_requires = ["ctx.reports@^0.1"]
+publishes = ["message.sent"]
+
+[capabilities]
+sql = true
+redis = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.reports" = ["write"]
+
+[[hook_points]]
+name = "message.before_send"
+input_schema = "schemas/hooks/message.before_send.json"
+
+[[http.routes]]
+id = "list"
+method = "GET"
+path = "/v1/conversations"
+auth = "user"
+
+[[http.routes]]
+id = "create"
+method = "POST"
+path = "/v1/conversations"
+auth = "user"
+permission = "messages.send"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "get"
+method = "GET"
+path = "/v1/conversations/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "reply"
+method = "POST"
+path = "/v1/conversations/{id}/messages"
+auth = "user"
+permission = "messages.send"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "remove"
+method = "DELETE"
+path = "/v1/conversations/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "unread"
+method = "GET"
+path = "/v1/unread"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "blocks"
+method = "GET"
+path = "/v1/blocks"
+auth = "user"
+
+[[http.routes]]
+id = "block"
+method = "POST"
+path = "/v1/blocks"
+auth = "user"
+
+[[http.routes]]
+id = "unblock"
+method = "DELETE"
+path = "/v1/blocks/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "get_settings"
+method = "GET"
+path = "/v1/settings"
+auth = "user"
+
+[[http.routes]]
+id = "put_settings"
+method = "PUT"
+path = "/v1/settings"
+auth = "user"
+
+[[http.routes]]
+id = "report"
+method = "POST"
+path = "/v1/messages/{id}/report"
+auth = "user"
+permission = "reports.create"
+rate_limit = "user:20/m"
+
+[[mcp.tools]]
+name = "list_my_messages"
+title = "我的站内信"
+description = "列出当前用户的站内信会话（标题、对方、最近时间、未读数），不含正文。folder 可选 inbox / sent / system。"
+input_schema = { type = "object", additionalProperties = false, properties = { folder = { type = "string", enum = ["inbox", "sent", "system"] }, unread_only = { type = "boolean" } } }
+
+[[mcp.tools]]
+name = "send_message"
+title = "发送站内信"
+description = "以当前用户身份给其他用户发送站内信（to 为用户名列表）。需要用户在站点确认后才会发送。"
+write = true
+permission = "messages.send"
+input_schema = { type = "object", additionalProperties = false, required = ["to", "subject", "body"], properties = { to = { type = "array", items = { type = "string", maxLength = 32 }, minItems = 1, maxItems = 5 }, subject = { type = "string", maxLength = 200 }, body = { type = "string", maxLength = 20000 } } }
+
+[[permissions]]
+name = "messages.send"
+description_term = "messages.perm.send"
+default_roles = ["user"]
+
+[[permissions]]
+name = "messages.broadcast"
+description_term = "messages.perm.broadcast"
+default_roles = ["moderator"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu"]
+routes = ["/p/messages/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.max_recipients]
+type = "integer"
+minimum = 1
+maximum = 50
+title = "每次最多收件人"
+default = 5
+
+[settings_schema.properties.rate_per_hour]
+type = "integer"
+minimum = 1
+title = "每小时最多发送数（员工不限）"
+default = 30
+
+[settings_schema.properties.max_length]
+type = "integer"
+minimum = 100
+title = "正文最大字数"
+default = 20000
+
+[terms]
+"messages.name" = { zh-CN = "站内信", en = "Messages" }
+"messages.perm.send" = { zh-CN = "发送站内信", en = "Send messages" }
+"messages.perm.broadcast" = { zh-CN = "群发公告", en = "Broadcast messages" }

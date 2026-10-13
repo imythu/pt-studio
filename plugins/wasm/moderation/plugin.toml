@@ -9,6 +9,7 @@ description = "候选区与审核：上传初始状态规则、审核队列（�
 
 provides = ["ctx.moderation@0.1.0"]
 requires = ["ctx.torrents@^0.1", "ctx.rbac@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
 publishes = ["moderation.decided", "moderation.submitted", "moderation.candidate_voted"]
 
 [capabilities]
@@ -17,6 +18,7 @@ views = ["torrent.v_torrent_public", "identity.v_user_public"]
 
 [capabilities.scopes]
 "ctx.torrents" = ["write:status"]
+"ctx.notify" = ["send"]
 
 [[hooks]]
 hook = "torrent.before_upload"
@@ -222,3 +224,9 @@ default = 30
 "moderation.perm.decide" = { zh-CN = "审核通过 / 拒绝", en = "Approve or reject" }
 "moderation.perm.vote" = { zh-CN = "候选区投票", en = "Vote on candidates" }
 "moderation.perm.manage" = { zh-CN = "审核规则配置", en = "Configure moderation" }
+"moderation.decision.approve.title" = { zh-CN = "你的种子已通过审核：{title}", en = "Your torrent was approved: {title}" }
+"moderation.decision.approve.body" = { zh-CN = "{note}", en = "{note}" }
+"moderation.decision.reject.title" = { zh-CN = "你的种子未通过审核：{title}", en = "Your torrent was rejected: {title}" }
+"moderation.decision.reject.body" = { zh-CN = "{note}", en = "{note}" }
+"moderation.decision.needs_edit.title" = { zh-CN = "你的种子需要修改：{title}", en = "Your torrent needs changes: {title}" }
+"moderation.decision.needs_edit.body" = { zh-CN = "{note}", en = "{note}" }

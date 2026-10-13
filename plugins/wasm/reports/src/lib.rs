@@ -76,6 +76,25 @@ fn svc(service: &str, method: &str, args: &Value) -> R<Value> {
     Ok(serde_json::from_str(&out).unwrap_or(Value::Null))
 }
 
+/// 发送站内通知（notify 未安装或失败时忽略）
+#[allow(clippy::too_many_arguments)]
+fn notify(
+    user: i64,
+    key: &str,
+    category: &str,
+    args: Value,
+    title: &str,
+    body: &str,
+    link: &str,
+    idem: &str,
+) {
+    let _ = services::call(
+        "ctx.notify",
+        "send",
+        &json!({ "user_id": user, "template_key": key, "category": category, "args": args, "title": title, "body": body, "link": link, "idempotency_key": idem }).to_string(),
+    );
+}
+
 fn publish(event: &str, key: &str, payload: Value) -> R<()> {
     events::publish(&events::NewEvent {
         event_type: event.into(),
@@ -90,7 +109,7 @@ fn publish(event: &str, key: &str, payload: Value) -> R<()> {
 /// (类型, ID, 预览, 目标所属用户)
 type Located = (String, i64, Value, Option<i64>);
 
-fn locate(target: &str) -> R<Option<Located>> {
+fn locate(target: &str, snapshot: Option<&Value>) -> R<Option<Located>> {
     let Some((kind, id)) = target.split_once(':') else {
         return Ok(None);
     };
@@ -124,6 +143,26 @@ fn locate(target: &str) -> R<Option<Located>> {
                 Some(id),
             )
         }),
+        // 私信：只能经服务调用附快照举报；之后的预览取已保存的快照
+        "message" => {
+            let snap = match snapshot {
+                Some(s) => Some(s.clone()),
+                None => sql::query(
+                    "SELECT r.snapshot::text FROM reports r JOIN cases c ON c.id = r.case_id WHERE c.target = $1 AND r.snapshot IS NOT NULL ORDER BY r.id LIMIT 1",
+                    &[SqlValue::Text(target.to_owned())],
+                )?
+                .rows
+                .first()
+                .and_then(|r| text(&r[0]))
+                .and_then(|t| serde_json::from_str(&t).ok()),
+            };
+            snap.map(|s| {
+                (
+                    json!({ "text": s["text"], "sender_id": s["sender_id"] }),
+                    s["sender_id"].as_i64(),
+                )
+            })
+        }
         "comment" => match svc("ctx.comments", "exists", &json!({ "id": id })) {
             Ok(v) if !v.is_null() => Some((
                 json!({ "target": v["target"], "excerpt": v["excerpt"], "state": v["state"] }),
@@ -172,7 +211,7 @@ fn create(r: NewReport<'_>) -> R<Value> {
     if n > setting("rate_per_hour", 20) {
         return Err(err("reports.rate_limited", "too many reports, try again later"));
     }
-    let Some((kind, ..)) = locate(r.target)? else {
+    let Some((kind, ..)) = locate(r.target, r.snapshot.as_ref())? else {
         return Err(err("reports.target_not_found", "target not found"));
     };
     if r.target == format!("user:{}", r.reporter) {
@@ -247,7 +286,7 @@ fn case_json(id: i64, staff: bool) -> R<Option<Value>> {
         v["action_results"] = text(&row[9])
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or(Value::Null);
-        v["target_preview"] = locate(&target)?.map_or(Value::Null, |l| l.2);
+        v["target_preview"] = locate(&target, None)?.map_or(Value::Null, |l| l.2);
         let reps = sql::query(
             "SELECT r.reporter_id, u.username, r.reason_code, r.note, r.snapshot::text, (extract(epoch FROM r.created_at) * 1000)::bigint
                FROM reports r LEFT JOIN identity.v_user_public u ON u.id = r.reporter_id WHERE r.case_id = $1 ORDER BY r.id",
@@ -271,7 +310,7 @@ fn actions_for(kind: &str) -> Vec<&'static str> {
     match kind {
         "comment" => vec!["delete_content", "restrict_user", "none"],
         "torrent" => vec!["disable_torrent", "restrict_user", "none"],
-        "user" => vec!["restrict_user", "none"],
+        "user" | "message" => vec!["restrict_user", "none"],
         _ => vec!["none"],
     }
 }
@@ -367,7 +406,7 @@ fn resolve(case_id: i64, staff: i64, b: &Value) -> R<(u16, Value)> {
         .split_once(':')
         .and_then(|(_, i)| i.parse().ok())
         .unwrap_or(0);
-    let owner = locate(&target)?.and_then(|l| l.3);
+    let owner = locate(&target, None)?.and_then(|l| l.3);
     let mut results = Vec::new();
     let mut ok_all = true;
     if code == "resolved" {
@@ -435,6 +474,31 @@ fn resolve(case_id: i64, staff: i64, b: &Value) -> R<(u16, Value)> {
         target: format!("case:{case_id}"),
         details: json!({ "code": code, "results": results, "target": target }).to_string(),
     })?;
+    // 通知举报者（系统举报者 0 除外；升级不算结案）
+    if new_state == "closed" {
+        let public = b["note_public"].as_str().unwrap_or("").to_owned();
+        let reporters = sql::query(
+            "SELECT DISTINCT reporter_id FROM reports WHERE case_id = $1 AND reporter_id > 0",
+            &[SqlValue::Int(case_id)],
+        )?;
+        for rid in reporters.rows.iter().filter_map(|r| int(&r[0])) {
+            let zh = if code == "resolved" {
+                "你的举报已处理"
+            } else {
+                "你的举报经核实不成立"
+            };
+            notify(
+                rid,
+                &format!("reports.resolved.{code}"),
+                "content",
+                json!({ "note": public }),
+                zh,
+                &public,
+                "/p/reports/",
+                &format!("case:{case_id}:{rid}"),
+            );
+        }
+    }
     let first = sql::query(
         "SELECT min(id) FROM reports WHERE case_id = $1",
         &[SqlValue::Int(case_id)],

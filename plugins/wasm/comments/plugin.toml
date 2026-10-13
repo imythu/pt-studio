@@ -9,12 +9,16 @@ description = "种子与作品的评论：Markdown / BBCode、楼层与回复、
 
 provides = ["ctx.comments@0.1.0"]
 requires = ["ctx.rbac@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
 publishes = ["comment.created", "comment.updated", "comment.deleted"]
 
 [capabilities]
 sql = true
 redis = true
 views = ["torrent.v_torrent_public", "torrent.v_group_public", "identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.notify" = ["send"]
 
 [[hook_points]]
 name = "comment.before_create"
@@ -173,3 +177,7 @@ default = []
 "comments.perm.create" = { zh-CN = "发表评论", en = "Post comments" }
 "comments.perm.update_own" = { zh-CN = "编辑自己的评论", en = "Edit own comments" }
 "comments.perm.moderate" = { zh-CN = "管理评论", en = "Moderate comments" }
+"comments.mentioned.title" = { zh-CN = "{user} 在评论中提到了你", en = "{user} mentioned you in a comment" }
+"comments.mentioned.body" = { zh-CN = "{excerpt}", en = "{excerpt}" }
+"comments.replied.title" = { zh-CN = "{user} 回复了你的评论", en = "{user} replied to your comment" }
+"comments.replied.body" = { zh-CN = "{excerpt}", en = "{excerpt}" }

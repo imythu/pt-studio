@@ -145,6 +145,15 @@
 | `moderation.vote_not_allowed` | 403 | moderation | 不能对该种子投票 |
 | `moderation.rule_invalid` | 422 | moderation | 规则校验失败 |
 | `ai-moderation.spam_detected` | 422 | ai-moderation | 发表前钩子拒绝（本地规则高置信垃圾） |
+| `notify.template_not_owned` | 403 | notify | 模板键前缀不是调用方插件 ID |
+| `notify.args_invalid` | 422 | notify | 通知参数、类别、标题或正文不合法 |
+| `messages.not_found` | 404 | messages | 会话或消息不存在（或不是参与者） |
+| `messages.recipient_not_found` | 404 | messages | 收件人不存在 |
+| `messages.blocked` | 403 | messages | 收件人已拉黑你 |
+| `messages.recipient_not_accepting` | 403 | messages | 收件人只接收员工的站内信 |
+| `messages.rate_limited` | 429 | messages | 发送过于频繁 |
+| `messages.too_long` | 422 | messages | 正文为空或超长 |
+| `messages.reply_not_allowed` | 403 | messages | 系统消息不能回复 |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `mcp.confirmation_invalid` | 409 | mcp | 确认项不存在、已处理、过期或参数不一致 |
 | `mcp.confirmation_pending` | 409 | mcp | 用户尚未确认（工具结果中返回） |

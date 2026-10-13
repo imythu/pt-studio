@@ -238,6 +238,25 @@ fn antispam(uid: i64, plain: &str, links: u32) -> R<()> {
     Ok(())
 }
 
+/// 发送站内通知（notify 未安装或失败时忽略）
+#[allow(clippy::too_many_arguments)]
+fn notify(
+    user: i64,
+    key: &str,
+    category: &str,
+    args: Value,
+    title: &str,
+    body: &str,
+    link: &str,
+    idem: &str,
+) {
+    let _ = services::call(
+        "ctx.notify",
+        "send",
+        &json!({ "user_id": user, "template_key": key, "category": category, "args": args, "title": title, "body": body, "link": link, "idempotency_key": idem }).to_string(),
+    );
+}
+
 fn publish(event: &str, key: &str, payload: Value) -> R<()> {
     events::publish(&events::NewEvent {
         event_type: event.into(),
@@ -359,6 +378,54 @@ fn create(c: NewComment<'_>) -> R<Value> {
         .filter(|m| i64::try_from(*m).ok() != Some(c.author))
         .take(10)
         .collect();
+    // 通知：@提醒与回复（不通知自己）
+    let (kind, tid) = logic::parse_target(c.target).unwrap_or(("torrent", 0));
+    let link = format!("/{}s/{tid}#comment-{id}", kind);
+    let author_name = sql::query(
+        "SELECT username FROM identity.v_user_public WHERE id = $1",
+        &[SqlValue::Int(c.author)],
+    )?
+    .rows
+    .first()
+    .and_then(|r| text(&r[0]))
+    .unwrap_or_default();
+    let excerpt: String = r.text.chars().take(100).collect();
+    for m in &mentions {
+        let uid = i64::try_from(*m).unwrap_or(0);
+        notify(
+            uid,
+            "comments.mentioned",
+            "social",
+            json!({ "user": author_name, "excerpt": excerpt }),
+            &format!("{author_name} 在评论中提到了你"),
+            &excerpt,
+            &link,
+            &format!("{id}:m:{uid}"),
+        );
+    }
+    if let Some(parent) = c.reply_to {
+        let p = sql::query(
+            "SELECT author_id FROM comments WHERE id = $1",
+            &[SqlValue::Int(parent)],
+        )?;
+        if let Some(pa) = p
+            .rows
+            .first()
+            .and_then(|row| int(&row[0]))
+            .filter(|pa| *pa != c.author && !mentions.contains(&u64::try_from(*pa).unwrap_or(0)))
+        {
+            notify(
+                pa,
+                "comments.replied",
+                "social",
+                json!({ "user": author_name, "excerpt": excerpt }),
+                &format!("{author_name} 回复了你的评论"),
+                &excerpt,
+                &link,
+                &format!("{id}:r"),
+            );
+        }
+    }
     publish(
         "comment.created",
         c.target,
