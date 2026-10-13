@@ -218,6 +218,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-checkin"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "pt-wasm-comments"
 version = "0.1.0"
 dependencies = [
@@ -302,6 +310,15 @@ dependencies = [
 name = "pt-wasm-reports"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
+name = "pt-wasm-requests"
+version = "0.1.0"
+dependencies = [
+ "pt-markup",
  "serde_json",
  "wit-bindgen",
 ]

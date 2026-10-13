@@ -331,8 +331,13 @@ function GroupTab({ api, ctx }: SlotProps<{ group: { id: number } }>) {
   return <CommentSection api={api} target={`group:${ctx.group.id}`} />;
 }
 
+function RequestSection({ api, ctx }: SlotProps<{ request: { id: number } }>) {
+  return <CommentSection api={api} target={`request:${ctx.request.id}`} />;
+}
+
 export default {
   slots: {
+    'request.detail.sidebar': { component: RequestSection, order: 10 },
     'torrent.detail.tabs': { component: TorrentTab, order: 10, title_term: 'comments.ui.tab' },
     'group.detail.tabs': { component: GroupTab, order: 10, title_term: 'comments.ui.tab' },
   },

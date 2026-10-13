@@ -154,6 +154,17 @@
 | `messages.rate_limited` | 429 | messages | 发送过于频繁 |
 | `messages.too_long` | 422 | messages | 正文为空或超长 |
 | `messages.reply_not_allowed` | 403 | messages | 系统消息不能回复 |
+| `checkin.disabled` | 403 | checkin | 签到已关闭 |
+| `checkin.not_allowed` | 403 | checkin | 账号状态不允许签到 |
+| `checkin.already_checked_in` | 409 | checkin | 今天已经签到过 |
+| `requests.not_found` | 404 | requests | 求种不存在 |
+| `requests.not_open` | 409 | requests | 求种不在可操作的状态 |
+| `requests.bounty_too_small` | 422 | requests | 悬赏低于最低值 |
+| `requests.self_fill` | 422 | requests | 不能应求自己的求种 |
+| `requests.torrent_invalid` | 422 | requests | 种子未通过审核或类型不符 |
+| `requests.requirements_not_met` | 422 | requests | 种子不满足规格要求 |
+| `requests.fill_not_found` | 404 | requests | 应求不存在 |
+| `requests.fill_not_pending` | 409 | requests | 应求不是待确认状态 |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `mcp.confirmation_invalid` | 409 | mcp | 确认项不存在、已处理、过期或参数不一致 |
 | `mcp.confirmation_pending` | 409 | mcp | 用户尚未确认（工具结果中返回） |

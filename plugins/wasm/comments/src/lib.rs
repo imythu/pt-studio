@@ -97,6 +97,16 @@ fn target_state(kind: &str, id: i64, uid: Option<i64>) -> R<(bool, bool)> {
                 || (status == "pending" && uid.is_some_and(|u| int(&row[1]) == Some(u) || moderator(u)));
             Ok((visible, commentable))
         }
+        // 求种（requests 未安装时视图不存在 → 不存在）；已关闭的求种不再接受评论
+        "request" => match sql::query(
+            "SELECT status FROM requests.v_request_public WHERE id = $1",
+            &[SqlValue::Int(id)],
+        ) {
+            Ok(r) => Ok(r.rows.first().map_or((false, false), |row| {
+                (true, text(&row[0]).as_deref() != Some("closed"))
+            })),
+            Err(_) => Ok((false, false)),
+        },
         "group" => {
             let r = sql::query(
                 "SELECT 1 FROM torrent.v_group_public WHERE id = $1",
@@ -380,7 +390,11 @@ fn create(c: NewComment<'_>) -> R<Value> {
         .collect();
     // 通知：@提醒与回复（不通知自己）
     let (kind, tid) = logic::parse_target(c.target).unwrap_or(("torrent", 0));
-    let link = format!("/{}s/{tid}#comment-{id}", kind);
+    let link = if kind == "request" {
+        format!("/p/requests/{tid}#comment-{id}")
+    } else {
+        format!("/{kind}s/{tid}#comment-{id}")
+    };
     let author_name = sql::query(
         "SELECT username FROM identity.v_user_public WHERE id = $1",
         &[SqlValue::Int(c.author)],

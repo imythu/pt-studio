@@ -15,7 +15,7 @@ publishes = ["comment.created", "comment.updated", "comment.deleted"]
 [capabilities]
 sql = true
 redis = true
-views = ["torrent.v_torrent_public", "torrent.v_group_public", "identity.v_user_public"]
+views = ["torrent.v_torrent_public", "torrent.v_group_public", "identity.v_user_public", "requests.v_request_public"]
 
 [capabilities.scopes]
 "ctx.notify" = ["send"]
@@ -111,7 +111,7 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["torrent.detail.tabs", "group.detail.tabs"]
+slots = ["torrent.detail.tabs", "group.detail.tabs", "request.detail.sidebar"]
 settings_ui = "schema"
 
 [settings_schema]
@@ -168,7 +168,7 @@ default = []
 
 [settings_schema.properties.disabled_targets]
 type = "array"
-items = { type = "string", enum = ["torrent", "group"] }
+items = { type = "string", enum = ["torrent", "group", "request"] }
 title = "关闭评论的目标类型"
 default = []
 

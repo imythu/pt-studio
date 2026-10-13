@@ -1,0 +1,197 @@
+id = "requests"
+name = "求种"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "求种与悬赏：发布、追加悬赏（经 ctx.ledger 托管）、投票、应求（规格要求检查）、确认发放、驳回、撤回与到期退款（ctx.requests）"
+
+provides = ["ctx.requests@0.1.0"]
+requires = ["ctx.ledger@^0.1", "ctx.rbac@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
+publishes = ["request.created", "request.bounty_added", "request.fill_submitted", "request.fill_rejected", "request.filled", "request.closed"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_public", "torrent.v_torrent_fields", "identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.ledger" = ["currency:bonus"]
+"ctx.notify" = ["send"]
+
+[[hook_points]]
+name = "request.before_create"
+input_schema = "schemas/hooks/request.before_create.json"
+
+[[cron]]
+name = "expire"
+schedule = "*/10 * * * *"
+timeout_secs = 300
+tx = "manual"
+
+[[cron]]
+name = "auto_confirm"
+schedule = "*/10 * * * *"
+timeout_secs = 300
+tx = "manual"
+
+[[http.routes]]
+id = "list"
+method = "GET"
+path = "/v1/requests"
+auth = "user"
+
+[[http.routes]]
+id = "create"
+method = "POST"
+path = "/v1/requests"
+auth = "user"
+permission = "requests.create"
+rate_limit = "user:10/h"
+
+[[http.routes]]
+id = "get"
+method = "GET"
+path = "/v1/requests/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "bounty"
+method = "POST"
+path = "/v1/requests/{id}/bounty"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "vote"
+method = "POST"
+path = "/v1/requests/{id}/vote"
+auth = "user"
+
+[[http.routes]]
+id = "unvote"
+method = "DELETE"
+path = "/v1/requests/{id}/vote"
+auth = "user"
+
+[[http.routes]]
+id = "fill"
+method = "POST"
+path = "/v1/requests/{id}/fills"
+auth = "user"
+permission = "requests.fill"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "confirm"
+method = "POST"
+path = "/v1/fills/{id}/confirm"
+auth = "user"
+
+[[http.routes]]
+id = "reject"
+method = "POST"
+path = "/v1/fills/{id}/reject"
+auth = "user"
+
+[[http.routes]]
+id = "withdraw"
+method = "POST"
+path = "/v1/requests/{id}/withdraw"
+auth = "user"
+
+[[mcp.tools]]
+name = "list_requests"
+title = "求种列表"
+description = "浏览求种（标题、类型、悬赏、票数），可按 status、type_id 筛选，sort 为 new / bounty / votes。"
+input_schema = { type = "object", additionalProperties = false, properties = { status = { type = "string", enum = ["open", "fill_pending", "filled", "closed"] }, type_id = { type = "string", maxLength = 32 }, sort = { type = "string", enum = ["new", "bounty", "votes"] } } }
+
+[[mcp.tools]]
+name = "create_request"
+title = "发布求种"
+description = "以当前用户身份发布求种，bounty 为从自己的魔力值中拿出的悬赏（最小单位）。需要用户在站点确认后才会发布并扣除悬赏。"
+write = true
+permission = "requests.create"
+input_schema = { type = "object", additionalProperties = false, required = ["type_id", "title", "bounty"], properties = { type_id = { type = "string", maxLength = 32 }, title = { type = "string", maxLength = 200 }, description = { type = "string", maxLength = 20000 }, bounty = { type = "integer", minimum = 1 }, requirements = { type = "array", items = { type = "object" } } } }
+
+[[permissions]]
+name = "requests.create"
+description_term = "requests.perm.create"
+default_roles = ["user"]
+
+[[permissions]]
+name = "requests.fill"
+description_term = "requests.perm.fill"
+default_roles = ["user"]
+
+[[permissions]]
+name = "requests.moderate"
+description_term = "requests.perm.moderate"
+default_roles = ["moderator"]
+
+[database]
+migrations = "migrations"
+views = ["v_request_public"]
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu"]
+routes = ["/p/requests/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.currency]
+type = "string"
+title = "悬赏币种"
+default = "bonus"
+
+[settings_schema.properties.min_bounty]
+type = "integer"
+minimum = 1
+title = "最低初始悬赏"
+default = 1
+
+[settings_schema.properties.min_contribution]
+type = "integer"
+minimum = 1
+title = "最低追加悬赏"
+default = 1
+
+[settings_schema.properties.fee_permille]
+type = "integer"
+minimum = 0
+maximum = 1000
+title = "发放时扣除的手续费（千分比）"
+default = 0
+
+[settings_schema.properties.expire_days]
+type = "integer"
+minimum = 1
+title = "求种有效天数"
+default = 30
+
+[settings_schema.properties.auto_confirm_days]
+type = "integer"
+minimum = 1
+title = "应求自动确认天数"
+default = 3
+
+[settings_schema.properties.allow_self_fill]
+type = "boolean"
+title = "允许应求自己的求种"
+default = false
+
+[terms]
+"requests.name" = { zh-CN = "求种", en = "Requests" }
+"requests.perm.create" = { zh-CN = "发布求种", en = "Create requests" }
+"requests.perm.fill" = { zh-CN = "应求", en = "Fill requests" }
+"requests.perm.moderate" = { zh-CN = "管理求种", en = "Moderate requests" }
+"requests.fill_submitted.title" = { zh-CN = "你的求种有人应求了：{title}", en = "Someone filled your request: {title}" }
+"requests.fill_submitted.body" = { zh-CN = "请尽快确认或驳回", en = "Please confirm or reject it" }
+"requests.fill_confirmed.title" = { zh-CN = "你的应求已确认：{title}", en = "Your fill was confirmed: {title}" }
+"requests.fill_confirmed.body" = { zh-CN = "获得悬赏 {payout}", en = "You received {payout}" }
+"requests.fill_rejected.title" = { zh-CN = "你的应求被驳回", en = "Your fill was rejected" }
+"requests.fill_rejected.body" = { zh-CN = "{reason}", en = "{reason}" }

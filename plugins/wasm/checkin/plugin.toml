@@ -1,0 +1,106 @@
+id = "checkin"
+name = "签到"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "每日签到：连续天数、递增奖励与里程碑（经 ctx.ledger 发放魔力值）、本月日历与排行"
+
+requires = ["ctx.ledger@^0.1"]
+publishes = ["checkin.checked_in"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.ledger" = ["currency:bonus"]
+
+[[hook_points]]
+name = "checkin.before_check_in"
+input_schema = "schemas/hooks/checkin.before_check_in.json"
+
+[[http.routes]]
+id = "check_in"
+method = "POST"
+path = "/v1/check-ins"
+auth = "user"
+permission = "checkin.use"
+rate_limit = "user:10/m"
+
+[[http.routes]]
+id = "status"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+
+[[http.routes]]
+id = "leaderboard"
+method = "GET"
+path = "/v1/leaderboard"
+auth = "user"
+
+[[mcp.tools]]
+name = "check_in"
+title = "签到"
+description = "为当前用户完成今天的签到并领取奖励（每天一次）。"
+write = true
+confirm = false
+permission = "checkin.use"
+input_schema = { type = "object", additionalProperties = false, properties = {} }
+
+[[permissions]]
+name = "checkin.use"
+description_term = "checkin.perm.use"
+default_roles = ["user"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu"]
+routes = ["/p/checkin/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.enabled]
+type = "boolean"
+title = "启用签到"
+default = true
+
+[settings_schema.properties.currency]
+type = "string"
+title = "奖励币种"
+default = "bonus"
+
+[settings_schema.properties.reward_base]
+type = "integer"
+minimum = 0
+title = "第一天奖励（最小单位）"
+default = 10
+
+[settings_schema.properties.reward_step]
+type = "integer"
+minimum = 0
+title = "每连续一天增加"
+default = 2
+
+[settings_schema.properties.reward_cap]
+type = "integer"
+minimum = 0
+title = "每日奖励上限"
+default = 50
+
+[settings_schema.properties.milestones]
+type = "array"
+items = { type = "object", properties = { days = { type = "integer", minimum = 2 }, amount = { type = "integer", minimum = 0 } } }
+title = "连续天数里程碑奖励"
+default = [{ days = 7, amount = 100 }, { days = 30, amount = 500 }]
+
+[terms]
+"checkin.name" = { zh-CN = "签到", en = "Check-in" }
+"checkin.perm.use" = { zh-CN = "签到", en = "Check in" }

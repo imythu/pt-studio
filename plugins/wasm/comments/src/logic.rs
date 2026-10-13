@@ -1,7 +1,7 @@
 //! 评论的纯逻辑（comments LLD §1.2～§1.4）：目标解析、重复内容指纹（simhash）、引用前缀。
 
 /// 支持的目标类型
-pub const KINDS: &[&str] = &["torrent", "group"];
+pub const KINDS: &[&str] = &["torrent", "group", "request"];
 
 /// `torrent:5501` → ("torrent", 5501)
 pub fn parse_target(t: &str) -> Option<(&str, i64)> {
