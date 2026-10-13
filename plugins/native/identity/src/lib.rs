@@ -184,6 +184,45 @@ impl pt_plugin_api::JsonService for Svc {
                 .ok_or_else(|| PluginError::validation(format!("argument `{k}` must be a user id")))
         };
         match method {
+            // ctx.auth.issue_token：作用域 tokens:issue（mcp 的 OAuth 令牌端点）
+            "issue_token" => {
+                if !ctx.invocation.has_scope("tokens:issue") {
+                    return Err(PluginError::forbidden("scope tokens:issue required"));
+                }
+                let uid =
+                    i64::try_from(id("user_id")?).map_err(|_| PluginError::bad_request("bad user id"))?;
+                let kind = tokens::Kind::parse(a["kind"].as_str().unwrap_or(""))
+                    .ok_or_else(|| PluginError::validation("kind"))?;
+                let scopes: Vec<String> = serde_json::from_value(a["scopes"].clone())
+                    .map_err(|_| PluginError::validation("scopes"))?;
+                let (tid, secret, expires) = tokens::issue(
+                    ctx,
+                    uid,
+                    kind,
+                    a["name"].as_str().unwrap_or("token"),
+                    &scopes,
+                    a["ttl_secs"].as_i64().unwrap_or(3600),
+                    &ctx.invocation.caller_plugin,
+                )
+                .await?;
+                Ok(
+                    serde_json::json!({ "token_id": tid, "token": secret, "expires_at": expires.timestamp_millis() }),
+                )
+            }
+            "revoke_token" => {
+                if !ctx.invocation.has_scope("tokens:issue") {
+                    return Err(PluginError::forbidden("scope tokens:issue required"));
+                }
+                let ok = match (
+                    a["token"].as_str(),
+                    a["token_id"].as_str().and_then(|t| uuid::Uuid::parse_str(t).ok()),
+                ) {
+                    (Some(t), _) => tokens::revoke_secret(ctx, t, a["user_id"].as_i64()).await?,
+                    (None, Some(id)) => tokens::revoke_id(ctx, id).await?,
+                    _ => return Err(PluginError::validation("token or token_id")),
+                };
+                Ok(serde_json::json!({ "revoked": ok }))
+            }
             "get" => Ok(serde_json::to_value(
                 UsersService::get(self, ctx, id("id")?).await?,
             )?),
@@ -344,7 +383,7 @@ pub fn plugin() -> NativePlugin {
             (RBAC, service_object::<dyn RbacService>(svc.clone())),
             (USERS, service_object::<dyn UsersService>(svc.clone())),
         ],
-        json_services: vec![(USERS, svc.clone()), (RBAC, svc)],
+        json_services: vec![(USERS, svc.clone()), (RBAC, svc.clone()), (AUTH, svc)],
         ..Default::default()
     }
 }

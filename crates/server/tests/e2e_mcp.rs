@@ -434,3 +434,324 @@ async fn mcp_end_to_end() {
 }
 
 use sqlx::Connection;
+
+fn form(pairs: &[(&str, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(k, v)| {
+            let enc: String = v
+                .bytes()
+                .map(|b| {
+                    if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+                        (b as char).to_string()
+                    } else {
+                        format!("%{b:02X}")
+                    }
+                })
+                .collect();
+            format!("{k}={enc}")
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+async fn post_form(app: &axum::Router, path: &str, body: String) -> common::Resp {
+    send(app, "POST", path, &[], |b| {
+        b.header("content-type", "application/x-www-form-urlencoded")
+            .body(axum::body::Body::from(body.clone()))
+            .unwrap()
+    })
+    .await
+}
+
+fn query_of(url: &str) -> std::collections::HashMap<String, String> {
+    let q = url.split_once('?').map_or("", |(_, q)| q);
+    q.split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| {
+            let mut out = Vec::new();
+            let b = v.as_bytes();
+            let mut i = 0;
+            while i < b.len() {
+                if b[i] == b'%' && i + 2 < b.len() + 1 && i + 2 < b.len() + 1 {
+                    out.push(u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap(), 16).unwrap());
+                    i += 3;
+                } else {
+                    out.push(b[i]);
+                    i += 1;
+                }
+            }
+            (k.to_owned(), String::from_utf8(out).unwrap())
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn mcp_oauth_end_to_end() {
+    let _guard = common::LOCK.lock().await;
+    let dir = common::package_wasm_plugins();
+    reset().await;
+    let kernel = Kernel::start(config(&dir), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+    let u = register_login(&app, "oauth_user").await;
+
+    // 元数据与动态注册
+    let r = call(&app, "GET", "/.well-known/oauth-authorization-server", None, &[]).await;
+    assert_eq!(
+        (
+            r.body["token_endpoint"].as_str(),
+            r.body["code_challenge_methods_supported"][0].as_str()
+        ),
+        (Some("https://pt.example/oauth/token"), Some("S256")),
+        "{} {:?}",
+        r.status,
+        r.body
+    );
+    let r = call(
+        &app,
+        "POST",
+        "/oauth/register",
+        Some(json!({ "client_name": "Evil", "redirect_uris": ["http://evil.example/cb"] })),
+        &[],
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.body["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("invalid_redirect_uri"))
+    );
+    let cb = "http://127.0.0.1:9999/cb";
+    let r = call(&app, "POST", "/oauth/register", Some(json!({ "client_name": "Claude Desktop", "redirect_uris": [cb], "token_endpoint_auth_method": "none", "application_type": "native" })), &[]).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let client_id = r.body["client_id"].as_str().unwrap().to_owned();
+    assert!(r.body.get("client_secret").is_none());
+
+    // 授权请求 → 站内同意页（PKCE 测试向量来自 RFC 7636 附录 B）
+    let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    let challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    let params = [
+        ("response_type", "code"),
+        ("client_id", client_id.as_str()),
+        ("redirect_uri", cb),
+        ("code_challenge", challenge),
+        ("code_challenge_method", "S256"),
+        ("state", "st-1"),
+        ("scope", "read write"),
+        ("resource", "https://pt.example/mcp"),
+    ];
+    let r = call(
+        &app,
+        "GET",
+        &format!("/oauth/authorize?{}", form(&params)),
+        None,
+        &[],
+    )
+    .await;
+    assert!(r.status.is_redirection(), "{:?}", r.body);
+    let loc = r.headers["location"].to_str().unwrap().to_owned();
+    assert!(loc.starts_with("https://pt.example/p/mcp/consent?"), "{loc}");
+    let mut bad = params.to_vec();
+    bad[2] = ("redirect_uri", "http://127.0.0.1:1/other");
+    let r = call(
+        &app,
+        "GET",
+        &format!("/oauth/authorize?{}", form(&bad)),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(
+        r.status,
+        StatusCode::BAD_REQUEST,
+        "unregistered redirect must not be redirected to"
+    );
+    let mut nopkce = params.to_vec();
+    nopkce.retain(|(k, _)| *k != "code_challenge");
+    let r = call(
+        &app,
+        "GET",
+        &format!("/oauth/authorize?{}", form(&nopkce)),
+        None,
+        &[],
+    )
+    .await;
+    let q = query_of(r.headers["location"].to_str().unwrap());
+    assert_eq!(
+        (
+            q.get("error").map(String::as_str),
+            q.get("state").map(String::as_str)
+        ),
+        (Some("invalid_request"), Some("st-1"))
+    );
+
+    // 同意页
+    let qp: Value = Value::Object(params.iter().map(|(k, v)| ((*k).to_owned(), json!(v))).collect());
+    let r = call(
+        &app,
+        "GET",
+        &format!("/api/p/mcp/v1/oauth/authorize-info?{}", form(&params)),
+        None,
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(
+        (r.body["client_name"].as_str(), r.body["scopes"].clone()),
+        (Some("Claude Desktop"), json!(["read", "write"])),
+        "{:?}",
+        r.body
+    );
+    let r = call(
+        &app,
+        "POST",
+        "/api/p/mcp/v1/oauth/consent",
+        Some(json!({ "params": qp, "approve": false })),
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(
+        query_of(r.body["redirect"].as_str().unwrap())
+            .get("error")
+            .map(String::as_str),
+        Some("access_denied")
+    );
+    let r = call(
+        &app,
+        "POST",
+        "/api/p/mcp/v1/oauth/consent",
+        Some(json!({ "params": qp, "approve": true })),
+        &hv(&u.headers()),
+    )
+    .await;
+    let redirect = r.body["redirect"].as_str().unwrap().to_owned();
+    assert!(redirect.starts_with(cb));
+    let q = query_of(&redirect);
+    assert_eq!(
+        (
+            q.get("state").map(String::as_str),
+            q.get("iss").map(String::as_str)
+        ),
+        (Some("st-1"), Some("https://pt.example"))
+    );
+    let code = q["code"].clone();
+
+    // 令牌：PKCE 错误 → invalid_grant（码已作废）；重新授权后成功
+    let r = post_form(
+        &app,
+        "/oauth/token",
+        form(&[
+            ("grant_type", "authorization_code"),
+            ("code", &code),
+            ("redirect_uri", cb),
+            ("client_id", &client_id),
+            ("code_verifier", &"x".repeat(43)),
+        ]),
+    )
+    .await;
+    assert_eq!(r.body["error"], "invalid_grant");
+    let r = call(
+        &app,
+        "POST",
+        "/api/p/mcp/v1/oauth/consent",
+        Some(json!({ "params": qp, "approve": true })),
+        &hv(&u.headers()),
+    )
+    .await;
+    let code = query_of(r.body["redirect"].as_str().unwrap())["code"].clone();
+    let tok_form = form(&[
+        ("grant_type", "authorization_code"),
+        ("code", &code),
+        ("redirect_uri", cb),
+        ("client_id", &client_id),
+        ("code_verifier", verifier),
+    ]);
+    let r = post_form(&app, "/oauth/token", tok_form.clone()).await;
+    assert_eq!(
+        (
+            r.status,
+            r.body["token_type"].as_str(),
+            r.body["expires_in"].as_i64()
+        ),
+        (StatusCode::OK, Some("Bearer"), Some(3600)),
+        "{:?}",
+        r.body
+    );
+    let access = r.body["access_token"].as_str().unwrap().to_owned();
+    let refresh = r.body["refresh_token"].as_str().unwrap().to_owned();
+    assert!(access.starts_with("ptm_"));
+    let r = post_form(&app, "/oauth/token", tok_form).await;
+    assert_eq!(r.body["error"], "invalid_grant", "codes are single use");
+
+    // 访问令牌可用于 MCP
+    let b = tool(&app, &access, "get_my_profile", json!({}), None).await;
+    assert_eq!(b["result"]["structuredContent"]["username"], "oauth_user", "{b}");
+
+    // 刷新：轮换刷新令牌，旧访问令牌被撤销；不能扩大作用域
+    let r = post_form(
+        &app,
+        "/oauth/token",
+        form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", &refresh),
+            ("client_id", &client_id),
+            ("scope", "read write admin"),
+        ]),
+    )
+    .await;
+    assert_eq!(r.body["error"], "invalid_scope");
+    let r = post_form(
+        &app,
+        "/oauth/token",
+        form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", &refresh),
+            ("client_id", &client_id),
+        ]),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let access2 = r.body["access_token"].as_str().unwrap().to_owned();
+    let refresh2 = r.body["refresh_token"].as_str().unwrap().to_owned();
+    let (st, _, _) = rpc(&app, &access, "2026-07-28", "ping", json!({}), &[]).await;
+    assert_eq!(
+        st,
+        StatusCode::UNAUTHORIZED,
+        "previous access token must be revoked"
+    );
+    let (st, _, _) = rpc(&app, &access2, "2026-07-28", "ping", json!({}), &[]).await;
+    assert_eq!(st, StatusCode::OK);
+    let r = post_form(
+        &app,
+        "/oauth/token",
+        form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", &refresh),
+            ("client_id", &client_id),
+        ]),
+    )
+    .await;
+    assert_eq!(
+        r.body["error"], "invalid_grant",
+        "old refresh token must be rotated out"
+    );
+
+    // 已授权的客户端；吊销刷新令牌 → 授权与访问令牌一并失效
+    let r = call(&app, "GET", "/api/p/mcp/v1/me/grants", None, &hv(&u.headers())).await;
+    assert_eq!(
+        r.body["items"][0]["client_name"], "Claude Desktop",
+        "{:?}",
+        r.body
+    );
+    let r = post_form(
+        &app,
+        "/oauth/revoke",
+        form(&[("token", &refresh2), ("client_id", &client_id)]),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let (st, _, _) = rpc(&app, &access2, "2026-07-28", "ping", json!({}), &[]).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    let r = call(&app, "GET", "/api/p/mcp/v1/me/grants", None, &hv(&u.headers())).await;
+    assert_eq!(r.body["items"].as_array().map(Vec::len), Some(0));
+    kernel.shutdown().await;
+}

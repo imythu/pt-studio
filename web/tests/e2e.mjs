@@ -207,6 +207,31 @@ try {
   await a.getByRole('button', { name: '设置状态' }).click();
   await a.getByText('disabled', { exact: true }).first().waitFor();
 
+  // 6f. AI 客户端（mcp）：设置页签发 token → 客户端发起写操作 → 待确认页确认执行
+  step('mcp tokens and confirmations');
+  await a.goto(`${BASE}/settings`);
+  await a.getByRole('tab', { name: '更多' }).click();
+  await a.getByRole('tab', { name: 'AI 客户端' }).click();
+  await a.getByText(`${BASE}/mcp`).first().waitFor();
+  await a.getByRole('checkbox', { name: '写操作（每次需在站内确认）', exact: true }).check();
+  await a.getByRole('checkbox', { name: '管理员工具', exact: true }).check();
+  await a.getByRole('button', { name: '生成 token' }).click();
+  await a.waitForFunction(() => /^ptm_/.test(document.querySelector('[data-testid=mcp-token]')?.textContent ?? ''));
+  const mcpToken = (await a.getByTestId('mcp-token').innerText()).trim();
+  const users = await a.evaluate(async () => (await fetch('/api/p/identity/v1/admin/users?username_prefix=web_bob')).json());
+  const bob = users.items.find((x) => x.username === 'web_bob');
+  const rpc = await fetch(`${BASE}/mcp`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${mcpToken}`, 'content-type': 'application/json', 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/call' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'admin_set_user_status', arguments: { user_id: bob.id, status: 'leech_disabled', reason_code: 'e2e-mcp' } } }),
+  }).then((r) => r.json());
+  if (rpc.result?.structuredContent?.status !== 'confirmation_required') throw new Error(`mcp call: ${JSON.stringify(rpc)}`);
+  await a.goto(`${BASE}/p/mcp/confirmations`);
+  await a.getByTestId('mcp-confirmation').getByText('admin_set_user_status').waitFor();
+  await a.getByText('e2e-mcp').waitFor();
+  await a.getByRole('button', { name: '确认执行' }).click();
+  await a.getByText('已执行').waitFor();
+
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);

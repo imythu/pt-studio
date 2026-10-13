@@ -124,7 +124,7 @@ pub async fn issue(
     kind: Kind,
     name: &str,
     scopes: &[String],
-    days: i64,
+    ttl_secs: i64,
     issued_by: &str,
 ) -> PResult<(uuid::Uuid, String, DateTime<Utc>)> {
     let name: String = name.trim().chars().take(64).collect();
@@ -137,9 +137,9 @@ pub async fn issue(
             kind.as_str()
         )));
     }
-    if !(1..=kind.max_days()).contains(&days) {
+    if !(60..=kind.max_days() * 86_400).contains(&ttl_secs) {
         return Err(PluginError::validation(format!(
-            "ttl must be 1..={} days",
+            "ttl must be 60 s .. {} days",
             kind.max_days()
         )));
     }
@@ -170,7 +170,7 @@ pub async fn issue(
     }
     let id = ctx.random.uuid_v7();
     let secret = format_secret(kind, &ctx.random.bytes(32));
-    let expires = Utc::now() + Duration::days(days);
+    let expires = Utc::now() + Duration::seconds(ttl_secs);
     sqlx::query(
         "INSERT INTO tokens (id, user_id, kind, name, scopes, token_hash, issued_by, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
@@ -242,6 +242,28 @@ pub async fn authenticate(ctx: &Ctx, secret: &str) -> PResult<Option<Principal>>
     }))
 }
 
+/// 按明文撤销（OAuth 吊销、刷新时撤销旧访问令牌）；`user_id` 给出时只撤销该用户的
+pub async fn revoke_secret(ctx: &Ctx, secret: &str, user_id: Option<i64>) -> PResult<bool> {
+    let mut conn = ctx.sql.conn().await?;
+    let n = sqlx::query("UPDATE tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL AND ($2::bigint IS NULL OR user_id = $2)")
+        .bind(crypto::sha256(secret.as_bytes()))
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+    Ok(n > 0)
+}
+
+pub async fn revoke_id(ctx: &Ctx, id: uuid::Uuid) -> PResult<bool> {
+    let mut conn = ctx.sql.conn().await?;
+    let n = sqlx::query("UPDATE tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL")
+        .bind(id)
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+    Ok(n > 0)
+}
+
 // ---------------- HTTP：/v1/users/me/tokens ----------------
 
 /// 只有浏览器会话能管理 token（token 不能签发 token）
@@ -299,7 +321,14 @@ fn default_days() -> i64 {
 pub async fn http_create(ctx: RequestCtx, Json(b): Json<CreateBody>) -> PResult<Response> {
     let uid = session_user(&ctx)?;
     let kind = Kind::parse(&b.kind).ok_or_else(|| PluginError::validation("kind must be api or mcp"))?;
-    let (id, secret, expires) = issue(&ctx, uid, kind, &b.name, &b.scopes, b.ttl_days, "user").await?;
+    if !(1..=kind.max_days()).contains(&b.ttl_days) {
+        return Err(PluginError::validation(format!(
+            "ttl_days must be 1..={}",
+            kind.max_days()
+        )));
+    }
+    let (id, secret, expires) =
+        issue(&ctx, uid, kind, &b.name, &b.scopes, b.ttl_days * 86_400, "user").await?;
     let mut resp = (
         StatusCode::CREATED,
         Json(json!({ "id": id, "kind": kind.as_str(), "token": secret, "scopes": b.scopes, "expires_at": expires.timestamp_millis() })),

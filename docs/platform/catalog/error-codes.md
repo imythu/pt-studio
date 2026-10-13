@@ -117,5 +117,6 @@
 | `mcp.confirmation_invalid` | 409 | mcp | 确认项不存在、已处理、过期或参数不一致 |
 | `mcp.confirmation_pending` | 409 | mcp | 用户尚未确认（工具结果中返回） |
 | `mcp.insufficient_scope` | 403 | mcp | token 作用域不足 |
+| `mcp.oauth_invalid_request` | 400 | mcp | OAuth 授权请求参数错误（同意页接口；令牌端点按 RFC 6749 返回 `error` 字段） |
 | `identity.token_limit_exceeded` | 409 | identity | 有效 token 数量达到上限 |
 | `llm-claude.upstream_error`、`llm-openai-compat.upstream_error` | 502 | llm-* | 模型服务出错 |

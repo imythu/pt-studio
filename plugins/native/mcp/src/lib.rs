@@ -1,11 +1,12 @@
 //! mcp 插件（Native，docs/plugins/mcp/）：MCP 网关——让 AI 客户端以用户身份调用站点工具。
 //!
 //! 本版本实现：`POST /mcp`（JSON-RPC，协议版本 2026-07-28 与 2025-11-25；`initialize` 与无状态会话 ID、`ping`、`tools/list`、
-//! `tools/call`）、`GET /mcp` 405、`DELETE /mcp` 204、受保护资源元数据；个人 MCP token 鉴权（identity 签发，作用域 read / write /
+//! `tools/call`）、`GET /mcp` 405、`DELETE /mcp` 204、受保护资源元数据；MCP token 鉴权（个人 token 或 OAuth 访问令牌，identity 签发，作用域 read / write /
 //! admin）与 `mcp.connect`；工具目录按 audience、作用域与权限过滤；写操作站内确认（待确认项、确认后执行并保存结果、拒绝、
 //! 过期）；`mcp.before_tool_call` 钩子；结果字符串兜底过滤；`mcp.tool_called` / `mcp.confirmation_resolved`；写操作审计。
-//! OAuth（动态注册、授权码 + PKCE、刷新与吊销）与前端页面在后续迭代实现。
+//! OAuth（`oauth` 模块：授权服务器元数据、动态注册、授权码 + PKCE、令牌与刷新轮换、吊销、站内同意、已授权客户端管理）。
 
+pub mod oauth;
 pub mod protocol;
 
 use std::sync::{Arc, OnceLock};
@@ -27,7 +28,10 @@ use serde_json::{Value, json};
 use sqlx::Row;
 
 pub const MANIFEST: &str = include_str!("../plugin.toml");
-pub const MIGRATIONS: &[(&str, &str)] = &[("0001_init.sql", include_str!("../migrations/0001_init.sql"))];
+pub const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    ("0002_oauth.sql", include_str!("../migrations/0002_oauth.sql")),
+];
 
 const CONFIRM_TTL_MINUTES: i64 = 10;
 
@@ -49,7 +53,7 @@ impl Mcp {
     }
 }
 
-fn issuer(ctx: &Ctx, headers: &HeaderMap) -> String {
+pub(crate) fn issuer(ctx: &Ctx, headers: &HeaderMap) -> String {
     if let Some(i) = ctx.config.get_static()["issuer"].as_str() {
         return i.trim_end_matches('/').to_owned();
     }
@@ -590,6 +594,13 @@ impl HttpRoutes for Routes {
             .route("/v1/me/confirmations", get(http_list_confirmations))
             .route("/v1/me/confirmations/{id}/approve", post(http_approve))
             .route("/v1/me/confirmations/{id}/reject", post(http_reject))
+            .route("/v1/oauth/authorize-info", get(oauth::http_authorize_info))
+            .route("/v1/oauth/consent", post(oauth::http_consent))
+            .route("/v1/me/grants", get(oauth::http_list_grants))
+            .route(
+                "/v1/me/grants/{client_id}",
+                axum::routing::delete(oauth::http_revoke_grant),
+            )
     }
 
     fn root_router(&self) -> Option<Router> {
@@ -613,7 +624,15 @@ impl HttpRoutes for Routes {
                 .route(
                     "/.well-known/oauth-protected-resource/mcp",
                     get(http_resource_metadata),
-                ),
+                )
+                .route(
+                    "/.well-known/oauth-authorization-server",
+                    get(oauth::http_metadata),
+                )
+                .route("/oauth/register", post(oauth::http_register))
+                .route("/oauth/authorize", get(oauth::http_authorize))
+                .route("/oauth/token", post(oauth::http_token))
+                .route("/oauth/revoke", post(oauth::http_revoke)),
         )
     }
 }
