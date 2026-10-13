@@ -1,0 +1,224 @@
+id = "moderation"
+name = "审核"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "候选区与审核：上传初始状态规则、审核队列（含 AI 预审结论）、认领与决定、候选区投票、敏感词（ctx.moderation）"
+
+provides = ["ctx.moderation@0.1.0"]
+requires = ["ctx.torrents@^0.1", "ctx.rbac@^0.1"]
+publishes = ["moderation.decided", "moderation.submitted", "moderation.candidate_voted"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_public", "identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.torrents" = ["write:status"]
+
+[[hooks]]
+hook = "torrent.before_upload"
+priority = 50
+
+[[hooks]]
+hook = "comment.before_create"
+priority = 20
+
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+
+[[subscriptions]]
+name = "on_torrent_status_changed"
+event = "torrent.status_changed"
+
+[[subscriptions]]
+name = "on_torrent_updated"
+event = "torrent.updated"
+
+[[subscriptions]]
+name = "on_upload_reviewed"
+event = "ai.upload_reviewed"
+
+[[http.routes]]
+id = "queue"
+method = "GET"
+path = "/v1/queue"
+auth = "user"
+permission = "moderation.queue.read"
+
+[[http.routes]]
+id = "queue_item"
+method = "GET"
+path = "/v1/queue/{target}"
+auth = "user"
+permission = "moderation.queue.read"
+
+[[http.routes]]
+id = "claim"
+method = "POST"
+path = "/v1/queue/{target}/claim"
+auth = "user"
+permission = "moderation.decide"
+
+[[http.routes]]
+id = "release"
+method = "DELETE"
+path = "/v1/queue/{target}/claim"
+auth = "user"
+permission = "moderation.decide"
+
+[[http.routes]]
+id = "decision"
+method = "POST"
+path = "/v1/queue/{target}/decision"
+auth = "user"
+permission = "moderation.decide"
+
+[[http.routes]]
+id = "history"
+method = "GET"
+path = "/v1/history"
+auth = "user"
+permission = "moderation.queue.read"
+
+[[http.routes]]
+id = "candidates"
+method = "GET"
+path = "/v1/candidates"
+auth = "user"
+
+[[http.routes]]
+id = "vote"
+method = "POST"
+path = "/v1/candidates/{id}/vote"
+auth = "user"
+permission = "moderation.candidates.vote"
+
+[[http.routes]]
+id = "list_words"
+method = "GET"
+path = "/v1/admin/words"
+auth = "user"
+permission = "moderation.manage"
+
+[[http.routes]]
+id = "add_word"
+method = "POST"
+path = "/v1/admin/words"
+auth = "user"
+permission = "moderation.manage"
+
+[[http.routes]]
+id = "delete_word"
+method = "DELETE"
+path = "/v1/admin/words/{id}"
+auth = "user"
+permission = "moderation.manage"
+
+[[http.routes]]
+id = "word_hits"
+method = "GET"
+path = "/v1/admin/word-hits"
+auth = "user"
+permission = "moderation.queue.read"
+
+[[mcp.tools]]
+name = "admin_list_moderation_queue"
+title = "审核队列"
+description = "管理员：列出待审核的种子（标题、上传者、等待小时、AI 预审结论），可按 state（pending / candidate / awaiting_uploader）筛选。"
+audience = "admin"
+permission = "moderation.queue.read"
+input_schema = { type = "object", additionalProperties = false, properties = { state = { type = "string", enum = ["pending", "candidate", "awaiting_uploader"] }, type_id = { type = "string", maxLength = 32 }, limit = { type = "integer", minimum = 1, maximum = 100 } } }
+
+[[mcp.tools]]
+name = "admin_decide_moderation"
+title = "审核决定"
+description = "管理员：对待审核的种子作出决定：approve（通过）、reject（拒绝）或 needs_edit（退回上传者修改），note 为给上传者的说明。"
+audience = "admin"
+write = true
+confirm_locked = true
+permission = "moderation.decide"
+input_schema = { type = "object", additionalProperties = false, required = ["target", "decision"], properties = { target = { type = "string", maxLength = 64 }, decision = { type = "string", enum = ["approve", "reject", "needs_edit"] }, note = { type = "string", maxLength = 2000 } } }
+
+[[permissions]]
+name = "moderation.queue.read"
+description_term = "moderation.perm.queue_read"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "moderation.decide"
+description_term = "moderation.perm.decide"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "moderation.candidates.vote"
+description_term = "moderation.perm.vote"
+default_roles = ["user"]
+
+[[permissions]]
+name = "moderation.manage"
+description_term = "moderation.perm.manage"
+default_roles = ["admin"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.detail.sidebar", "nav.user_menu"]
+routes = ["/p/moderation/*", "/admin/p/moderation/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.initial_rules]
+type = "array"
+items = { type = "object" }
+title = "上传初始状态规则（按顺序匹配第一条）"
+default = []
+
+[settings_schema.properties.default_status]
+type = "string"
+enum = ["", "pending", "candidate"]
+title = "规则都不匹配时的状态（留空 = 不改变）"
+default = ""
+
+[settings_schema.properties.candidate_enabled]
+type = "boolean"
+title = "启用候选区"
+default = false
+
+[settings_schema.properties.approve_votes]
+type = "integer"
+minimum = 1
+title = "候选区通过所需净赞成票"
+default = 3
+
+[settings_schema.properties.reject_votes]
+type = "integer"
+minimum = 1
+title = "候选区拒绝所需净反对票"
+default = 3
+
+[settings_schema.properties.vote_min_account_days]
+type = "integer"
+minimum = 0
+title = "投票所需账号天数"
+default = 7
+
+[settings_schema.properties.claim_minutes]
+type = "integer"
+minimum = 1
+title = "认领有效期（分钟）"
+default = 30
+
+[terms]
+"moderation.name" = { zh-CN = "审核", en = "Moderation" }
+"moderation.perm.queue_read" = { zh-CN = "查看审核队列", en = "View the review queue" }
+"moderation.perm.decide" = { zh-CN = "审核通过 / 拒绝", en = "Approve or reject" }
+"moderation.perm.vote" = { zh-CN = "候选区投票", en = "Vote on candidates" }
+"moderation.perm.manage" = { zh-CN = "审核规则配置", en = "Configure moderation" }

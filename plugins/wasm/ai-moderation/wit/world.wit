@@ -1,0 +1,10 @@
+package pt:ai-moderation-plugin@0.1.0;
+
+world ai-moderation {
+  include pt:plugin/host@0.1.0;
+  export pt:plugin/hooks@0.1.0;
+  export pt:plugin/on-event@0.1.0;
+  export pt:plugin/on-cron@0.1.0;
+  export pt:plugin/http-handler@0.1.0;
+  export pt:plugin/service-provider@0.1.0;
+}

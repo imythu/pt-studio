@@ -102,6 +102,7 @@
 | `moderation.queue.read` | moderation | 查看审核队列 | moderator |
 | `moderation.decide` | moderation | 审核通过 / 拒绝 | moderator |
 | `moderation.manage` | moderation | 审核规则配置 | admin |
+| `moderation.candidates.vote` | moderation | 候选区投票 | user |
 | `reports.create` | reports | 举报 | user |
 | `reports.moderate` | reports | 处理举报 | moderator |
 | `rss.use` | rss | 使用 RSS（含个人 RSS 密钥） | user |

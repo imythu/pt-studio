@@ -1,0 +1,140 @@
+id = "ai-moderation"
+name = "AI 内容审核"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "评论的 AI 审核：本地规则 + 大模型分类，达到阈值时建举报工单交给人工处理（不自动删除）"
+
+provides = ["ctx.ai_moderation@0.1.0"]
+requires = ["ctx.reports@^0.1"]
+optional_requires = ["ctx.llm@^0.1", "ctx.comments@^0.1"]
+publishes = ["ai.content_flagged"]
+
+[capabilities]
+sql = true
+redis = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.llm" = ["use", "profile:cheap"]
+"ctx.reports" = ["write"]
+"ctx.comments" = ["read:raw"]
+
+[[hooks]]
+hook = "comment.before_create"
+priority = 30
+
+[[subscriptions]]
+name = "on_comment_created"
+event = "comment.created"
+
+[[subscriptions]]
+name = "on_report_resolved"
+event = "report.resolved"
+
+[[jobs]]
+name = "classify_item"
+timeout_secs = 150
+
+[[cron]]
+name = "cleanup"
+schedule = "15 5 * * *"
+timeout_secs = 300
+
+[[http.routes]]
+id = "flags"
+method = "GET"
+path = "/v1/admin/flags"
+auth = "admin"
+permission = "ai-moderation.manage"
+
+[[http.routes]]
+id = "stats"
+method = "GET"
+path = "/v1/admin/stats"
+auth = "admin"
+permission = "ai-moderation.manage"
+
+[[permissions]]
+name = "ai-moderation.manage"
+description_term = "ai-moderation.perm.manage"
+default_roles = ["admin"]
+
+[wasm]
+default_timeout_ms = 130000
+
+[database]
+migrations = "migrations"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.enabled]
+type = "boolean"
+title = "审核新评论"
+default = true
+
+[settings_schema.properties.sample_rate]
+type = "number"
+minimum = 0
+maximum = 1
+title = "抽样率（新用户的评论全部审核）"
+default = 0.2
+
+[settings_schema.properties.new_user_days]
+type = "integer"
+minimum = 0
+title = "新用户天数"
+default = 7
+
+[settings_schema.properties.model_enabled]
+type = "boolean"
+title = "使用大模型"
+default = true
+
+[settings_schema.properties.profile]
+type = "string"
+title = "模型配置（profile）"
+default = "cheap"
+
+[settings_schema.properties.report_threshold]
+type = "number"
+minimum = 0
+maximum = 1
+title = "建举报工单的分数阈值"
+default = 0.8
+
+[settings_schema.properties.review_threshold]
+type = "number"
+minimum = 0
+maximum = 1
+title = "进入抽查列表的分数阈值"
+default = 0.5
+
+[settings_schema.properties.daily_model_budget]
+type = "integer"
+minimum = 0
+title = "每日模型调用上限"
+default = 2000
+
+[settings_schema.properties.spam_domains]
+type = "array"
+items = { type = "string" }
+title = "垃圾域名"
+default = []
+
+[settings_schema.properties.hook_enabled]
+type = "boolean"
+title = "发表前用本地规则拦截明显的垃圾内容"
+default = false
+
+[settings_schema.properties.extra_guidelines]
+type = "string"
+maxLength = 2000
+title = "追加到系统提示的站点说明"
+
+[terms]
+"ai-moderation.name" = { zh-CN = "AI 内容审核", en = "AI moderation" }
+"ai-moderation.perm.manage" = { zh-CN = "配置 AI 内容审核", en = "Configure AI moderation" }

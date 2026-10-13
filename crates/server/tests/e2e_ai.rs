@@ -60,7 +60,11 @@ async fn mock_anthropic(m: Mock) -> String {
                         "usage": { "input_tokens": 300, "output_tokens": 40, "cache_read_input_tokens": 0 } }))
                     .into_response();
                 }
-                let text = if b["output_config"]["format"].is_object() {
+                let moderation = b["system"][0]["text"].as_str().is_some_and(|t| t.contains("内容审核助手"));
+                let text = if moderation {
+                    let insult = b.to_string().contains("白痴");
+                    json!({ "categories": if insult { json!([{ "category": "harassment", "score": 0.92, "rationale": "人身攻击" }]) } else { json!([]) } }).to_string()
+                } else if b["output_config"]["format"].is_object() {
                     json!({ "verdict": "warn", "confidence": 0.7, "findings": [{ "code": "title_format", "severity": "low", "message": "标题不规范" }] }).to_string()
                 } else {
                     "pong".to_owned()
@@ -513,5 +517,79 @@ async fn assistant_end_to_end() {
     )
     .await;
     assert_eq!(r.body["items"].as_array().map(Vec::len), Some(0));
+    kernel.shutdown().await;
+}
+
+#[tokio::test]
+async fn ai_moderation_model_end_to_end() {
+    let _guard = common::LOCK.lock().await;
+    let dir = common::package_wasm_plugins();
+    let mock = Mock::default();
+    let base = mock_anthropic(mock.clone()).await;
+    reset().await;
+    let kernel = Kernel::start(config(&dir, &base), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+    let modr = register_login(&app, "aim_mod").await;
+    common::grant_role(modr.id, "moderator").await;
+    let u = register_login(&app, "aim_user").await;
+    let tid = common::upload(&app, &modr, "AiMod.Target.2026", &[("a.bin", 4 << 20)]).await;
+    let post = |body: &'static str| {
+        let h = u.headers();
+        let app = app.clone();
+        async move {
+            call(
+                &app,
+                "POST",
+                &format!("/api/p/comments/v1/targets/torrent:{tid}/comments"),
+                Some(json!({ "body": body })),
+                &hv(&h),
+            )
+            .await
+        }
+    };
+    let ok = post("画质很好，感谢分享").await;
+    assert_eq!(ok.status, StatusCode::CREATED, "{:?}", ok.body);
+    let bad = post("你是个白痴，别发了").await;
+    let bad_id = bad.body["id"].as_i64().unwrap();
+    // 模型判定 harassment 0.92 ≥ 0.8 → 系统举报（理由 abuse）；正常评论不建工单
+    let mut cases = Value::Null;
+    for _ in 0..200 {
+        cases = call(&app, "GET", "/api/p/reports/v1/cases", None, &hv(&modr.headers()))
+            .await
+            .body;
+        if cases["items"].as_array().is_some_and(|a| !a.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let items = cases["items"].as_array().cloned().unwrap_or_default();
+    assert_eq!(items.len(), 1, "{cases}");
+    assert_eq!(items[0]["target"], format!("comment:{bad_id}"));
+    let d = call(
+        &app,
+        "GET",
+        &format!("/api/p/reports/v1/cases/{}", items[0]["id"]),
+        None,
+        &hv(&modr.headers()),
+    )
+    .await;
+    assert_eq!(d.body["reports"][0]["reason_code"], "abuse", "{:?}", d.body);
+    // 发给模型的请求：评论正文作为不可信内容、cheap profile、结构化输出
+    let reqs = mock.bodies.lock().unwrap().clone();
+    let m = reqs
+        .iter()
+        .find(|b| b.to_string().contains("白痴"))
+        .cloned()
+        .unwrap();
+    assert_eq!(m["model"], "claude-haiku-4-5");
+    assert!(
+        m["messages"][0]["content"][1]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("<user_content>")
+    );
+    assert_eq!(m["output_config"]["format"]["type"], "json_schema");
     kernel.shutdown().await;
 }

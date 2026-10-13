@@ -138,6 +138,13 @@
 | `reports.claimed_by_other` | 409 | reports | 工单已被其他人认领 |
 | `reports.action_unavailable` | 422 | reports | 动作不适用于该对象或依赖插件未启用 |
 | `reports.escalation_required` | 403 | reports | 升级工单需管理员处理 |
+| `moderation.not_in_queue` | 404 | moderation | 目标不在审核队列 |
+| `moderation.claimed_by_other` | 409 | moderation | 已被其他审核员认领 |
+| `moderation.stale` | 409 | moderation | 目标状态已变化 |
+| `moderation.blocked_word` | 422 | moderation | 含禁止词（不回显具体词） |
+| `moderation.vote_not_allowed` | 403 | moderation | 不能对该种子投票 |
+| `moderation.rule_invalid` | 422 | moderation | 规则校验失败 |
+| `ai-moderation.spam_detected` | 422 | ai-moderation | 发表前钩子拒绝（本地规则高置信垃圾） |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `mcp.confirmation_invalid` | 409 | mcp | 确认项不存在、已处理、过期或参数不一致 |
 | `mcp.confirmation_pending` | 409 | mcp | 用户尚未确认（工具结果中返回） |
