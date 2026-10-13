@@ -1,4 +1,6 @@
-package pt:plugin@0.1.0;
+/// PT Studio 插件 API。1.0.0 起冻结：此后只做增量变更（新增接口放在新的次版本中），
+/// 已有接口、记录、函数签名不再改变。变更记录见 docs/platform/plugin-api.md §6。
+package pt:plugin@1.0.0;
 
 /// 公共类型。所有 JSON 一律为 UTF-8 文本，内容须符合对应目录（事件/钩子/MCP）中登记的 JSON Schema。
 interface types {
@@ -72,6 +74,12 @@ interface types {
     deadline: timestamp-ms,
     /// 服务调用深度（从 0 开始，内核上限 8）
     depth: u8,
+    /// 请求 ID（与响应头 x-request-id、日志一致；非 HTTP 入口为内核生成的 ID）
+    request-id: string,
+    /// 客户端 IP：只传给获授敏感能力 user.ip 的插件，其余为 none
+    client-ip: option<string>,
+    /// 客户端 User-Agent（截断到 256 字符）
+    user-agent: option<string>,
   }
 }
 
@@ -333,8 +341,9 @@ interface metadata {
 }
 
 
-/// 调用依赖的业务服务（v0.1：JSON 分派；清单 `requires` 中声明的服务才可调用）。
-/// method 为服务方法名（snake_case），args / 返回值为 JSON。类型化的业务服务 WIT 包在 0.2 引入。
+/// 调用依赖的业务服务（JSON 分派；清单 `requires` / `optional_requires` 中声明的服务才可调用）。
+/// method 为服务方法名（snake_case），args / 返回值为 JSON，方法与参数见 catalog/services.md。
+/// 类型化的业务服务 WIT 包（`pt:<svc>`）若引入，将以新增包的方式提供，本接口保持不变。
 interface services {
   use types.{json, plugin-error};
   call: func(service: string, method: string, args: json) -> result<json, plugin-error>;

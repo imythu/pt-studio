@@ -23,7 +23,7 @@
 package pt:llm@0.1.0;
 
 interface llm {
-  use pt:plugin/types@0.1.0.{plugin-error, user-id, json};
+  use pt:plugin/types@1.0.0.{plugin-error, user-id, json};
 
   enum role { user, assistant }
   variant content-part {

@@ -1,8 +1,8 @@
 package pt:ai-upload-review-plugin@0.1.0;
 
 world ai-upload-review {
-  include pt:plugin/host@0.1.0;
-  export pt:plugin/http-handler@0.1.0;
-  export pt:plugin/on-event@0.1.0;
-  export pt:plugin/on-cron@0.1.0;
+  include pt:plugin/host@1.0.0;
+  export pt:plugin/http-handler@1.0.0;
+  export pt:plugin/on-event@1.0.0;
+  export pt:plugin/on-cron@1.0.0;
 }

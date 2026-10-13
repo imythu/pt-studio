@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use pt_plugin_api::{
-    API_VERSIONS, NativePlugin,
+    NativePlugin, api_supported,
     manifest::{Manifest, PluginKind, ServiceRef},
 };
 use sha2::{Digest, Sha256};
@@ -136,7 +136,7 @@ pub fn resolve(specs: &[PluginSpec], cfg: &SiteConfig) -> Result<Resolution, Vec
                 "plugin id appears more than once",
             ));
         }
-        if !API_VERSIONS.contains(&m.api.as_str()) {
+        if !api_supported(&m.api) {
             errors.push(LoadError::new(
                 "E-LOAD-API",
                 &m.id,

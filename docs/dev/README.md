@@ -173,7 +173,7 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | 2026-10-06 | P1：内核骨架、identity、torrent |
 | 2026-10-07 | P2：ledger、accounting、分区 worker、插件分区维护、网关限流与幂等键 |
 | 2026-10-07 | cron、accounting 小时快照、bonus 小时结算与批量入账（WASM） |
-| 2026-10-07 | P3：WASM 宿主、`pt:plugin@0.1` WIT、JSON 分派服务、bonus（WASM 试点）、沙箱越界测试插件 x-chaos |
+| 2026-10-07 | P3：WASM 宿主、`pt:plugin@1` WIT、JSON 分派服务、bonus（WASM 试点）、沙箱越界测试插件 x-chaos |
 | 2026-10-07 | P4：promotion（WASM）、levels（WASM）、identity 等级与等级角色 |
 | 2026-10-07 | P4：search-meilisearch（Native）、内核搜索贡献者调用入口、torrent 搜索贡献 |
 | 2026-10-07 | P4：invite（WASM）、identity 限制与 `user.status_changed` |

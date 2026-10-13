@@ -42,7 +42,7 @@
 
 ## 4. WIT 契约
 
-WIT 包 `pt:plugin@0.1.0` 的完整定义、Native 插件的 Rust trait 以及调用语义，**以 [../platform/plugin-api.md](../platform/plugin-api.md) 为准**，本文不再给出示例。要点：
+WIT 包 `pt:plugin@1.0.0` 的完整定义、Native 插件的 Rust trait 以及调用语义，**以 [../platform/plugin-api.md](../platform/plugin-api.md) 为准**，本文不再给出示例。要点：
 
 - 宿主接口按能力拆分为独立接口（`log`、`config`、`kv`、`sql`、`redis`、`events`、`http-client`、`blob`、`terms`、`audit`、`jobs` 等），插件按清单中的能力链接；未授权的导入链接到“拒绝桩”。
 - 插件导出接口：`lifecycle`、`hooks`、`on-event`、`on-cron`、`http-handler`、`search-contributor`、`mcp-tool`、`content-type`、`metadata-provider`。
@@ -62,7 +62,7 @@ id = "bonus"
 name = "魔力值"
 version = "1.2.0"
 kind = "wasm"
-api = "pt:plugin@0.1"
+api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 provides = ["ctx.bonus@0.1.0"]
 requires = ["ctx.ledger@^0.1", "ctx.users@^0.1", "ctx.accounting@^0.1"]

@@ -1,10 +1,10 @@
-# 插件 API 契约（`pt:plugin@0.1.0`）
+# 插件 API 契约（`pt:plugin@1.0.0`）
 
 | 项 | 内容 |
 |---|---|
 | 文档编号 | PLAT-API |
-| 版本 | 0.1 |
-| 状态 | 草案 |
+| 版本 | 1.0 |
+| 状态 | 已冻结（P7，2026-10-14） |
 | 适用 | 全部 Native 插件与 WASM 插件 |
 
 本文是插件与内核之间的唯一契约：WIT 包、Native Rust trait、`plugin.toml` 清单、插件目录结构和版本兼容策略。名字（服务、事件、钩子、权限点、术语键……）由 [catalog/](catalog/) 下的目录统一分配。
@@ -28,8 +28,8 @@
 
 | 类别 | 定义位置 | 说明 |
 |---|---|---|
-| 宿主通用接口（host） | `pt:plugin@0.1.0` 中的 `log`、`config`、`kv`、`sql`、`redis`、`events`、`http-client`、`blob`、`terms`、`time`、`random`、`audit`、`jobs`、`metrics`、`invocation`、`hook-runner`、`metadata` | 由内核实现，所有插件可按能力导入 |
-| 插件导出接口（export） | `pt:plugin@0.1.0` 中的 `lifecycle`、`hooks`、`on-event`、`on-cron`、`http-handler`、`search-contributor`、`mcp-tool`、`content-type`、`metadata-provider` | 由插件按需实现，内核调用 |
+| 宿主通用接口（host） | `pt:plugin@1.0.0` 中的 `log`、`config`、`kv`、`sql`、`redis`、`events`、`http-client`、`blob`、`terms`、`time`、`random`、`audit`、`jobs`、`metrics`、`invocation`、`hook-runner`、`metadata` | 由内核实现，所有插件可按能力导入 |
+| 插件导出接口（export） | `pt:plugin@1.0.0` 中的 `lifecycle`、`hooks`、`on-event`、`on-cron`、`http-handler`、`search-contributor`、`mcp-tool`、`content-type`、`metadata-provider` | 由插件按需实现，内核调用 |
 | 业务服务接口（service） | 每个服务一个 WIT 包：`pt:<service>@x.y.z`，如 `pt:ledger@0.1.0` | 由提供方插件导出、消费方插件导入，内核负责连线 |
 
 ### 1.1 服务名与 WIT 名的映射
@@ -56,12 +56,14 @@
 
 ---
 
-## 2. WIT 包 `pt:plugin@0.1.0`（完整定义）
+## 2. WIT 包 `pt:plugin@1.0.0`（完整定义）
 
-文件：`crates/plugin-api/wit/plugin.wit`。本定义已用 `wasm-tools component wit`（v1.261）解析通过。
+文件：`crates/plugin-api/wit/plugin.wit`（下面是其原文）。1.0.0 的快照保存在 `crates/plugin-api/wit-frozen/pt-plugin-1.0.0.wit`，`crates/plugin-api/tests/api_freeze.rs` 检查已冻结的接口没有被修改。
 
 ```wit
-package pt:plugin@0.1.0;
+/// PT Studio 插件 API。1.0.0 起冻结：此后只做增量变更（新增接口放在新的次版本中），
+/// 已有接口、记录、函数签名不再改变。变更记录见 docs/platform/plugin-api.md §6。
+package pt:plugin@1.0.0;
 
 /// 公共类型。所有 JSON 一律为 UTF-8 文本，内容须符合对应目录（事件/钩子/MCP）中登记的 JSON Schema。
 interface types {
@@ -135,6 +137,12 @@ interface types {
     deadline: timestamp-ms,
     /// 服务调用深度（从 0 开始，内核上限 8）
     depth: u8,
+    /// 请求 ID（与响应头 x-request-id、日志一致；非 HTTP 入口为内核生成的 ID）
+    request-id: string,
+    /// 客户端 IP：只传给获授敏感能力 user.ip 的插件，其余为 none
+    client-ip: option<string>,
+    /// 客户端 User-Agent（截断到 256 字符）
+    user-agent: option<string>,
   }
 }
 
@@ -395,6 +403,21 @@ interface metadata {
   search: func(source: string, query: string, type-id: string, limit: u32) -> result<list<metadata-record>, plugin-error>;
 }
 
+
+/// 调用依赖的业务服务（JSON 分派；清单 `requires` / `optional_requires` 中声明的服务才可调用）。
+/// method 为服务方法名（snake_case），args / 返回值为 JSON，方法与参数见 catalog/services.md。
+/// 类型化的业务服务 WIT 包（`pt:<svc>`）若引入，将以新增包的方式提供，本接口保持不变。
+interface services {
+  use types.{json, plugin-error};
+  call: func(service: string, method: string, args: json) -> result<json, plugin-error>;
+}
+
+/// 提供业务服务（清单 `provides` 中的服务），与 services.call 对应
+interface service-provider {
+  use types.{json, plugin-error};
+  call: func(service: string, method: string, args: json) -> result<json, plugin-error>;
+}
+
 // ---------------------------------------------------------------------------
 // 插件导出接口
 // ---------------------------------------------------------------------------
@@ -624,6 +647,7 @@ world host {
   import metrics;
   import hook-runner;
   import metadata;
+  import services;
 }
 
 /// 参考世界：插件按需 include host 并只 export 自己实现的接口
@@ -638,12 +662,28 @@ world example-full {
   export mcp-tool;
   export content-type;
   export metadata-provider;
+  export service-provider;
+}
+
+/// 内核绑定使用的世界。暂不含 metadata-provider：wasmtime 49 的 bindgen 在导出接口含名为 `lookup`
+/// 的函数时生成的代码有变量遮蔽错误；元数据插件接入前改为动态查找导出。
+world kernel {
+  include host;
+  export lifecycle;
+  export hooks;
+  export on-event;
+  export on-cron;
+  export http-handler;
+  export search-contributor;
+  export mcp-tool;
+  export content-type;
+  export service-provider;
 }
 ```
 
 ### 2.0 v0.1 实现说明：业务服务的 JSON 分派（2026-10-07）
 
-§2.2 / §2.3 描述的“每个业务服务一个 WIT 包、内核动态桥接”需要 `service!` 宏为每个服务生成 Val ↔ Rust 适配层，该宏尚未实现。为不阻塞 WASM 插件，`pt:plugin@0.1.0` 增加两个接口（已写入 `crates/plugin-api/wit/plugin.wit`）：
+§2.2 / §2.3 描述的“每个业务服务一个 WIT 包、内核动态桥接”需要 `service!` 宏为每个服务生成 Val ↔ Rust 适配层，该宏尚未实现。为不阻塞 WASM 插件，`pt:plugin@1.0.0` 增加两个接口（已写入 `crates/plugin-api/wit/plugin.wit`）：
 
 | 接口 | 方向 | 说明 |
 |---|---|---|
@@ -652,7 +692,7 @@ world example-full {
 
 约定：方法名为服务方法的 snake_case 名；只有一个请求结构体参数的方法，`args` 即该结构体（如 `ledger.transfer` 的 `TransferRequest`）；多参数方法用具名字段（如 `{"currency": "bonus", "user": 1}`）。Native 服务通过 `JsonService` trait 提供同样的分派（`NativePlugin.json_services`），Native 插件也可用 `ctx.call_json(...)` 调用 WASM 提供的服务。
 
-类型化业务服务 WIT 包计划在 `pt:plugin@0.2` 引入，届时 JSON 分派继续保留以兼容。
+1.0 的业务服务一律经 JSON 分派（`services` / `service-provider`）。类型化业务服务 WIT 包（`pt:<svc>`）如果引入，将作为新增的包提供，JSON 分派继续保留。
 
 另：内核以 `world kernel`（不含 `metadata-provider` 导出）生成宿主绑定，原因是 wasmtime 49 bindgen 在导出接口含名为 `lookup` 的函数时生成代码有变量遮蔽错误；元数据插件接入前改为动态查找该导出或升级 wasmtime。
 
@@ -704,14 +744,14 @@ services.md 中 `ctx.plugins.search_contributors()` 只返回插件 ID，没有�
 package pt:bonus-plugin@1.2.0;
 
 world bonus {
-  include pt:plugin/host@0.1.0;
+  include pt:plugin/host@1.0.0;
   import pt:ledger/ledger@0.1.0;      // 依赖的业务服务
   import pt:users/users@0.1.0;
   export pt:bonus/bonus@0.1.0;        // 提供的业务服务
-  export pt:plugin/lifecycle@0.1.0;
-  export pt:plugin/on-event@0.1.0;
-  export pt:plugin/on-cron@0.1.0;
-  export pt:plugin/mcp-tool@0.1.0;
+  export pt:plugin/lifecycle@1.0.0;
+  export pt:plugin/on-event@1.0.0;
+  export pt:plugin/on-cron@1.0.0;
+  export pt:plugin/mcp-tool@1.0.0;
 }
 ```
 
@@ -721,7 +761,7 @@ world bonus {
 package pt:ledger@0.1.0;
 
 interface ledger {
-  use pt:plugin/types@0.1.0.{plugin-error, user-id};
+  use pt:plugin/types@1.0.0.{plugin-error, user-id};
 
   record transfer-request {
     currency: string,
@@ -1025,7 +1065,7 @@ id = "bonus"                       # ^[a-z][a-z0-9-]{1,31}$，全局唯一，见
 name = "魔力值"                     # 后台显示名（可用术语键：name_term）
 version = "1.2.0"                  # semver
 kind = "wasm"                      # "wasm" | "native"
-api = "pt:plugin@0.1"              # 依赖的插件 API 版本（主.次）
+api = "pt:plugin@1"              # 依赖的插件 API 版本（主.次）
 kernel = ">=0.1.0, <0.3.0"         # 可选：兼容的内核版本范围
 license = "MIT OR Apache-2.0"      # SPDX；官方插件必须为此值（D19），见 conventions/licensing.md
 authors = ["PT Studio"]
@@ -1260,7 +1300,7 @@ plugins/native/identity/
 
 | 对象 | 版本规则 | 兼容判断 |
 |---|---|---|
-| `pt:plugin` WIT 包 | semver。**v1.0 之前**：次版本号可以不兼容（0.1 → 0.2 视为不兼容），修订号只做增量；**v1.0 之后**：只允许增量（新增接口、新增函数、新增 variant 分支须在新接口中） | 内核同时支持一个主线版本与上一个次版本（如内核 0.2 支持 `pt:plugin@0.2` 与 `@0.1`），通过适配层转换；更早的拒绝启动 |
+| `pt:plugin` WIT 包 | semver。**v1.0 之前**：次版本号可以不兼容（0.1 → 0.2 视为不兼容），修订号只做增量；**v1.0 之后**：只允许增量（新增接口、新增函数、新增 variant 分支须在新接口中） | 清单 `api = "pt:plugin@1"`（或 `@1.<次>`，表示用到了该次版本新增的接口）；内核接受主版本相同、次版本不高于自身的插件；1.0 之前的版本（`@0.x`）不再接受 |
 | 业务服务 WIT（`pt:<svc>`） | semver，同上 | 消费方 `requires` 的版本要求必须被提供方 `provides` 的版本满足 |
 | 事件载荷 | 整数 `version`；字段只增不删为同一版本；删除/改语义必须升版本，且发布方在过渡期（至少一个次版本）**双发**新旧版本 | 订阅方声明 `versions`，内核只投递匹配版本 |
 | 钩子输入 | 与事件相同，钩子输入 schema 带 `version`，只增不删 | |
@@ -1268,10 +1308,16 @@ plugins/native/identity/
 | REST API | 路径带主版本 `/v1/`；见 conventions/api.md | |
 | plugin.toml 格式 | 跟随 `api` 字段 | |
 
-**冻结**：P7 阶段把 `pt:plugin` 定为 1.0.0（见 design/09）。冻结前每次不兼容变更都要在本文“修订记录”中写明迁移方法。
+**冻结**：`pt:plugin` 已于 P7 定为 1.0.0（2026-10-14）。此后：
+
+- 已有接口、记录、变体、函数签名不再改变；新增能力放进**新接口**，并把包的次版本加一（1.1.0），插件清单写 `api = "pt:plugin@1.1"` 表示依赖它。
+- 世界（`host`、`kernel` 等）只增不减。
+- 业务服务（JSON 分派）的方法、事件载荷、钩子输入按各自的版本规则演进（见上表），不受 WIT 冻结影响。
+- Native 插件与内核一起编译，Rust API（`pt-plugin-api` 的 trait 与类型）随内核版本演进，不承诺二进制兼容；但同一主版本内不删除公开项。
 
 修订记录：
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | 0.1 | 2026-10-04 | 初稿 |
+| 1.0 | 2026-10-14 | 冻结为 `pt:plugin@1.0.0`。相对 0.1 的变更：`invocation-info` 新增 `request-id`、`client-ip`（仅获授 `user.ip` 的插件）、`user-agent`；`services` 的说明改为“JSON 分派为 1.0 的正式机制”。迁移：WIT 中 `pt:plugin/*@0.1.0` 改为 `@1.0.0`，清单 `api = "pt:plugin@0.1"` 改为 `"pt:plugin@1"`，重新构建 |

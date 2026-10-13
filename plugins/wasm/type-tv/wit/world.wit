@@ -1,10 +1,10 @@
 package pt:type-tv-plugin@0.1.0;
 
 world type-tv {
-  include pt:plugin/host@0.1.0;
-  export pt:plugin/content-type@0.1.0;
-  export pt:plugin/search-contributor@0.1.0;
-  export pt:plugin/hooks@0.1.0;
-  export pt:plugin/on-event@0.1.0;
-  export pt:plugin/on-cron@0.1.0;
+  include pt:plugin/host@1.0.0;
+  export pt:plugin/content-type@1.0.0;
+  export pt:plugin/search-contributor@1.0.0;
+  export pt:plugin/hooks@1.0.0;
+  export pt:plugin/on-event@1.0.0;
+  export pt:plugin/on-cron@1.0.0;
 }

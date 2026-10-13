@@ -21,7 +21,7 @@ id = "x-gate"
 name = "gate"
 version = "0.1.0"
 kind = "native"
-api = "pt:plugin@0.1"
+api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 
 [[http.routes]]

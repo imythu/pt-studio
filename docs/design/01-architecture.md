@@ -141,7 +141,7 @@ pt-studio/
 ├─ rust-toolchain.toml
 ├─ deny.toml               # cargo-deny：许可证、漏洞、来源；禁止依赖 pt-tracker
 ├─ crates/
-│  ├─ plugin-api/          # WIT（pt:plugin@0.1.0）+ Native 插件的 trait + 清单类型（两层共享同一份契约）
+│  ├─ plugin-api/          # WIT（pt:plugin@1.0.0）+ Native 插件的 trait + 清单类型（两层共享同一份契约）
 │  ├─ plugin-api-macros/   # proc-macro：service!、export_service!、native_plugins!
 │  ├─ plugin-sdk-rust/     # 写 WASM 插件用的 SDK
 │  ├─ kernel/              # 内核库：加载器、服务注册表、hooks、事件日志、调度、网关

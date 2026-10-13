@@ -70,7 +70,7 @@ pub trait KernelLink: Send + Sync {
     ) -> PResult<Json>;
 }
 
-/// JSON 分派的业务服务（pt:plugin@0.1 的 `services` / `service-provider`）。
+/// JSON 分派的业务服务（pt:plugin@1 的 `services` / `service-provider`）。
 /// WASM 插件经此调用 Native 服务；Native 插件也可经 [`Ctx::call_json`] 调用 WASM 提供的服务。
 #[async_trait]
 pub trait JsonService: Send + Sync {

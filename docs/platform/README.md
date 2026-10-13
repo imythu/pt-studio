@@ -15,7 +15,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [plugin-api.md](plugin-api.md) | **核心契约**：WIT 包 `pt:plugin@0.1.0` 全文（已用 wasm-tools 解析验证）、Native 插件 Rust trait、`plugin.toml` 字段规范、能力清单、插件目录结构、版本兼容策略 |
+| [plugin-api.md](plugin-api.md) | **核心契约**：WIT 包 `pt:plugin@1.0.0` 全文（已用 wasm-tools 解析验证）、Native 插件 Rust trait、`plugin.toml` 字段规范、能力清单、插件目录结构、版本兼容策略 |
 | **kernel/** | 内核的四份工程文档 |
 | [kernel/01-需求规格说明书.md](kernel/01-需求规格说明书.md) | FR-KRN / NFR-KRN |
 | [kernel/02-概要设计说明书.md](kernel/02-概要设计说明书.md) | 模块、内核 HTTP 路由、关键流程、设计决策 DD-KRN |

@@ -489,7 +489,7 @@ id = "bonus"
 name = "魔力值"
 version = "1.2.0"
 kind = "wasm"
-api = "pt:plugin@0.1"
+api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 provides = ["ctx.bonus@0.1.0"]
 requires = ["ctx.ledger@^0.1"]
@@ -516,7 +516,7 @@ auth = "user"
 
     #[test]
     fn rejects_bad_route_and_unknown_field() {
-        let base = "id = \"xx\"\nname=\"x\"\nversion=\"0.1.0\"\nkind=\"native\"\napi=\"pt:plugin@0.1\"\nlicense=\"MIT\"\n";
+        let base = "id = \"xx\"\nname=\"x\"\nversion=\"0.1.0\"\nkind=\"native\"\napi=\"pt:plugin@1\"\nlicense=\"MIT\"\n";
         assert!(Manifest::parse(&format!("{base}bogus = 1\n")).is_err());
         assert!(
             Manifest::parse(&format!(

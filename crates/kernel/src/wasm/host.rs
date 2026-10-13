@@ -230,6 +230,9 @@ impl w::invocation::Host for HostState {
             locale: i.locale.clone(),
             deadline: i.deadline,
             depth: i.depth,
+            request_id: i.request_id.clone(),
+            client_ip: i.client_ip.clone(),
+            user_agent: i.user_agent.clone(),
         }
     }
 }

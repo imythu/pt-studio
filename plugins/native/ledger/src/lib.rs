@@ -591,7 +591,7 @@ impl pt_plugin_api::HttpRoutes for Routes {
     }
 }
 
-// ---------------- JSON 分派（pt:plugin@0.1 services，供 WASM 插件调用） ----------------
+// ---------------- JSON 分派（pt:plugin@1 services，供 WASM 插件调用） ----------------
 
 fn arg<T: serde::de::DeserializeOwned>(v: &serde_json::Value, k: &str) -> PResult<T> {
     serde_json::from_value(v.get(k).cloned().unwrap_or(serde_json::Value::Null))

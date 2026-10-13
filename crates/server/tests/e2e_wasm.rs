@@ -21,7 +21,7 @@ id = "x-awarder"
 name = "awarder"
 version = "0.1.0"
 kind = "native"
-api = "pt:plugin@0.1"
+api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 requires = ["ctx.bonus@^0.1"]
 
