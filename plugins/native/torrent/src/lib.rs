@@ -1277,6 +1277,44 @@ impl HttpRoutes for Routes {
     }
 }
 
+// ---------------- MCP 工具（catalog/mcp-tools.md） ----------------
+
+struct Tools;
+
+#[async_trait]
+impl pt_plugin_api::McpTool for Tools {
+    async fn call(&self, ctx: &Ctx, tool: &str, a: serde_json::Value) -> PResult<serde_json::Value> {
+        match tool {
+            "get_torrent" => {
+                let id = a["torrent_id"]
+                    .as_i64()
+                    .ok_or_else(|| PluginError::validation("torrent_id"))?;
+                let t = load(ctx, id)
+                    .await?
+                    .filter(|t| t.status != "deleted")
+                    .ok_or_else(|| PluginError::not_found("torrent not found"))?;
+                if !can_view(ctx, &t).await? {
+                    return Err(PluginError::not_found("torrent not found"));
+                }
+                let mut fields = t.fields.clone();
+                if let Some(o) = fields.as_object_mut() {
+                    for k in ["logs", "group_title", "edition_key"] {
+                        o.remove(k);
+                    }
+                }
+                let desc: String = t.description.chars().take(2000).collect();
+                // 用户填写的文本放在 user_content 下（mcp LLD §1.4）
+                Ok(json!({
+                    "torrent_id": t.id, "group_id": t.group_id, "type_id": t.type_id, "size": t.size, "file_count": t.file_count,
+                    "status": t.status, "created_at": t.created_at.timestamp_millis(), "can_download": can_download(ctx, &t), "fields": fields,
+                    "user_content": { "title": t.title, "subtitle": t.subtitle, "description": desc },
+                }))
+            }
+            other => Err(PluginError::not_found(format!("unknown tool `{other}`"))),
+        }
+    }
+}
+
 pub fn plugin() -> NativePlugin {
     let t = Arc::new(Torrent::default());
     NativePlugin {
@@ -1285,6 +1323,7 @@ pub fn plugin() -> NativePlugin {
         lifecycle: Some(t.clone()),
         http: Some(Arc::new(Routes(t))),
         search_contributor: Some(Arc::new(search::Contributor)),
+        mcp_tool: Some(Arc::new(Tools)),
         json_services: vec![("ctx.torrents", Arc::new(TorrentsSvc))],
         ..Default::default()
     }

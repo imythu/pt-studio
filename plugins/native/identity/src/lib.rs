@@ -1,16 +1,18 @@
 //! identity 插件（docs/plugins/identity/）：账号、会话、`ctx.auth`、`ctx.rbac`、`ctx.users`。
 //!
 //! 本版本实现 P1 子集：注册、密码登录、会话、权限检查、用户摘要、passkey。
-//! 另有等级（`set_class`）、等级角色、限制与有效状态（`status`）。2FA、token、改名等按 03 详细设计在后续迭代实现。
+//! 另有等级（`set_class`）、等级角色、限制与有效状态（`status`）、个人 API / MCP token（`tokens`）。2FA、feed key、改名等按 03 详细设计在后续迭代实现。
 
 pub mod accounts;
 pub mod api;
 pub mod auth;
 pub mod crypto;
 mod http;
+mod mcp;
 pub mod rbac;
 mod settings;
 pub mod status;
+pub mod tokens;
 
 use std::sync::{Arc, OnceLock};
 
@@ -34,6 +36,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0003_restrictions.sql",
         include_str!("../migrations/0003_restrictions.sql"),
     ),
+    ("0004_tokens.sql", include_str!("../migrations/0004_tokens.sql")),
 ];
 
 #[derive(Debug, Default)]
@@ -334,7 +337,8 @@ pub fn plugin() -> NativePlugin {
         migrations: MIGRATIONS,
         lifecycle: Some(id.clone()),
         on_cron: Some(Arc::new(Cron)),
-        http: Some(Arc::new(Routes(id))),
+        http: Some(Arc::new(Routes(id.clone()))),
+        mcp_tool: Some(Arc::new(mcp::Tools(id))),
         services: vec![
             (AUTH, service_object::<dyn AuthService>(svc.clone())),
             (RBAC, service_object::<dyn RbacService>(svc.clone())),

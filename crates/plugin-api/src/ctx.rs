@@ -57,6 +57,17 @@ pub trait KernelLink: Send + Sync {
     fn content_type_plugins(&self, caller: &Ctx) -> PResult<Vec<String>>;
     /// 调用资源类型插件：`info`（fields 忽略）、`normalize`、`group_key`、`canonical_title`
     async fn content_type_call(&self, caller: &Ctx, plugin: &str, op: &str, fields: Json) -> PResult<Json>;
+    /// 全部 MCP 工具（仅 `ctx.mcp` 提供方可用）
+    fn mcp_tools(&self, caller: &Ctx) -> PResult<Vec<crate::McpToolDef>>;
+    /// 以 `principal`（须已在本调用中认证）调用 MCP 工具（kernel/03 §10）；`confirmed`：写操作已经用户确认
+    async fn mcp_call(
+        &self,
+        caller: &Ctx,
+        tool: &str,
+        args: Json,
+        principal: &Principal,
+        confirmed: bool,
+    ) -> PResult<Json>;
 }
 
 /// JSON 分派的业务服务（pt:plugin@0.1 的 `services` / `service-provider`）。
@@ -223,6 +234,22 @@ impl Ctx {
     /// 调用资源类型插件的 `normalize` / `group_key` / `canonical_title`
     pub async fn content_type_call(&self, plugin: &str, op: &str, fields: Json) -> PResult<Json> {
         self.link.content_type_call(self, plugin, op, fields).await
+    }
+
+    /// MCP 工具目录（仅 `ctx.mcp` 提供方可用）。
+    pub fn mcp_tools(&self) -> PResult<Vec<crate::McpToolDef>> {
+        self.link.mcp_tools(self)
+    }
+
+    /// 调用 MCP 工具（仅 `ctx.mcp` 提供方可用；内核做权限、输入校验、确认检查与敏感字段过滤）。
+    pub async fn mcp_call(
+        &self,
+        tool: &str,
+        args: Json,
+        principal: &Principal,
+        confirmed: bool,
+    ) -> PResult<Json> {
+        self.link.mcp_call(self, tool, args, principal, confirmed).await
     }
 
     /// 以已认证用户的身份继续调用（只能切换一次）。

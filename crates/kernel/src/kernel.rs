@@ -417,6 +417,7 @@ impl Kernel {
                 http: native.and_then(|n| n.http.clone()),
                 search_contributor: native.and_then(|n| n.search_contributor.clone()),
                 content_type: native.and_then(|n| n.content_type.clone()),
+                mcp_tool: native.and_then(|n| n.mcp_tool.clone()),
                 redis: rg,
                 manifest: m,
             };
@@ -431,6 +432,7 @@ impl Kernel {
                 ));
             }
         }
+        let mcp_tools = collect_mcp_tools(&plugins, &mut errors);
         if !errors.is_empty() {
             return Err(StartError::Load(errors));
         }
@@ -451,6 +453,7 @@ impl Kernel {
             json_services,
             allowed: res.allowed.clone(),
             hook_handlers,
+            mcp_tools,
             node_id,
             events_cfg,
             me: me.clone(),
@@ -717,4 +720,67 @@ async fn register_permissions(sh: &Shared) -> Result<(), StartError> {
     let r = rbac.register_permissions(&ctx, perms).await;
     uow.finish(r.is_ok()).await.map_err(err)?;
     r.map_err(err)
+}
+
+/// 聚合清单 `[[mcp.tools]]`（catalog/mcp-tools.md §1）：名称规则、全站唯一、提供方须实现 `mcp-tool` 导出
+fn collect_mcp_tools(
+    plugins: &BTreeMap<String, Arc<PluginRuntime>>,
+    errors: &mut Vec<LoadError>,
+) -> Vec<pt_plugin_api::McpToolDef> {
+    let mut out: Vec<pt_plugin_api::McpToolDef> = Vec::new();
+    for (id, rt) in plugins {
+        let Some(decl) = &rt.manifest.mcp else { continue };
+        if decl.tools.is_empty() {
+            continue;
+        }
+        if rt.mcp_tool.is_none() {
+            errors.push(LoadError::new(
+                "E-LOAD-WORLD",
+                id,
+                "declares [[mcp.tools]] but does not implement mcp-tool",
+            ));
+            continue;
+        }
+        for t in &decl.tools {
+            let mut def: pt_plugin_api::McpToolDef = match serde_json::from_value(t.clone()) {
+                Ok(d) => d,
+                Err(e) => {
+                    errors.push(LoadError::new("E-LOAD-MANIFEST", id, format!("mcp.tools: {e}")));
+                    continue;
+                }
+            };
+            def.plugin = id.clone();
+            let name_ok = def.name.len() >= 3
+                && def.name.len() <= 64
+                && def.name.starts_with(|c: char| c.is_ascii_lowercase())
+                && def
+                    .name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            let admin_ok = (def.audience == "admin") == def.name.starts_with("admin_")
+                && matches!(def.audience.as_str(), "user" | "admin");
+            if !name_ok || !admin_ok || !def.input_schema.is_object() {
+                errors.push(LoadError::new(
+                    "E-LOAD-MANIFEST",
+                    id,
+                    format!("mcp tool `{}`: invalid name, audience (admin tools use the admin_ prefix) or input_schema", def.name),
+                ));
+                continue;
+            }
+            if let Some(other) = out.iter().find(|o| o.name == def.name) {
+                errors.push(LoadError::new(
+                    "E-LOAD-MANIFEST",
+                    id,
+                    format!(
+                        "mcp tool `{}` is already declared by `{}`",
+                        def.name, other.plugin
+                    ),
+                ));
+                continue;
+            }
+            out.push(def);
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
 }

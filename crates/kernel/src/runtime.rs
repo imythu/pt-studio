@@ -53,6 +53,7 @@ pub struct PluginRuntime {
     pub http: Option<Arc<dyn HttpRoutes>>,
     pub search_contributor: Option<Arc<dyn SearchContributor>>,
     pub content_type: Option<Arc<dyn pt_plugin_api::ContentType>>,
+    pub mcp_tool: Option<Arc<dyn pt_plugin_api::McpTool>>,
     /// 出站 HTTP 策略（清单 `http_outbound` + 静态配置）
     pub outbound: Arc<crate::http_client::OutboundPolicy>,
     pub redis: RedisGateway,
@@ -91,6 +92,8 @@ pub struct Shared {
     pub json_services: JsonServices,
     pub allowed: HashMap<String, HashSet<String>>,
     pub hook_handlers: BTreeMap<String, Vec<HookHandlerEntry>>,
+    /// MCP 工具（清单 `[[mcp.tools]]` 聚合，按名称排序）
+    pub mcp_tools: Vec<pt_plugin_api::McpToolDef>,
     pub node_id: String,
     pub events_cfg: Arc<crate::config::EventsSection>,
     pub me: Weak<Shared>,
@@ -355,6 +358,47 @@ impl Shared {
     }
 }
 
+/// MCP 工具调用超时（kernel/03 §10）
+const MCP_TOOL_TIMEOUT_MS: i64 = 10_000;
+
+/// MCP 输出的敏感字段过滤（kernel/03 §10 第 5 步）：按键名递归替换；返回命中次数
+pub fn filter_sensitive(v: &mut Json) -> usize {
+    const KEYS: &[&str] = &[
+        "passkey",
+        "email",
+        "ip",
+        "ipaddress",
+        "password",
+        "passwordhash",
+        "totpsecret",
+        "totp",
+        "token",
+        "secret",
+        "apikey",
+    ];
+    match v {
+        Json::Object(m) => {
+            let mut n = 0;
+            for (k, x) in m.iter_mut() {
+                let norm: String = k
+                    .to_ascii_lowercase()
+                    .chars()
+                    .filter(|c| *c != '_' && *c != '-')
+                    .collect();
+                if KEYS.contains(&norm.as_str()) || norm.starts_with("webauthn") {
+                    *x = Json::String("[filtered]".into());
+                    n += 1;
+                } else {
+                    n += filter_sensitive(x);
+                }
+            }
+            n
+        }
+        Json::Array(a) => a.iter_mut().map(filter_sensitive).sum(),
+        _ => 0,
+    }
+}
+
 /// 资源类型导出（content-types-common §2：normalize 为纯函数，p99 < 5 ms）
 const CONTENT_TYPE_TIMEOUT_MS: i64 = 1_000;
 
@@ -363,6 +407,52 @@ const CONTRIBUTOR_SCHEMA_TIMEOUT_MS: i64 = 2_000;
 const CONTRIBUTOR_DOCS_TIMEOUT_MS: i64 = 5_000;
 
 impl Shared {
+    /// MCP 注册入口只对 `ctx.mcp` 提供方开放
+    fn require_mcp_provider(&self, caller: &Ctx) -> PResult<()> {
+        let ok = self.plugins.get(&*caller.plugin_id).is_some_and(|rt| {
+            rt.manifest
+                .provides
+                .iter()
+                .any(|p| p.split('@').next() == Some("ctx.mcp"))
+        });
+        if ok {
+            Ok(())
+        } else {
+            Err(PluginError::capability_denied(
+                "only the ctx.mcp provider may call MCP tools",
+            ))
+        }
+    }
+
+    /// 经 `ctx.rbac.check_principal` 检查（token 作用域与权限点）
+    async fn principal_allowed(
+        &self,
+        caller: &Ctx,
+        principal: &Principal,
+        permission: Option<&str>,
+        method: &str,
+    ) -> PResult<bool> {
+        let Some((rbac_id, obj)) = self
+            .services
+            .get(pt_plugin_api::services::RBAC)
+            .and_then(|v| v.first())
+        else {
+            return if permission.is_some() {
+                Err(PluginError::unavailable("no ctx.rbac provider"))
+            } else {
+                Ok(true)
+            };
+        };
+        let rbac = obj
+            .downcast_ref::<Arc<dyn pt_plugin_api::services::RbacService>>()
+            .cloned()
+            .ok_or_else(|| PluginError::internal("ctx.rbac has wrong type"))?;
+        let (rctx, ruow) = self.kernel_service_ctx(caller, rbac_id).await?;
+        let r = rbac.check_principal(&rctx, principal, permission, method).await;
+        ruow.finish(r.is_ok()).await?;
+        r
+    }
+
     /// 贡献者接口只对 `ctx.search` 提供方开放
     fn contributor(&self, caller: &Ctx, plugin: Option<&str>) -> PResult<Option<Arc<dyn SearchContributor>>> {
         let is_search = self.plugins.get(&*caller.plugin_id).is_some_and(|rt| {
@@ -605,6 +695,103 @@ impl KernelLink for Shared {
         };
         uow.finish(r.is_ok()).await?;
         r
+    }
+
+    fn mcp_tools(&self, caller: &Ctx) -> PResult<Vec<pt_plugin_api::McpToolDef>> {
+        self.require_mcp_provider(caller)?;
+        Ok(self.mcp_tools.clone())
+    }
+
+    async fn mcp_call(
+        &self,
+        caller: &Ctx,
+        tool: &str,
+        args: Json,
+        principal: &Principal,
+        confirmed: bool,
+    ) -> PResult<Json> {
+        self.require_mcp_provider(caller)?;
+        let authed = caller
+            .authenticated
+            .lock()
+            .map(|l| l.contains(&principal.user_id))
+            .unwrap_or(false);
+        if !authed {
+            return Err(PluginError::capability_denied(
+                "principal was not authenticated in this invocation",
+            ));
+        }
+        let def = self
+            .mcp_tools
+            .iter()
+            .find(|d| d.name == tool)
+            .cloned()
+            .ok_or_else(|| PluginError::not_found(format!("unknown MCP tool `{tool}`")))?;
+        // 权限（token 作用域经 check_principal：写工具需要 write）
+        let method = if def.write { "POST" } else { "GET" };
+        if def.audience == "admin" {
+            if principal.credential_kind == "mcp" && !principal.scopes.iter().any(|s| s == "admin") {
+                return Err(PluginError::forbidden("admin tools require the admin scope")
+                    .with_details(serde_json::json!({ "code": "mcp.insufficient_scope" })));
+            }
+            if !self
+                .principal_allowed(caller, principal, Some("mcp.admin_tools.use"), method)
+                .await?
+            {
+                return Err(PluginError::forbidden("permission denied")
+                    .with_details(serde_json::json!({ "permission": "mcp.admin_tools.use" })));
+            }
+        }
+        if !self
+            .principal_allowed(caller, principal, def.permission.as_deref(), method)
+            .await?
+        {
+            return Err(PluginError::forbidden("permission denied")
+                .with_details(serde_json::json!({ "permission": def.permission })));
+        }
+        pt_plugin_api::schema::validate(&def.input_schema, &args)
+            .map_err(|m| PluginError::validation(format!("arguments: {m}")))?;
+        if def.needs_confirm() && !confirmed {
+            return Err(PluginError::new(
+                "mcp.confirmation_required",
+                "this tool requires user confirmation",
+            ));
+        }
+        let imp = self
+            .plugins
+            .get(&def.plugin)
+            .and_then(|rt| rt.mcp_tool.clone())
+            .ok_or_else(|| PluginError::unavailable(format!("plugin `{}` is not available", def.plugin)))?;
+        let mut spec = self.child_spec(caller, InvocationKind::Mcp, &def.plugin, MCP_TOOL_TIMEOUT_MS)?;
+        spec.actor = pt_plugin_api::Actor {
+            kind: pt_plugin_api::ActorKind::Mcp,
+            user_id: Some(principal.user_id),
+            plugin_id: None,
+            credential_id: Some(principal.credential_id.clone()),
+        };
+        let (ctx, uow) = self.make_ctx(&def.plugin, spec)?;
+        let budget = std::time::Duration::from_millis(
+            u64::try_from((ctx.invocation.deadline - now_ms()).max(0)).unwrap_or(0),
+        );
+        let r = match tokio::time::timeout(budget, imp.call(&ctx, tool, args)).await {
+            Ok(r) => r,
+            Err(_) => {
+                Err(PluginError::new("kernel.timeout", format!("MCP tool `{tool}` timed out")).retryable())
+            }
+        };
+        uow.finish(r.is_ok()).await?;
+        let mut out = r?;
+        let hits = filter_sensitive(&mut out);
+        if hits > 0 {
+            tracing::warn!(tool, plugin = %def.plugin, hits, "MCP tool returned sensitive fields; filtered");
+        }
+        if let Some(schema) = &def.output_schema
+            && let Err(m) = pt_plugin_api::schema::validate(schema, &out)
+        {
+            tracing::error!(tool, plugin = %def.plugin, error = %m, "MCP tool output does not match its output schema");
+            return Err(PluginError::internal("tool output does not match its schema"));
+        }
+        Ok(out)
     }
 
     async fn authenticate(&self, caller: &Ctx, credential: Credential) -> PResult<Option<Principal>> {

@@ -26,6 +26,8 @@ pub const CSRF_COOKIE: &str = "__Host-pt_csrf";
 struct PluginState {
     shared: Arc<Shared>,
     plugin: String,
+    /// 路由模板前缀（`/api/p/<id>`；根路由为空）
+    prefix: String,
     /// (方法, 路由模板) → 声明
     routes: Arc<HashMap<(String, String), RouteDecl>>,
 }
@@ -52,6 +54,7 @@ pub fn router(shared: Arc<Shared>) -> Router {
         let state = PluginState {
             shared: shared.clone(),
             plugin: id.clone(),
+            prefix: format!("/api/p/{id}"),
             routes: Arc::new(routes),
         };
         let max_kb = usize::try_from(shared.cfg.http.max_body_kb).unwrap_or(1024);
@@ -60,6 +63,30 @@ pub fn router(shared: Arc<Shared>) -> Router {
             .route_layer(middleware::from_fn_with_state(state, plugin_mw))
             .layer(DefaultBodyLimit::max(max_kb * 1024));
         app = app.nest(&format!("/api/p/{id}"), r);
+        // 根路由（清单校验保证只有 mcp 插件能声明）
+        if let Some(root) = http.root_router() {
+            let routes: HashMap<(String, String), RouteDecl> = rt
+                .manifest
+                .http
+                .as_ref()
+                .map(|h| {
+                    h.root_routes
+                        .iter()
+                        .map(|r| ((r.method.to_ascii_uppercase(), r.path.clone()), r.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let state = PluginState {
+                shared: shared.clone(),
+                plugin: id.clone(),
+                prefix: String::new(),
+                routes: Arc::new(routes),
+            };
+            app = app.merge(
+                root.route_layer(middleware::from_fn_with_state(state, plugin_mw))
+                    .layer(DefaultBodyLimit::max(max_kb * 1024)),
+            );
+        }
     }
     let sh = shared.clone();
     app.merge(crate::frontend::routes(shared))
@@ -358,9 +385,12 @@ async fn prepare(
     request_id: &str,
 ) -> Result<Prepared, PluginError> {
     let sh = &st.shared;
-    let prefix = format!("/api/p/{}", st.plugin);
     let pattern = matched.as_ref().map(MatchedPath::as_str).unwrap_or_default();
-    let pattern = pattern.strip_prefix(&prefix).unwrap_or(pattern);
+    let pattern = if st.prefix.is_empty() {
+        pattern
+    } else {
+        pattern.strip_prefix(&st.prefix).unwrap_or(pattern)
+    };
     let method = req.method().as_str().to_owned();
     let route = st
         .routes
@@ -385,7 +415,12 @@ async fn prepare(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.chars().take(256).collect());
     let (kctx, kuow) = sh.make_ctx("kernel", spec.clone())?;
-    let cred = credential(&headers);
+    // 公开的根路由（MCP 等协议端点）自行鉴权，网关不处理凭据
+    let cred = if st.prefix.is_empty() && route.auth == AuthLevel::Public {
+        None
+    } else {
+        credential(&headers)
+    };
     let principal: Option<Principal> = match &cred {
         Some(c) => kctx.authenticate(c.clone()).await?,
         None => None,

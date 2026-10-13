@@ -8,6 +8,7 @@ use axum::{
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
 use crate::{Actor, Ctx, PResult, PluginError, TimestampMs};
@@ -93,6 +94,10 @@ pub trait OnCron: Send + Sync {
 /// handler 用 [`RequestCtx`] 取得本次请求的上下文。
 pub trait HttpRoutes: Send + Sync {
     fn router(&self) -> axum::Router;
+    /// 站点根路径下的路由（清单 `[http] root_routes`，仅 mcp 插件可声明：`/mcp`、`/.well-known/…`、`/oauth/…`）
+    fn root_router(&self) -> Option<axum::Router> {
+        None
+    }
 }
 
 /// 请求上下文提取器：内核在调用 handler 前放入请求扩展。
@@ -183,6 +188,46 @@ pub trait SearchContributor: Send + Sync {
 #[async_trait]
 pub trait McpTool: Send + Sync {
     async fn call(&self, ctx: &Ctx, tool: &str, arguments: Json) -> PResult<Json>;
+}
+
+/// MCP 工具定义（清单 `[[mcp.tools]]`，kernel/03 §10、catalog/mcp-tools.md）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpToolDef {
+    pub name: String,
+    /// 提供方插件（内核填写）
+    #[serde(default)]
+    pub plugin: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    pub description: String,
+    pub input_schema: Json,
+    #[serde(default)]
+    pub output_schema: Option<Json>,
+    #[serde(default)]
+    pub permission: Option<String>,
+    #[serde(default)]
+    pub write: bool,
+    /// 写操作是否需要用户确认（缺省 = write）
+    #[serde(default)]
+    pub confirm: Option<bool>,
+    /// 确认不能由站点关闭（如封禁用户）
+    #[serde(default)]
+    pub confirm_locked: bool,
+    #[serde(default)]
+    pub destructive: Option<bool>,
+    /// `user` | `admin`
+    #[serde(default = "default_audience")]
+    pub audience: String,
+}
+
+fn default_audience() -> String {
+    "user".into()
+}
+
+impl McpToolDef {
+    pub fn needs_confirm(&self) -> bool {
+        self.write && self.confirm.unwrap_or(true)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

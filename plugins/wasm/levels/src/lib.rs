@@ -15,7 +15,7 @@ wit_bindgen::generate!({
 
 use std::collections::BTreeMap;
 
-use exports::pt::plugin::{hooks, http_handler, lifecycle, on_cron, on_event, service_provider};
+use exports::pt::plugin::{hooks, http_handler, lifecycle, mcp_tool, on_cron, on_event, service_provider};
 use pt::plugin::{
     events, invocation, services,
     sql::{self, SqlValue},
@@ -704,6 +704,17 @@ impl service_provider::Guest for Levels {
             _ => return Err(err("kernel.not_found", "unknown method")),
         };
         Ok(out.to_string())
+    }
+}
+
+// ---------------- MCP 工具（catalog/mcp-tools.md） ----------------
+
+impl mcp_tool::Guest for Levels {
+    fn call(tool: String, _arguments: String) -> R<String> {
+        match tool.as_str() {
+            "get_my_level" => Ok(level_info(me()?)?.to_string()),
+            _ => Err(err("kernel.not_found", "unknown tool")),
+        }
     }
 }
 

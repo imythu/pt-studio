@@ -2143,6 +2143,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-plugin-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "hex",
+ "hmac",
+ "pt-plugin-api",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "pt-plugin-search-meilisearch"
 version = "0.1.0"
 dependencies = [
@@ -2204,6 +2221,7 @@ dependencies = [
  "pt-plugin-identity",
  "pt-plugin-ledger",
  "pt-plugin-llm-claude",
+ "pt-plugin-mcp",
  "pt-plugin-search-meilisearch",
  "pt-plugin-torrent",
  "redis",

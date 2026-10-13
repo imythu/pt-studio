@@ -15,7 +15,7 @@ use serde::Deserialize;
 use crate::{
     Identity, accounts,
     accounts::{Origin, RegisterRequest},
-    auth, rbac, settings, status,
+    auth, rbac, settings, status, tokens,
 };
 
 pub fn router(id: Arc<Identity>) -> Router {
@@ -46,6 +46,11 @@ pub fn router(id: Arc<Identity>) -> Router {
             delete(settings::admin_remove_role),
         )
         .route("/v1/users/me/permissions", get(my_permissions))
+        .route(
+            "/v1/users/me/tokens",
+            get(tokens::http_list).post(tokens::http_create),
+        )
+        .route("/v1/users/me/tokens/{tid}", delete(tokens::http_revoke))
         .route("/v1/users/me/passkey", get(my_passkey))
         .route("/v1/users/{id}", get(get_user))
         .route("/v1/admin/users/{id}/roles", post(grant_role))
@@ -215,7 +220,7 @@ async fn grant_role(ctx: RequestCtx, Path(uid): Path<i64>, Json(b): Json<GrantBo
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn admin_rank_ok(ctx: &RequestCtx, target: i64) -> PResult<i64> {
+pub(crate) async fn admin_rank_ok(ctx: &pt_plugin_api::Ctx, target: i64) -> PResult<i64> {
     let by = i64::try_from(ctx.require_user()?).unwrap_or_default();
     // 管理员只能限制 rank 低于自己的用户（03 §1.6），sysop 不受限
     let rank = |roles: &std::collections::HashSet<String>| {

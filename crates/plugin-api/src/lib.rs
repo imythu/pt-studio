@@ -8,6 +8,7 @@ mod error;
 mod exports;
 pub mod host;
 pub mod manifest;
+pub mod schema;
 pub mod services;
 mod types;
 

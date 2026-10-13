@@ -47,6 +47,12 @@ schedule = "0 4 * * *"
 timeout_secs = 1800
 tx = "manual"
 
+[[mcp.tools]]
+name = "get_my_level"
+title = "我的等级"
+description = "查询当前用户的等级与升级进度（下一等级的条件与当前数值）。"
+input_schema = { type = "object", additionalProperties = false, properties = {} }
+
 [[http.routes]]
 id = "me"
 method = "GET"

@@ -1,0 +1,116 @@
+id = "mcp"
+name = "MCP 网关"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "MCP 网关：AI 客户端以个人 MCP token 调用站点工具，写操作需要用户在站内确认"
+
+provides = ["ctx.mcp@0.1.0"]
+requires = ["ctx.auth@^0.1", "ctx.rbac@^0.1"]
+publishes = ["mcp.tool_called", "mcp.confirmation_resolved"]
+
+[capabilities]
+kv = true
+sql = true
+
+[[hook_points]]
+name = "mcp.before_tool_call"
+input_schema = "schemas/hooks/mcp.before_tool_call.json"
+
+[[cron]]
+name = "expire_confirmations"
+schedule = "* * * * *"
+timeout_secs = 50
+
+[[http.root_routes]]
+id = "mcp_post"
+method = "POST"
+path = "/mcp"
+auth = "public"
+rate_limit = "ip:600/m"
+max_body_kb = 256
+timeout_ms = 30000
+
+[[http.root_routes]]
+id = "mcp_get"
+method = "GET"
+path = "/mcp"
+auth = "public"
+
+[[http.root_routes]]
+id = "mcp_delete"
+method = "DELETE"
+path = "/mcp"
+auth = "public"
+
+[[http.root_routes]]
+id = "resource_metadata"
+method = "GET"
+path = "/.well-known/oauth-protected-resource"
+auth = "public"
+
+[[http.root_routes]]
+id = "resource_metadata_mcp"
+method = "GET"
+path = "/.well-known/oauth-protected-resource/mcp"
+auth = "public"
+
+[[http.routes]]
+id = "list_confirmations"
+method = "GET"
+path = "/v1/me/confirmations"
+auth = "user"
+permission = "mcp.connect"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "approve_confirmation"
+method = "POST"
+path = "/v1/me/confirmations/{id}/approve"
+auth = "user"
+permission = "mcp.connect"
+rate_limit = "user:30/m"
+timeout_ms = 30000
+
+[[http.routes]]
+id = "reject_confirmation"
+method = "POST"
+path = "/v1/me/confirmations/{id}/reject"
+auth = "user"
+permission = "mcp.connect"
+rate_limit = "user:30/m"
+
+[[permissions]]
+name = "mcp.connect"
+description_term = "mcp.perm.connect"
+default_roles = ["user"]
+
+[[permissions]]
+name = "mcp.admin_tools.use"
+description_term = "mcp.perm.admin_tools_use"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "mcp.manage"
+description_term = "mcp.perm.manage"
+default_roles = ["sysop"]
+
+[database]
+migrations = "migrations"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.disabled_confirm_tools]
+type = "array"
+items = { type = "string" }
+title = "免确认的写工具（确认被锁定的工具除外）"
+default = []
+
+[terms]
+"mcp.name" = { zh-CN = "MCP 网关", en = "MCP gateway" }
+"mcp.perm.connect" = { zh-CN = "使用 MCP 连接 AI 客户端", en = "Connect AI clients via MCP" }
+"mcp.perm.admin_tools_use" = { zh-CN = "使用管理员侧 MCP 工具", en = "Use admin MCP tools" }
+"mcp.perm.manage" = { zh-CN = "配置 MCP 网关", en = "Configure the MCP gateway" }

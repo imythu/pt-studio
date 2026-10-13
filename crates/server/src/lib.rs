@@ -18,5 +18,7 @@ pub fn native_plugins() -> Vec<NativePlugin> {
     v.push(pt_plugin_search_meilisearch::plugin());
     #[cfg(feature = "llm-claude")]
     v.push(pt_plugin_llm_claude::plugin());
+    #[cfg(feature = "mcp")]
+    v.push(pt_plugin_mcp::plugin());
     v
 }

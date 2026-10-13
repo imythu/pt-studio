@@ -94,6 +94,7 @@ pub struct WasmPlugin {
     service: Option<ex::service_provider::GuestIndices>,
     search: Option<ex::search_contributor::GuestIndices>,
     content: Option<ex::content_type::GuestIndices>,
+    mcp: Option<ex::mcp_tool::GuestIndices>,
 }
 
 impl std::fmt::Debug for WasmPlugin {
@@ -395,6 +396,17 @@ impl pt_plugin_api::ContentType for Adapter {
         call_export!(self.0, ctx, content, |g, store| g
             .call_canonical_title(&mut store, &f)
             .await)
+    }
+}
+
+#[async_trait]
+impl pt_plugin_api::McpTool for Adapter {
+    async fn call(&self, ctx: &Ctx, tool: &str, arguments: serde_json::Value) -> PResult<serde_json::Value> {
+        let a = arguments.to_string();
+        let out = call_export!(self.0, ctx, mcp, |g, store| g
+            .call_call(&mut store, tool, &a)
+            .await)?;
+        serde_json::from_str(&out).map_err(|_| PluginError::internal("mcp-tool returned invalid JSON"))
     }
 }
 
@@ -701,6 +713,7 @@ fn load_one(
         service: ex::service_provider::GuestIndices::new(&pre).ok(),
         search: ex::search_contributor::GuestIndices::new(&pre).ok(),
         content: ex::content_type::GuestIndices::new(&pre).ok(),
+        mcp: ex::mcp_tool::GuestIndices::new(&pre).ok(),
         pre,
     });
     // 导出与清单一致（plugin-api.md §2.1）
@@ -730,6 +743,11 @@ fn load_one(
             m.capabilities.search_contributor,
         ),
         ("content-type", wp.content.is_some(), m.capabilities.content_type),
+        (
+            "mcp-tool",
+            wp.mcp.is_some(),
+            m.mcp.as_ref().is_some_and(|d| !d.tools.is_empty()),
+        ),
     ];
     for (iface, exported, declared) in checks {
         if exported != declared {
@@ -778,6 +796,10 @@ fn load_one(
             .content
             .is_some()
             .then(|| adapter.clone() as Arc<dyn pt_plugin_api::ContentType>),
+        mcp_tool: wp
+            .mcp
+            .is_some()
+            .then(|| adapter.clone() as Arc<dyn pt_plugin_api::McpTool>),
         json_services,
         ..Default::default()
     })

@@ -60,6 +60,31 @@ auth = "user"
 rate_limit = "user:60/m"
 
 [[http.routes]]
+id = "list_tokens"
+method = "GET"
+path = "/v1/users/me/tokens"
+auth = "user"
+permission = "identity.tokens.manage_own"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "create_token"
+method = "POST"
+path = "/v1/users/me/tokens"
+auth = "user"
+permission = "identity.tokens.manage_own"
+rate_limit = "user:10/h"
+idempotent = true
+
+[[http.routes]]
+id = "revoke_token"
+method = "DELETE"
+path = "/v1/users/me/tokens/{tid}"
+auth = "user"
+permission = "identity.tokens.manage_own"
+rate_limit = "user:60/m"
+
+[[http.routes]]
 id = "get_passkey"
 method = "GET"
 path = "/v1/users/me/passkey"
@@ -248,6 +273,24 @@ default_roles = ["admin"]
 name = "identity.roles.manage"
 description_term = "identity.perm.roles_manage"
 default_roles = []
+
+[[mcp.tools]]
+name = "get_my_profile"
+title = "我的资料"
+description = "查询当前用户的资料：用户名、等级、状态、角色、注册时间。用户问“我是什么等级 / 我的账号状态”时使用。"
+input_schema = { type = "object", additionalProperties = false, properties = {} }
+output_schema = { type = "object", required = ["id", "username", "status"], properties = { id = { type = "integer" }, username = { type = "string" }, status = { type = "string" }, class_id = { type = "integer" }, roles = { type = "array", items = { type = "string" } }, created_at = { type = "integer" } } }
+
+[[mcp.tools]]
+name = "admin_set_user_status"
+title = "限制用户"
+description = "管理员：封禁用户或禁止其下载。需要说明原因代码；只能处理等级低于自己的用户。"
+audience = "admin"
+write = true
+confirm_locked = true
+destructive = true
+permission = "identity.users.ban"
+input_schema = { type = "object", additionalProperties = false, required = ["user_id", "status", "reason_code"], properties = { user_id = { type = "integer", minimum = 1 }, status = { type = "string", enum = ["banned", "leech_disabled"] }, reason_code = { type = "string", maxLength = 64 }, note = { type = "string", maxLength = 500 }, until = { type = "integer" } } }
 
 [database]
 migrations = "migrations"
