@@ -89,7 +89,8 @@ pub struct Admission {
     inner: RwLock<Inner>,
 }
 
-const NEGATIVE_TTL: Duration = Duration::from_secs(60);
+/// 回源未命中的负缓存时长：足够挡住穷举，又让刚注册 / 刚发布（同步尚未到达）的情况很快恢复
+const NEGATIVE_TTL: Duration = Duration::from_secs(10);
 
 fn field<T: std::str::FromStr>(h: &HashMap<String, String>, k: &str) -> Option<T> {
     h.get(k).and_then(|v| v.parse().ok())

@@ -22,7 +22,7 @@ target/release/pt-tracker tracker.toml
 | 方向 | 键 | 说明 |
 |---|---|---|
 | 读 | `trk:pk:<passkey>`、`trk:t:<info_hash>`、`trk:clients`、`trk:cfg` | tracker-bridge 插件写入的快照；启动时全量加载到内存 |
-| 读 | `trk:sync` | 变更流，`XREAD BLOCK` 跟随；本地未命中时回源一次并负缓存 60 秒 |
+| 读 | `trk:sync` | 变更流，`XREAD BLOCK` 跟随；本地未命中时回源一次并负缓存 10 秒 |
 | 写 | `acct:<user_id % N>` | 流量事件（`v`、`eid`、`ts`、`uid`、`tid`、`ih`、`pid`、`ip`、`port`、`ev`、`up`、`down`、`left`、`dup`、`ddown`、`dseed`、`dleech`、`flags`、`ua`），由 accounting 消费；`N` 取 `acct:_meta` 的 `partitions` |
 | 写 | `u:<uid>:live` | 实时原始计数 `up`、`down`、`seed_time` |
 | 读写 | `ps:<info_hash>` | 会话状态（field `<uid>:<peer_id_hex>`，JSON），重启后据此恢复基线 |
