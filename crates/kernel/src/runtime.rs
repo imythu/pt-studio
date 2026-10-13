@@ -92,6 +92,10 @@ pub struct Shared {
     pub json_services: JsonServices,
     pub allowed: HashMap<String, HashSet<String>>,
     pub hook_handlers: BTreeMap<String, Vec<HookHandlerEntry>>,
+    /// 钩子点定义（目录 + 第三方插件清单中的 `[[hook_points]]`）
+    pub hook_registry: crate::catalog::HookRegistry,
+    /// 插件清单 `[error_codes]` 声明的 HTTP 状态（目录未登记的错误码）
+    pub error_codes: HashMap<String, u16>,
     /// MCP 工具（清单 `[[mcp.tools]]` 聚合，按名称排序）
     pub mcp_tools: Vec<pt_plugin_api::McpToolDef>,
     pub node_id: String,
@@ -937,7 +941,9 @@ fn redact(input: &Json, sensitive: &HashSet<String>) -> (Json, Vec<&'static str>
 impl HookRunner for PipelineRunner {
     async fn run(&self, hook: &str, input: Json) -> PResult<HookOutcome> {
         let sh = &self.shared;
-        let def = catalog::hook_point(hook)
+        let def = sh
+            .hook_registry
+            .get(hook)
             .ok_or_else(|| PluginError::internal(format!("unknown hook `{hook}`")))?;
         if def.owner != self.caller {
             return Err(PluginError::capability_denied(format!(
@@ -1002,7 +1008,7 @@ impl HookRunner for PipelineRunner {
                 // 处理者的写入独立提交（hooks.md）
                 uow.finish(r.is_ok()).await?;
                 match r {
-                    Ok(HookDecision::Modify(patch)) => match check_patch(def, &patch, &view, &removed) {
+                    Ok(HookDecision::Modify(patch)) => match check_patch(&def, &patch, &view, &removed) {
                         Ok(()) => Ok(HookDecision::Modify(patch)),
                         Err(why) => Err(PluginError::internal(format!("invalid hook patch: {why}"))),
                     },

@@ -76,6 +76,9 @@ pub struct Manifest {
     pub workers: Vec<WorkerDecl>,
     #[serde(default)]
     pub notify: Option<Json>,
+    /// 本插件错误码的 HTTP 状态（catalog/error-codes.md 未登记的码使用；未声明时按后缀规则），如 `"notes.too_many" = 422`
+    #[serde(default)]
+    pub error_codes: BTreeMap<String, u16>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -177,6 +180,16 @@ pub struct HookPoint {
     pub name: String,
     #[serde(default)]
     pub input_schema: Option<String>,
+    /// 处理者可以修改的字段（点分路径）；为空则只能放行或拒绝。只对 catalog/hooks.md 之外的钩子点生效，
+    /// 已登记的钩子点以目录为准。
+    #[serde(default)]
+    pub modifiable: Vec<String>,
+    /// 单个处理者的超时（默认 200，最大 1000 毫秒）
+    #[serde(default)]
+    pub timeout_ms: Option<u32>,
+    /// 处理者出错或超时时是否视为拒绝（默认放行）
+    #[serde(default)]
+    pub deny_on_error: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,6 +441,22 @@ impl Manifest {
                 return Err(PluginError::validation(format!(
                     "term `{k}` must start with `{}.`",
                     self.id
+                )));
+            }
+        }
+        for (code, status) in &self.error_codes {
+            if !code.starts_with(&format!("{}.", self.id)) || !(400..=599).contains(status) {
+                return Err(PluginError::validation(format!(
+                    "error code `{code}` must start with `{}.` and map to a 4xx/5xx status",
+                    self.id
+                )));
+            }
+        }
+        for hp in &self.hook_points {
+            if hp.timeout_ms.is_some_and(|t| !(1..=1000).contains(&t)) {
+                return Err(PluginError::validation(format!(
+                    "hook point `{}`: timeout_ms must be 1..=1000",
+                    hp.name
                 )));
             }
         }

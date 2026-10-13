@@ -2,6 +2,8 @@
 
 > 版本 0.1 · 状态：草案 · 2026-10-04
 
+> 插件 API 已于 P7（2026-10-14）冻结为 `pt:plugin@1.0.0`；第三方插件开发见 [../sdk/README.md](../sdk/README.md)。
+
 本目录是内核与全部插件之间的**唯一契约**。插件文档（`docs/plugins/<id>/`）引用的服务名、事件名、钩子名、权限点、术语键、插槽、MCP 工具、Redis 前缀、错误码，都必须与这里的目录一致；需要新增时，在插件概要设计第 7 节“对平台契约的新增”中提出，评审后合入本目录。
 
 已确定的相关决策：D1～D17（见 [../design/README.md](../design/README.md)），以及本轮新增的：
@@ -15,7 +17,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [plugin-api.md](plugin-api.md) | **核心契约**：WIT 包 `pt:plugin@1.0.0` 全文（已用 wasm-tools 解析验证）、Native 插件 Rust trait、`plugin.toml` 字段规范、能力清单、插件目录结构、版本兼容策略 |
+| [plugin-api.md](plugin-api.md) | **核心契约**：WIT 包 `pt:plugin@1.0.0` 全文（1.0 已冻结）、Native 插件 Rust trait、`plugin.toml` 字段规范、能力清单、插件目录结构、版本兼容策略 |
 | **kernel/** | 内核的四份工程文档 |
 | [kernel/01-需求规格说明书.md](kernel/01-需求规格说明书.md) | FR-KRN / NFR-KRN |
 | [kernel/02-概要设计说明书.md](kernel/02-概要设计说明书.md) | 模块、内核 HTTP 路由、关键流程、设计决策 DD-KRN |

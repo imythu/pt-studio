@@ -2269,6 +2269,7 @@ dependencies = [
  "redis",
  "serde_json",
  "sha1",
+ "sha2",
  "sqlx",
  "tokio",
  "tower",

@@ -1,9 +1,9 @@
 //! 故意越界的测试插件：验证沙箱的截止时间、陷入、内存上限与能力隔离。
 
-wit_bindgen::generate!({ path: "wit", world: "chaos", generate_all });
+pt_plugin_sdk::world!("chaos");
 
 use exports::pt::plugin::http_handler::{Guest, Request, Response};
-use pt::plugin::{redis, sql, types::PluginError};
+use pt_plugin_sdk::{redis, sql, types::PluginError};
 
 struct Chaos;
 

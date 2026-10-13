@@ -8,17 +8,13 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "type-music",
-    generate_all,
-});
+pt_plugin_sdk::world!("type-music");
 
 pub mod logcheck;
 pub mod music;
 
 use exports::pt::plugin::{content_type, hooks, http_handler, on_cron, on_event, search_contributor};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, jobs, services,
     sql::{self, SqlValue},
     time,

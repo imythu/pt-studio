@@ -1,0 +1,27 @@
+id = "greeter"
+name = "欢迎新用户"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["Your Name"]
+description = "Native 插件模板：订阅 user.registered 记录欢迎时间，提供 GET /v1/me"
+
+[capabilities]
+sql = true
+
+[[subscriptions]]
+name = "on_registered"
+event = "user.registered"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+
+[database]
+migrations = "migrations"
+
+[terms]
+"greeter.name" = { zh-CN = "欢迎新用户", en = "Greeter" }

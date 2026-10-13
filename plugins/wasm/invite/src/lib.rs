@@ -7,18 +7,14 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "invite",
-    generate_all,
-});
+pt_plugin_sdk::world!("invite");
 
 pub mod codes;
 
 use std::collections::BTreeMap;
 
 use exports::pt::plugin::{hooks, http_handler, lifecycle, on_cron, on_event, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     audit, config, events, hook_runner, invocation, kv, random, services,
     sql::{self, SqlValue},
     time,

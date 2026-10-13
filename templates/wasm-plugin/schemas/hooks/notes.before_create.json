@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "notes.before_create 钩子输入",
+  "type": "object",
+  "required": ["version", "user_id", "title", "body"],
+  "properties": {
+    "version": { "const": 1 },
+    "user_id": { "type": "integer" },
+    "title": { "type": "string", "maxLength": 100 },
+    "body": { "type": "string", "maxLength": 10000 }
+  }
+}

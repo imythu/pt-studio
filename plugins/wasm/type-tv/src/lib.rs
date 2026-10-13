@@ -6,16 +6,12 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "type-tv",
-    generate_all,
-});
+pt_plugin_sdk::world!("type-tv");
 
 pub mod tv;
 
 use exports::pt::plugin::{content_type, hooks, on_cron, on_event, search_contributor};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, jobs, services,
     sql::{self, SqlValue},
     time,

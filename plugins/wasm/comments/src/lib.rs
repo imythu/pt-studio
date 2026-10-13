@@ -8,16 +8,12 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "comments",
-    generate_all,
-});
+pt_plugin_sdk::world!("comments");
 
 pub mod logic;
 
 use exports::pt::plugin::{http_handler, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, events, hook_runner, invocation, redis, services,
     sql::{self, SqlValue},
     types::PluginError,
@@ -481,7 +477,7 @@ fn row_json(
     let deleted = state != "visible";
     let window = setting("edit_window_minutes", 60) * 60_000;
     let created = int(&row[7]).unwrap_or(0);
-    let now = pt::plugin::time::now();
+    let now = pt_plugin_sdk::time::now();
     json!({
         "id": id, "floor": int(&row[1]), "reply_to": int(&row[3]),
         "author": author.map(|a| json!({ "id": a, "username": names.get(&a) })),
@@ -757,7 +753,7 @@ impl http_handler::Guest for Comments {
                     if author != Some(uid) {
                         return Err(err("kernel.forbidden", "not allowed to edit this comment"));
                     }
-                    if pt::plugin::time::now() - created > setting("edit_window_minutes", 60) * 60_000 {
+                    if pt_plugin_sdk::time::now() - created > setting("edit_window_minutes", 60) * 60_000 {
                         return Err(err("comments.edit_window_expired", "the edit window has passed"));
                     }
                 }

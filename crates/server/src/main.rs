@@ -24,6 +24,53 @@ enum Cmd {
     Check,
     /// 只执行迁移
     Migrate,
+    /// 插件开发工具（不读取 site.toml、不连接数据库）
+    Plugin {
+        #[command(subcommand)]
+        cmd: PluginCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginCmd {
+    /// 检查插件包目录：清单、API 版本、组件链接与导出、迁移文件名
+    Check {
+        /// 包目录（`<id>/` 下含 plugin.toml、plugin.wasm）
+        dir: std::path::PathBuf,
+    },
+    /// 组装插件包：<out>/<id>/{plugin.toml, plugin.wasm, migrations/, checksums.txt}，并检查
+    Package {
+        /// 插件源码目录（含 plugin.toml、migrations/）
+        #[arg(long, default_value = ".")]
+        src: std::path::PathBuf,
+        /// 构建出的组件（cargo build --release --target wasm32-wasip2 的产物）
+        #[arg(long)]
+        wasm: std::path::PathBuf,
+        /// 输出目录（站点配置 plugins.dir 指向它即可加载）
+        #[arg(long, default_value = "dist")]
+        out: std::path::PathBuf,
+    },
+}
+
+fn plugin_cmd(cmd: PluginCmd) -> ExitCode {
+    let r = match cmd {
+        PluginCmd::Check { dir } => {
+            pt_server::check(&dir).map(|m| format!("ok: {} {} ({})", m.id, m.version, m.api))
+        }
+        PluginCmd::Package { src, wasm, out } => {
+            pt_server::package(&src, &wasm, &out).map(|d| format!("ok: packaged {}", d.display()))
+        }
+    };
+    match r {
+        Ok(msg) => {
+            println!("{msg}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::from(2)
+        }
+    }
 }
 
 #[tokio::main]
@@ -32,6 +79,9 @@ async fn main() -> ExitCode {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
     let cli = Cli::parse();
+    if let Cmd::Plugin { cmd } = cli.cmd {
+        return plugin_cmd(cmd);
+    }
     let cfg = match std::fs::read_to_string(&cli.config)
         .map_err(anyhow::Error::from)
         .and_then(|t| SiteConfig::parse(&t))
@@ -66,6 +116,7 @@ async fn main() -> ExitCode {
                 }
             }
         }
+        Cmd::Plugin { .. } => unreachable!("handled above"),
         Cmd::Serve => {
             let bind = cfg.http.bind.clone();
             let kernel = match Kernel::start(cfg, pt_server::native_plugins()).await {

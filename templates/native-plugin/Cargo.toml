@@ -1,0 +1,19 @@
+# Native 插件模板：与内核一起编译进 pt-server（适合高吞吐或需要 Rust 生态的插件）。见 README.md。
+[package]
+name = "pt-plugin-greeter"
+description = "PT Studio Native plugin template: welcomes new users (event subscription, HTTP, SQL)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+# 放进 PT Studio 仓库的 plugins/native/<id>/ 后改为 `pt-plugin-api.workspace = true` 等工作区依赖
+pt-plugin-api = { path = "../../crates/plugin-api" }
+async-trait = "0.1"
+axum = "0.8"
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "chrono"] }
+
+# 独立的工作区（模板目录不并入主工作区）
+[workspace]

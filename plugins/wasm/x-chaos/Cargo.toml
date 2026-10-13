@@ -10,4 +10,4 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = "0.62"
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

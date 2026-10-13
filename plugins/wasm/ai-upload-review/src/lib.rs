@@ -7,16 +7,12 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "ai-upload-review",
-    generate_all,
-});
+pt_plugin_sdk::world!("ai-upload-review");
 
 pub mod review;
 
 use exports::pt::plugin::{http_handler, on_cron, on_event};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, events, invocation, jobs, redis, services,
     sql::{self, SqlValue},
     time,

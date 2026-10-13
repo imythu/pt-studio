@@ -6,11 +6,7 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "type-generic",
-    generate_all,
-});
+pt_plugin_sdk::world!("type-generic");
 
 pub mod kinds;
 
@@ -18,7 +14,7 @@ use std::collections::BTreeMap;
 
 use exports::pt::plugin::{content_type, http_handler, lifecycle, search_contributor};
 use kinds::KindDef;
-use pt::plugin::{
+use pt_plugin_sdk::{
     config,
     sql::{self, SqlValue},
     types::PluginError,

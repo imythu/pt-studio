@@ -1202,11 +1202,11 @@ audience = "user"                  # "user" | "admin"
 
 | 字段 | 类型 | 必填 | 规则 |
 |---|---|---|---|
-| `id` | string | 是 | `^[a-z][a-z0-9-]{1,31}$`；不得以 `-` 结尾；保留字：`kernel`、`public`、`core`、`shared`、`system`、`pg-*`、`information-schema`。必须在 [catalog/plugins.md](catalog/plugins.md) 中登记 |
+| `id` | string | 是 | `^[a-z][a-z0-9-]{1,31}$`；不得以 `-` 结尾；保留字：`kernel`、`public`、`core`、`shared`、`system`、`pg-*`、`information-schema`。官方插件在 [catalog/plugins.md](catalog/plugins.md) 中登记；第三方插件选一个不冲突的 ID（`x-` 前缀留给测试插件） |
 | `name` / `name_term` | string | 是（二选一） | |
 | `version` | semver | 是 | |
 | `kind` | enum | 是 | `wasm` / `native`；与实际加载方式不符则拒绝启动 |
-| `api` | string | 是 | `pt:plugin@<major>.<minor>`；兼容规则见 §6 |
+| `api` | string | 是 | `pt:plugin@<major>` 或 `pt:plugin@<major>.<minor>`（如 `pt:plugin@1`）；兼容规则见 §6 |
 | `kernel` | semver req | 否 | |
 | `license` | SPDX | 是 | 官方插件必须为 `MIT OR Apache-2.0`（D19）；第三方插件可用其他许可证，但不得为 AGPL/GPL 等与内核链接后产生传染的许可证（Native 插件会被静态链接进内核） |
 | `provides` | [string] | 否 | `ctx.<name>@<semver>`；服务必须在 [catalog/services.md](catalog/services.md) 中归属本插件 |
@@ -1215,7 +1215,7 @@ audience = "user"                  # "user" | "admin"
 | `publishes` | [string] | 否 | 必须是 events 目录中归属本插件的事件 |
 | `[[subscriptions]]` | table[] | 否 | `name`、`event`、`versions`（默认 `[1]`）、`ordered`（默认 false）、`max_attempts`（默认 10）、`tx`（默认 auto）、`batch`（仅 Native，默认 1） |
 | `[[hooks]]` | table[] | 否 | `hook`、`priority`（i32，默认 0）、`timeout_ms` |
-| `[[hook_points]]` | table[] | 否 | `name`、`input_schema`；必须在 hooks 目录中归属本插件 |
+| `[[hook_points]]` | table[] | 否 | `name`、`input_schema`；目录中登记的钩子点必须归属本插件（其参数以目录为准）。目录之外的钩子点名字须以 `<id>.` 开头，参数由清单给出：`modifiable`（可修改字段的点分路径，为空则只能放行 / 拒绝）、`timeout_ms`（默认 200，≤ 1000）、`deny_on_error`（默认 false） |
 | `[[cron]]` | table[] | 否 | `name`（`^[a-z][a-z0-9_]{1,63}$`）、`schedule`（5 段 cron）、`timeout_secs`（默认 300）、`catch_up`（默认 none）、`tx`（默认 manual） |
 | `[[jobs]]` | table[] | 否 | `name`、`timeout_secs` |
 | `[http]`、`[[http.routes]]` | | 否 | 见 [conventions/api.md](conventions/api.md)；路由可选 `reauth_secs`（要求最近 N 秒内重新验证过身份，否则 403 `identity.reauth_required`） |
@@ -1228,7 +1228,8 @@ audience = "user"                  # "user" | "admin"
 | `[wasm]` | | 否 | 仅 `kind = "wasm"` |
 | `[terms]` | map | 否 | 键必须以 `<plugin_id>.` 开头；值为 `{ <locale> = "..." }` 或 `{ <locale> = { name, short, unit, icon } }` |
 | `[frontend]` | | 否 | `entry`、`slots`（须在 [catalog/slots.md](catalog/slots.md)）、`routes`（须以 `/p/<plugin_id>/` 或 `/admin/p/<plugin_id>/` 开头）、`settings_ui` |
-| `[[mcp.tools]]` | table[] | 否 | 名称须在 [catalog/mcp-tools.md](catalog/mcp-tools.md) 中归属本插件 |
+| `[[mcp.tools]]` | table[] | 否 | 官方插件的工具名在 [catalog/mcp-tools.md](catalog/mcp-tools.md) 中登记；管理员工具以 `admin_` 开头 |
+| `[error_codes]` | map | 否 | 本插件错误码 → HTTP 状态（4xx / 5xx），如 `"notes.too_many" = 422`；键须以 `<id>.` 开头。只对 [catalog/error-codes.md](catalog/error-codes.md) 未登记的码生效，都未声明时按后缀规则（conventions/api.md §7） |
 
 清单的 JSON Schema 放在 `crates/plugin-api/schemas/plugin-manifest.schema.json`，内核用它校验 TOML 解析后的结果；上表与该 schema 不一致时以本文为准并修正 schema。
 
@@ -1292,7 +1293,7 @@ plugins/native/identity/
 
 ### 5.3 源码中的 WASM 插件（`plugins/wasm/<id>/`）
 
-与 5.1 相同，另加 `Cargo.toml`（或其他语言工程文件）与 `src/`；`plugin.wasm`、`plugin.sig`、`checksums.txt` 由 `xtask package` 生成。
+与 5.1 相同，另加 `Cargo.toml`（或其他语言工程文件）与 `src/`。`pt-server plugin package --src <源码目录> --wasm <组件> --out <目录>` 组装运行时目录（plugin.toml、plugin.wasm、migrations/、schemas/hooks/、checksums.txt）并检查；`pt-server plugin check <包目录>` 只做检查（清单、API 版本、组件链接、导出与声明一致、迁移文件名），都不需要数据库。包签名（plugin.sig）尚未实现，开发环境用 `plugins.allow_unsigned = true`。
 
 ---
 

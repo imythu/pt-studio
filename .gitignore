@@ -6,3 +6,5 @@ target/
 /.spike/torrust-tracker
 /.spike/*/target
 /core
+/templates/*/target
+/templates/*/Cargo.lock

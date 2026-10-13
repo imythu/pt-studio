@@ -8,14 +8,10 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "reports",
-    generate_all,
-});
+pt_plugin_sdk::world!("reports");
 
 use exports::pt::plugin::{http_handler, mcp_tool, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     audit, config, events, invocation, redis, services,
     sql::{self, SqlValue},
     types::PluginError,
@@ -353,7 +349,7 @@ fn run_action(a: &Value, kind: &str, id: i64, owner: Option<i64>, case_id: i64, 
             let until = a["days"]
                 .as_i64()
                 .filter(|d| *d > 0)
-                .map(|d| pt::plugin::time::now() + d * 86_400_000);
+                .map(|d| pt_plugin_sdk::time::now() + d * 86_400_000);
             svc(
                 "ctx.users",
                 "apply_restriction",

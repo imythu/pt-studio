@@ -5,17 +5,13 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "metadata-tmdb",
-    generate_all,
-});
+pt_plugin_sdk::world!("metadata-tmdb");
 
 pub mod mapper;
 
 use exports::pt::plugin::{http_handler, service_provider};
 use mapper::Id;
-use pt::plugin::{
+use pt_plugin_sdk::{
     blob, config, events, http_client,
     sql::{self, SqlValue},
     types::PluginError,

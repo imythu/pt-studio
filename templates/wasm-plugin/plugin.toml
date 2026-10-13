@@ -1,0 +1,85 @@
+# 插件清单（格式见 docs/platform/plugin-api.md §4）。ID 只能是小写字母、数字与连字符，权限点、术语键、错误码、
+# 事件、钩子点都以 `<ID>.` 开头。
+id = "notes"
+name = "便签"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["Your Name"]
+description = "插件模板：每个用户的个人便签（增删查），演示 HTTP、SQL、设置、事件、钩子点、错误码与 MCP 工具"
+
+# 调用其他插件的服务时在这里声明，如 requires = ["ctx.ledger@^0.1"]
+requires = []
+publishes = ["notes.created"]
+
+[capabilities]
+sql = true
+# 读取其他插件的只读视图须在这里声明（且提供方在其清单 [database] views 中开放）
+views = ["identity.v_user_public"]
+
+# 第三方钩子点：其他插件可以在 `notes.before_create` 上放行、拒绝或修改 title
+[[hook_points]]
+name = "notes.before_create"
+input_schema = "schemas/hooks/notes.before_create.json"
+modifiable = ["title"]
+timeout_ms = 200
+
+[[http.routes]]
+id = "list"
+method = "GET"
+path = "/v1/notes"
+auth = "user"
+permission = "notes.use"
+
+[[http.routes]]
+id = "create"
+method = "POST"
+path = "/v1/notes"
+auth = "user"
+permission = "notes.use"
+rate_limit = "user:30/m"
+max_body_kb = 16
+
+[[http.routes]]
+id = "delete"
+method = "DELETE"
+path = "/v1/notes/{id}"
+auth = "user"
+permission = "notes.use"
+
+# MCP 工具：AI 客户端以用户身份调用（只读工具不需要确认）
+[[mcp.tools]]
+name = "list_my_notes"
+title = "我的便签"
+description = "列出当前用户最近的便签（标题与创建时间）。"
+permission = "notes.use"
+input_schema = { type = "object", additionalProperties = false, properties = { limit = { type = "integer", minimum = 1, maximum = 50 } } }
+
+[[permissions]]
+name = "notes.use"
+description_term = "notes.perm.use"
+default_roles = ["user"]
+
+# 目录（catalog/error-codes.md）之外的错误码在这里给出 HTTP 状态；未声明的按后缀规则（*.not_found → 404 等）
+[error_codes]
+"notes.too_many" = 422
+"notes.title_invalid" = 422
+
+[database]
+migrations = "migrations"
+
+# 后台“插件设置”表单由这里的 JSON Schema 生成；读取时自行处理默认值
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.max_notes]
+type = "integer"
+minimum = 1
+maximum = 1000
+title = "每人最多便签数"
+default = 100
+
+[terms]
+"notes.name" = { zh-CN = "便签", en = "Notes" }
+"notes.perm.use" = { zh-CN = "使用便签", en = "Use notes" }

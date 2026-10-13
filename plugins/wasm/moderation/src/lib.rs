@@ -8,16 +8,12 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "moderation",
-    generate_all,
-});
+pt_plugin_sdk::world!("moderation");
 
 pub mod rules;
 
 use exports::pt::plugin::{hooks, http_handler, mcp_tool, on_event, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, events, invocation, services,
     sql::{self, SqlValue},
     types::PluginError,
@@ -473,7 +469,7 @@ fn decide(target: &str, uid: Option<i64>, decision: &str, note: &str, actor: &st
             &zh,
             note,
             &format!("/torrents/{id}"),
-            &format!("{target}:{decision}:{}", pt::plugin::time::now()),
+            &format!("{target}:{decision}:{}", pt_plugin_sdk::time::now()),
         );
     }
     Ok(json!({ "target": target, "decision": decision }))

@@ -116,7 +116,8 @@ fn kernel_status(code: &str) -> Option<u16> {
 /// conventions/api.md §7 的后缀规则。
 pub fn suffix_status(code: &str) -> u16 {
     let name = code.rsplit('.').next().unwrap_or(code);
-    let ends = |sfx: &[&str]| sfx.iter().any(|s| name.ends_with(s));
+    // 后缀匹配；错误名恰好是该词（如 `notes.not_found`）也算
+    let ends = |sfx: &[&str]| sfx.iter().any(|s| name.ends_with(s) || name == &s[1..]);
     if ends(&["_not_found"]) {
         404
     } else if ends(&[
@@ -192,6 +193,8 @@ mod tests {
         assert_eq!(PluginError::new("hnr.download_restricted", "").http_status(), 403);
         assert_eq!(PluginError::new("torrent.invalid_file", "").http_status(), 422);
         assert_eq!(PluginError::new("x.y_not_found", "").http_status(), 404);
+        assert_eq!(PluginError::new("notes.not_found", "").http_status(), 404);
+        assert_eq!(PluginError::new("notes.forbidden", "").http_status(), 403);
         assert_eq!(PluginError::new("kernel.reentrant_call", "").http_status(), 500);
         assert_eq!(PluginError::new("a.b", "").with_status(202).http_status(), 202);
     }

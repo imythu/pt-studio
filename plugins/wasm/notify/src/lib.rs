@@ -11,14 +11,10 @@
 
 pub mod email;
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "notify",
-    generate_all,
-});
+pt_plugin_sdk::world!("notify");
 
 use exports::pt::plugin::{http_handler, on_cron, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, http_client, invocation, jobs, services,
     sql::{self, SqlValue},
     time,

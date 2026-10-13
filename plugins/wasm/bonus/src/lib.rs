@@ -8,18 +8,14 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "bonus",
-    generate_all,
-});
+pt_plugin_sdk::world!("bonus");
 
 pub mod expr;
 pub mod hourly;
 pub mod rules;
 
 use exports::pt::plugin::{http_handler, lifecycle, mcp_tool, on_cron, on_event, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     events, invocation, log, services,
     sql::{self, SqlValue},
     types::PluginError,

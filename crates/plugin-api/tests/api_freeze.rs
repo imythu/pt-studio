@@ -95,3 +95,13 @@ fn package_version_matches_crate() {
         "WIT package version must match API_VERSION"
     );
 }
+
+#[test]
+fn template_wit_copy_is_current() {
+    // 模板要能复制到仓库外使用，所以带一份 WIT 副本（不是符号链接）；改 WIT 时同步更新
+    assert_eq!(
+        include_str!("../../../templates/wasm-plugin/wit/deps/pt-plugin/plugin.wit"),
+        include_str!("../wit/plugin.wit"),
+        "copy crates/plugin-api/wit/plugin.wit to templates/wasm-plugin/wit/deps/pt-plugin/"
+    );
+}

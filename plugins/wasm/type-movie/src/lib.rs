@@ -6,16 +6,12 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "type-movie",
-    generate_all,
-});
+pt_plugin_sdk::world!("type-movie");
 
 pub mod movie;
 
 use exports::pt::plugin::{content_type, on_cron, on_event, search_contributor};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, jobs, services,
     sql::{self, SqlValue},
     time,

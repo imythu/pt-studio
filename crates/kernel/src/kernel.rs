@@ -119,6 +119,7 @@ fn enabled_specs(cfg: &SiteConfig, natives: Vec<NativePlugin>) -> Result<Vec<Plu
 /// 与 catalog 相关的检查：钩子点归属、处理的钩子存在、敏感能力授权。
 fn static_checks(cfg: &SiteConfig, specs: &[PluginSpec]) -> Vec<LoadError> {
     let mut errs = Vec::new();
+    let registry = catalog::HookRegistry::build(specs.iter().map(|s| &s.manifest));
     for s in specs {
         let m = &s.manifest;
         for hp in &m.hook_points {
@@ -129,6 +130,8 @@ fn static_checks(cfg: &SiteConfig, specs: &[PluginSpec]) -> Vec<LoadError> {
                     &m.id,
                     format!("hook point `{}` belongs to `{}`", hp.name, def.owner),
                 )),
+                // 目录之外的钩子点：名字在本插件的命名空间内即可（第三方插件，定义见清单）
+                None if hp.name.starts_with(&format!("{}.", m.id)) => {}
                 None if cfg.kernel.strict_catalog && !m.id.starts_with("x-") => {
                     errs.push(LoadError::new(
                         "E-CATALOG",
@@ -152,7 +155,7 @@ fn static_checks(cfg: &SiteConfig, specs: &[PluginSpec]) -> Vec<LoadError> {
             }
         }
         for h in &m.hooks {
-            if catalog::hook_point(&h.hook).is_none() {
+            if registry.get(&h.hook).is_none() {
                 errs.push(LoadError::new(
                     "E-CATALOG",
                     &m.id,
@@ -288,6 +291,11 @@ impl Kernel {
         }
 
         // 运行时表
+        let hook_registry = catalog::HookRegistry::build(ordered.iter().map(|s| &s.manifest));
+        let error_codes: std::collections::HashMap<String, u16> = ordered
+            .iter()
+            .flat_map(|s| s.manifest.error_codes.iter().map(|(c, st)| (c.clone(), *st)))
+            .collect();
         let mut plugins = BTreeMap::new();
         let mut services: BTreeMap<String, Vec<(String, ServiceObj)>> = BTreeMap::new();
         let mut json_services = crate::runtime::JsonServices::new();
@@ -358,7 +366,7 @@ impl Kernel {
                 }
             }
             for h in &m.hooks {
-                let def = catalog::hook_point(&h.hook);
+                let def = hook_registry.get(&h.hook);
                 let point_timeout = def.map_or(200, |d| d.timeout_ms);
                 let priority = cfg
                     .hooks
@@ -453,6 +461,8 @@ impl Kernel {
             json_services,
             allowed: res.allowed.clone(),
             hook_handlers,
+            hook_registry,
+            error_codes,
             mcp_tools,
             node_id,
             events_cfg,

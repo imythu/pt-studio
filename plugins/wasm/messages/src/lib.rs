@@ -7,14 +7,10 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "messages",
-    generate_all,
-});
+pt_plugin_sdk::world!("messages");
 
 use exports::pt::plugin::{http_handler, mcp_tool, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, events, hook_runner, invocation, redis, services,
     sql::{self, SqlValue},
     types::PluginError,

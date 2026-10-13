@@ -7,16 +7,12 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "levels",
-    generate_all,
-});
+pt_plugin_sdk::world!("levels");
 
 use std::collections::BTreeMap;
 
 use exports::pt::plugin::{hooks, http_handler, lifecycle, mcp_tool, on_cron, on_event, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     events, invocation, services,
     sql::{self, SqlValue},
     types::PluginError,
@@ -75,7 +71,7 @@ fn publish(event_type: &str, user: i64, payload: Value) -> R<()> {
 }
 
 fn cfg() -> Value {
-    serde_json::from_str(&pt::plugin::config::get_static()).unwrap_or(Value::Null)
+    serde_json::from_str(&pt_plugin_sdk::config::get_static()).unwrap_or(Value::Null)
 }
 
 const GIB: f64 = 1_073_741_824.0;

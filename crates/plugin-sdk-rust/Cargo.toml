@@ -1,0 +1,12 @@
+[package]
+name = "pt-plugin-sdk"
+description = "PT Studio plugin SDK for Rust WASM plugins (wasm32-wasip2): host bindings for pt:plugin@1.0.0 plus helpers"
+version = "1.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wit-bindgen = "0.62"

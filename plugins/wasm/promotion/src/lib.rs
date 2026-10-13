@@ -6,14 +6,10 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "promotion",
-    generate_all,
-});
+pt_plugin_sdk::world!("promotion");
 
 use exports::pt::plugin::{http_handler, on_cron, on_event, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     events, invocation, services,
     sql::{self, SqlValue},
     types::PluginError,
@@ -110,7 +106,7 @@ fn kind_rates(
 }
 
 fn max_custom_up() -> i64 {
-    let cfg: Value = serde_json::from_str(&pt::plugin::config::get_static()).unwrap_or(Value::Null);
+    let cfg: Value = serde_json::from_str(&pt_plugin_sdk::config::get_static()).unwrap_or(Value::Null);
     cfg["max_custom_up_permille"].as_i64().unwrap_or(5000)
 }
 
@@ -518,7 +514,7 @@ fn evaluate(tid: i64) -> R<()> {
         )?;
     }
     if let Some((rid, def)) = best {
-        let now = pt::plugin::time::now();
+        let now = pt_plugin_sdk::time::now();
         let hours = match def["duration"]["mode"].as_str() {
             Some("fixed") => def["duration"]["hours"].as_i64(),
             _ => def["duration"]["max_hours"].as_i64().filter(|h| *h > 0),
@@ -756,11 +752,11 @@ fn apply_card(user: i64, tid: i64, card_kind: &str, confirm: bool) -> R<Value> {
         });
     }
     let balance = grant_cards(user, card_kind, -1, &format!("apply:{tid}"))?;
-    let days: i64 = serde_json::from_str::<Value>(&pt::plugin::config::get_static())
+    let days: i64 = serde_json::from_str::<Value>(&pt_plugin_sdk::config::get_static())
         .ok()
         .and_then(|c| c["card_duration_days"].as_i64())
         .unwrap_or(7);
-    let now = pt::plugin::time::now();
+    let now = pt_plugin_sdk::time::now();
     let p = create(&NewPromo {
         source: "card",
         torrent_id: Some(tid),
@@ -921,7 +917,7 @@ impl http_handler::Guest for Promotion {
                     .unwrap_or_default();
                 let ends = b["duration_secs"]
                     .as_i64()
-                    .map(|d| pt::plugin::time::now() + d * 1000)
+                    .map(|d| pt_plugin_sdk::time::now() + d * 1000)
                     .or_else(|| b["ends_at_ms"].as_i64());
                 let items = set_single(
                     &tids,
@@ -959,7 +955,7 @@ impl http_handler::Guest for Promotion {
                         .as_i64()
                         .ok_or_else(|| err("kernel.validation_failed", "ends_at_ms is required"))?,
                 );
-                if ends - starts.unwrap_or_else(pt::plugin::time::now) > 31 * 86_400_000 {
+                if ends - starts.unwrap_or_else(pt_plugin_sdk::time::now) > 31 * 86_400_000 {
                     return Err(err(
                         "promotion.duration_invalid",
                         "site events last at most 31 days",

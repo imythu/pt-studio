@@ -6,14 +6,10 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "hnr",
-    generate_all,
-});
+pt_plugin_sdk::world!("hnr");
 
 use exports::pt::plugin::{hooks, http_handler, mcp_tool, on_cron, on_event, service_provider};
-use pt::plugin::{
+use pt_plugin_sdk::{
     audit, config, events, invocation, services,
     sql::{self, SqlValue},
     time,

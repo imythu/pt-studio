@@ -1,0 +1,24 @@
+# 插件模板（WASM，Rust）：复制本目录，改名并替换 `notes` 后开始开发。见 README.md。
+[package]
+name = "pt-wasm-notes"
+description = "PT Studio plugin template: personal notes (HTTP, SQL, settings, events, hook point, MCP tool)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# 仓库外使用时改为 git 依赖：pt-plugin-sdk = { git = "<PT Studio 仓库地址>", package = "pt-plugin-sdk" }
+pt-plugin-sdk = { path = "../../crates/plugin-sdk-rust" }
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+# 独立的工作区（不并入 PT Studio 的主工作区）
+[workspace]

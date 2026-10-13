@@ -636,6 +636,39 @@ pub fn load_dir(
     (out, errs)
 }
 
+/// 检查一个插件包目录（`<dir>/plugin.toml`、`plugin.wasm`、`migrations/`），不连接数据库：清单格式、API 版本、
+/// 组件能否链接到宿主、导出与清单声明是否一致、迁移文件名。用于 `pt-server plugin check` 与插件作者的 CI。
+pub fn check_package(dir: &Path) -> Result<Manifest, LoadFailure> {
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let fail = |code: &'static str, message: String| LoadFailure {
+        plugin: name.clone(),
+        code,
+        message,
+    };
+    let rt = WasmRuntime::new().map_err(|e| fail("E-LOAD-WORLD", e.to_string()))?;
+    let p = load_one(&rt, dir, &name, true)?;
+    let m = Manifest::parse(p.manifest).map_err(|e| fail("E-LOAD-MANIFEST", e.message))?;
+    if !pt_plugin_api::api_supported(&m.api) {
+        return Err(fail("E-LOAD-API", format!("unsupported api `{}`", m.api)));
+    }
+    for (file, _) in p.migrations {
+        let ok = file.len() > 9
+            && file.as_bytes()[..4].iter().all(u8::is_ascii_digit)
+            && file.as_bytes()[4] == b'_'
+            && file.ends_with(".sql");
+        if !ok {
+            return Err(fail(
+                "E-MIG-NAME",
+                format!("migration `{file}` must be named NNNN_<name>.sql"),
+            ));
+        }
+    }
+    Ok(m)
+}
+
 fn load_one(
     rt: &Arc<WasmRuntime>,
     d: &Path,

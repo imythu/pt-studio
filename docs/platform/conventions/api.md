@@ -116,6 +116,8 @@ RFC 9457 `application/problem+json`：
 | `_upstream_error` | 502 |
 | 其他 | 422 |
 
+错误名（最后一段）恰好等于后缀词本身时同样适用，如 `notes.not_found` → 404。目录未登记且不符合后缀规则的码，插件可在清单 `[error_codes]` 中给出状态。
+
 ## 8. 鉴权
 
 | 方式 | 用途 | 传递 |

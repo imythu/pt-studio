@@ -54,4 +54,3 @@ mod api_version_tests {
         assert!(!api_supported("pt:other@1"));
     }
 }
-

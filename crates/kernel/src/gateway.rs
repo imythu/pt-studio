@@ -260,7 +260,9 @@ async fn plugin_mw(
     };
     // 插件未显式给出状态时，使用 error-codes 目录登记的状态（conventions/api.md §7）
     let resp = match resp.extensions().get::<ErrorMarker>() {
-        Some(m) if m.0.status.is_none() => match crate::catalog::error_status(&m.0.code) {
+        Some(m) if m.0.status.is_none() => match crate::catalog::error_status(&m.0.code)
+            .or_else(|| st.shared.error_codes.get(&m.0.code).copied())
+        {
             Some(st) if st != resp.status().as_u16() => m.0.clone().with_status(st).into_response(),
             _ => resp,
         },

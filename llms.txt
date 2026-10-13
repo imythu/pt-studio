@@ -1,0 +1,56 @@
+# PT Studio
+
+> PT Studio 是私有 BT 站点（PT 站）的开源实现：Rust 微内核 +“一切皆插件”（WASM 与 Native 插件），PostgreSQL + Redis，React 前端。插件 API `pt:plugin@1`（WIT 1.0.0）已冻结。许可证 MIT OR Apache-2.0（pt-tracker 为 AGPL-3.0-only，独立组件）。
+
+要点：
+
+- 内核只做加载、权限（RBAC、作用域、敏感能力授权）、调用上下文与工作单元、钩子管线、事件（outbox，至少一次）、cron 与延迟任务、HTTP 网关（鉴权、CSRF、限流、幂等键）、MCP 工具注册；站点功能全部在插件中。
+- 插件之间只经声明的业务服务（JSON 分派，`ctx.<name>`）、事件、钩子与只读视图交互；每个插件有自己的 PostgreSQL schema 与 Redis 前缀。
+- 名字由 `docs/platform/catalog/` 统一分配；第三方插件使用 `<插件 ID>.` 命名空间（权限、术语、错误码、事件、钩子点）。
+- 写插件：优先 WASM（Rust + `pt-plugin-sdk`，目标 `wasm32-wasip2`），从 `templates/wasm-plugin` 开始；用 `pt-server plugin package` 打包、`pt-server plugin check` 检查。
+- 文档以中文为主；代码标识符、错误信息、提交信息为英文。
+
+## 插件开发
+
+- [插件开发指南](docs/sdk/README.md): 快速开始、清单要点、SDK 用法、扩展点、事务与幂等、错误码、测试、前端插件、兼容承诺
+- [插件 API 契约](docs/platform/plugin-api.md): WIT `pt:plugin@1.0.0` 原文、Native trait、`plugin.toml` 字段表、目录结构、版本兼容策略
+- [WASM 插件模板](templates/wasm-plugin/README.md): 可运行的完整示例（HTTP、SQL、设置、事件、钩子点、错误码、MCP 工具）
+- [Native 插件模板](templates/native-plugin/README.md): 编译进 pt-server 的插件
+- [Rust SDK](crates/plugin-sdk-rust/README.md): `pt-plugin-sdk`（`world!` 宏、`ctx`、`http`、SQL 辅助）
+- [WIT 定义](crates/plugin-api/wit/plugin.wit): 宿主接口与导出接口；冻结快照在 `crates/plugin-api/wit-frozen/`
+
+## 目录（名字与契约）
+
+- [业务服务](docs/platform/catalog/services.md): 各 `ctx.*` 服务的方法、提供方与可申请的作用域
+- [事件](docs/platform/catalog/events.md): 事件类型、发布方与载荷
+- [钩子](docs/platform/catalog/hooks.md): 钩子点、可修改字段、超时与失败策略
+- [错误码](docs/platform/catalog/error-codes.md): 错误码与 HTTP 状态；未登记时的后缀规则
+- [权限点](docs/platform/catalog/permissions.md): 权限点与默认角色
+- [前端插槽](docs/platform/catalog/slots.md): 插件前端可挂载的位置
+- [MCP 工具](docs/platform/catalog/mcp-tools.md): AI 工具名与归属
+
+## 规范
+
+- [API 规范](docs/platform/conventions/api.md): REST 路径、错误格式（problem+json）、分页、幂等、限流
+- [数据库规范](docs/platform/conventions/database.md): schema 隔离、迁移、视图、分区
+- [安全规范](docs/platform/conventions/security.md)
+- [编码规范](docs/platform/conventions/coding.md)
+- [许可证规范](docs/platform/conventions/licensing.md)
+
+## 设计
+
+- [架构总览](docs/design/01-architecture.md)
+- [插件系统](docs/design/02-plugin-system.md)
+- [Tracker 与记账](docs/design/03-tracker-and-accounting.md)
+- [搜索](docs/design/04-search.md)
+- [资源类型与术语](docs/design/05-content-types-and-terms.md)
+- [前端](docs/design/06-frontend.md)
+- [AI 与 MCP](docs/design/07-ai-and-mcp.md)
+- [路线图](docs/design/09-roadmap.md)
+- [内核详细设计](docs/platform/kernel/03-详细设计说明书.md)
+
+## Optional
+
+- [开发进度与环境](docs/dev/README.md): 各插件实现状态、与设计文档的差异、本地 PostgreSQL / Redis / Meilisearch、测试方法
+- [插件设计文档](docs/plugins/): 每个官方插件的需求、概要设计、详细设计、测试计划
+- [经验教训](docs/design/08-lessons-learned.md): 参考既有 PT 站点得到的取舍

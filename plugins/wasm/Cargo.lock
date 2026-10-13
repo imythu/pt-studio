@@ -191,6 +191,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-plugin-sdk"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "pt-release-parser"
 version = "0.1.0"
 
@@ -206,33 +215,32 @@ dependencies = [
 name = "pt-wasm-ai-moderation"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-ai-upload-review"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-bonus"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-checkin"
 version = "0.1.0"
 dependencies = [
- "serde_json",
- "wit-bindgen",
+ "pt-plugin-sdk",
 ]
 
 [[package]]
@@ -240,36 +248,36 @@ name = "pt-wasm-comments"
 version = "0.1.0"
 dependencies = [
  "pt-markup",
+ "pt-plugin-sdk",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-hnr"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-invite"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde",
  "serde_json",
  "sha2",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-levels"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
@@ -277,26 +285,26 @@ name = "pt-wasm-messages"
 version = "0.1.0"
 dependencies = [
  "pt-markup",
+ "pt-plugin-sdk",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-metadata-tmdb"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde",
  "serde_json",
  "sha2",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-moderation"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
@@ -304,26 +312,26 @@ name = "pt-wasm-notify"
 version = "0.1.0"
 dependencies = [
  "hmac",
+ "pt-plugin-sdk",
  "serde_json",
  "sha2",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-promotion"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-reports"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
@@ -331,68 +339,68 @@ name = "pt-wasm-requests"
 version = "0.1.0"
 dependencies = [
  "pt-markup",
+ "pt-plugin-sdk",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-type-anime"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "pt-release-parser",
  "pt-type-kit",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-type-generic"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "pt-type-kit",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-type-movie"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "pt-release-parser",
  "pt-type-kit",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-type-music"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "pt-type-kit",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-type-tv"
 version = "0.1.0"
 dependencies = [
+ "pt-plugin-sdk",
  "pt-release-parser",
  "pt-type-kit",
  "serde",
  "serde_json",
- "wit-bindgen",
 ]
 
 [[package]]
 name = "pt-wasm-x-chaos"
 version = "0.1.0"
 dependencies = [
- "wit-bindgen",
+ "pt-plugin-sdk",
 ]
 
 [[package]]

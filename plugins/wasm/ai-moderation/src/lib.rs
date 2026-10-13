@@ -9,17 +9,13 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-wit_bindgen::generate!({
-    path: "wit",
-    world: "ai-moderation",
-    generate_all,
-});
+pt_plugin_sdk::world!("ai-moderation");
 
 pub mod local;
 
 use exports::pt::plugin::{hooks, http_handler, on_cron, on_event, service_provider};
 use local::Score;
-use pt::plugin::{
+use pt_plugin_sdk::{
     config, events, jobs, redis, services,
     sql::{self, SqlValue},
     time,
@@ -319,7 +315,7 @@ impl service_provider::Guest for AiModeration {
                 &format!("ctx.ai_moderation has no method `{method}`"),
             ));
         }
-        if !pt::plugin::invocation::current()
+        if !pt_plugin_sdk::invocation::current()
             .caller_scopes
             .iter()
             .any(|s| s == "use")
