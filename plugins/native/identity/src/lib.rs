@@ -223,6 +223,34 @@ impl pt_plugin_api::JsonService for Svc {
                 };
                 Ok(serde_json::json!({ "revoked": ok }))
             }
+            // ctx.users.get_sensitive：调用方须获授对应的敏感能力（内核以 `sensitive:<能力>` 作用域传入，插件无法自行声明）
+            "get_sensitive" => {
+                let uid = i64::try_from(id("id")?).map_err(|_| PluginError::bad_request("bad user id"))?;
+                match a["field"].as_str() {
+                    Some("email") => {
+                        if !ctx.invocation.has_scope("sensitive:user.email") {
+                            return Err(PluginError::capability_denied(
+                                "sensitive capability user.email required",
+                            ));
+                        }
+                        let mut c = ctx.sql.conn().await?;
+                        let row = sqlx::query(
+                            "SELECT e.email_enc, e.verified_at IS NOT NULL FROM user_emails e JOIN users u ON u.id = e.user_id
+                              WHERE e.user_id = $1 AND u.deleted_at IS NULL",
+                        )
+                        .bind(uid)
+                        .fetch_optional(&mut *c)
+                        .await?;
+                        drop(c);
+                        let Some(row) = row else {
+                            return Ok(serde_json::Value::Null);
+                        };
+                        let email = self.0.keys()?.email_open(uid, &row.get::<Vec<u8>, _>(0))?;
+                        Ok(serde_json::json!({ "value": email, "verified": row.get::<bool, _>(1) }))
+                    }
+                    _ => Err(PluginError::validation("field must be email")),
+                }
+            }
             "get" => Ok(serde_json::to_value(
                 UsersService::get(self, ctx, id("id")?).await?,
             )?),

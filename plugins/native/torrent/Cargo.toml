@@ -21,6 +21,7 @@ sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 sha1 = "0.10"
+base64 = "0.22"
 
 [lints]
 workspace = true

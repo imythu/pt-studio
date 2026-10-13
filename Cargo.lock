@@ -2182,6 +2182,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-plugin-rss"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "pt-plugin-api",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tracing",
+]
+
+[[package]]
 name = "pt-plugin-search-meilisearch"
 version = "0.1.0"
 dependencies = [
@@ -2208,6 +2225,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "hex",
@@ -2245,6 +2263,7 @@ dependencies = [
  "pt-plugin-ledger",
  "pt-plugin-llm-claude",
  "pt-plugin-mcp",
+ "pt-plugin-rss",
  "pt-plugin-search-meilisearch",
  "pt-plugin-torrent",
  "redis",

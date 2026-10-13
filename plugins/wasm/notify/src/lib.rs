@@ -2,10 +2,14 @@
 //!
 //! 本版本实现：`ctx.notify.send` / `send_many`（作用域 `send`；模板键前缀必须是调用方插件 ID；按类别的用户偏好；
 //! security 类不可关闭；幂等键）、通知中心（列表、未读数、标记已读）、偏好读写、过期清理。通知的标题与正文由前端按模板术语
-//! （`<key>.title` / `<key>.body`，参数插值）渲染，存储的 `title` / `body` 为调用方给出的回退文本。邮件、Telegram、Discord
-//! 渠道、合并通知、退订链接在后续迭代实现。
+//! （`<key>.title` / `<key>.body`，参数插值）渲染，存储的 `title` / `body` 为调用方给出的回退文本。
+//! 邮件渠道：按类别与渠道的偏好（security、account 默认开启邮件）、每人每小时上限、待投递记录 + 延迟任务 `deliver`
+//! （投递时经 `ctx.users.get_sensitive` 读取已验证的邮箱，需 `user.email` 授权；4xx 永久失败、429 / 5xx 由内核重试）、
+//! 提供方 http_relay / postmark / sendgrid、一键退订（签名令牌，List-Unsubscribe）。Telegram、Discord、合并通知在后续迭代实现。
 
 #![allow(clippy::missing_errors_doc)]
+
+pub mod email;
 
 wit_bindgen::generate!({
     path: "wit",
@@ -15,8 +19,9 @@ wit_bindgen::generate!({
 
 use exports::pt::plugin::{http_handler, on_cron, service_provider};
 use pt::plugin::{
-    invocation,
+    config, http_client, invocation, jobs, services,
     sql::{self, SqlValue},
+    time,
     types::PluginError,
 };
 use serde_json::{Value, json};
@@ -58,19 +63,52 @@ fn me() -> R<i64> {
         .ok_or_else(|| err("kernel.unauthenticated", "login required"))
 }
 
-/// 用户关闭了该类别的站内通知？
-fn muted(uid: i64, category: &str) -> R<bool> {
+pub const CHANNELS: &[&str] = &["center", "email"];
+
+/// 未设置时的默认值：站内全开；邮件只开 security 与 account
+pub fn default_enabled(category: &str, channel: &str) -> bool {
+    channel == "center" || matches!(category, "security" | "account")
+}
+
+/// 用户是否接收该类别在该渠道的通知（security 类不可关闭）
+fn enabled(uid: i64, category: &str, channel: &str) -> R<bool> {
     if category == "security" {
-        return Ok(false);
+        return Ok(true);
     }
     let r = sql::query(
-        "SELECT enabled FROM prefs WHERE user_id = $1 AND category = $2 AND channel = 'center'",
-        &[SqlValue::Int(uid), SqlValue::Text(category.into())],
+        "SELECT enabled FROM prefs WHERE user_id = $1 AND category = $2 AND channel = $3",
+        &[
+            SqlValue::Int(uid),
+            SqlValue::Text(category.into()),
+            SqlValue::Text(channel.into()),
+        ],
     )?;
-    Ok(matches!(
-        r.rows.first().map(|row| &row[0]),
-        Some(SqlValue::Boolean(false))
-    ))
+    Ok(match r.rows.first().map(|row| &row[0]) {
+        Some(SqlValue::Boolean(b)) => *b,
+        _ => default_enabled(category, channel),
+    })
+}
+
+fn static_config() -> Value {
+    serde_json::from_str(&config::get_static()).unwrap_or(Value::Null)
+}
+
+fn email_config() -> Option<email::Config> {
+    email::Config::from_static(&static_config())
+}
+
+fn set_pref(uid: i64, category: &str, channel: &str, on: bool) -> R<()> {
+    sql::execute(
+        "INSERT INTO prefs (user_id, category, channel, enabled) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id, category, channel) DO UPDATE SET enabled = EXCLUDED.enabled",
+        &[
+            SqlValue::Int(uid),
+            SqlValue::Text(category.into()),
+            SqlValue::Text(channel.into()),
+            SqlValue::Boolean(on),
+        ],
+    )?;
+    Ok(())
 }
 
 struct Send<'a> {
@@ -82,6 +120,7 @@ struct Send<'a> {
     body: String,
     link: Option<String>,
     idem: Option<String>,
+    channels: Vec<String>,
 }
 
 /// 发送；返回 (已投递, 跳过)
@@ -103,17 +142,22 @@ fn send(s: Send<'_>) -> R<(u32, u32)> {
         ));
     }
     let link = s.link.filter(|l| l.starts_with('/') && !l.starts_with("//"));
+    let mail = email_config();
+    let per_hour = static_config()["email_per_hour"].as_i64().unwrap_or(20);
     let (mut sent, mut skipped) = (0u32, 0u32);
     for (i, uid) in s.users.iter().enumerate() {
-        if let Some(k) = &s.idem {
-            let key = if s.users.len() > 1 {
+        let idem = s.idem.as_ref().map(|k| {
+            if s.users.len() > 1 {
                 format!("{k}:{i}")
             } else {
                 k.clone()
-            };
+            }
+        });
+        if let Some(key) = &idem {
             let dup = sql::query(
-                "SELECT 1 FROM notifications WHERE owner_plugin = $1 AND idempotency_key = $2",
-                &[SqlValue::Text(owner.clone()), SqlValue::Text(key)],
+                "SELECT 1 FROM notifications WHERE owner_plugin = $1 AND idempotency_key = $2
+                 UNION ALL SELECT 1 FROM outbox WHERE owner_plugin = $1 AND idempotency_key = $2",
+                &[SqlValue::Text(owner.clone()), SqlValue::Text(key.clone())],
             )?;
             if !dup.rows.is_empty() {
                 skipped += 1;
@@ -124,8 +168,49 @@ fn send(s: Send<'_>) -> R<(u32, u32)> {
             "SELECT 1 FROM identity.v_user_public WHERE id = $1 AND status <> 'deleted'",
             &[SqlValue::Int(*uid)],
         )?;
-        if exists.rows.is_empty() || muted(*uid, s.category)? {
+        if exists.rows.is_empty() {
             skipped += 1;
+            continue;
+        }
+        let mut delivered = false;
+        // 邮件：渠道已配置、用户接收；每人每小时上限
+        if mail.is_some() && s.channels.iter().any(|c| c == "email") && enabled(*uid, s.category, "email")? {
+            let n = sql::query(
+                "SELECT count(*) FROM outbox WHERE user_id = $1 AND channel = 'email' AND created_at > now() - interval '1 hour'",
+                &[SqlValue::Int(*uid)],
+            )?;
+            if n.rows.first().and_then(|r| int(&r[0])).unwrap_or(0) < per_hour {
+                let r = sql::query(
+                    "INSERT INTO outbox (user_id, channel, owner_plugin, template_key, category, title, body, link, idempotency_key)
+                     VALUES ($1, 'email', $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                    &[
+                        SqlValue::Int(*uid),
+                        SqlValue::Text(owner.clone()),
+                        SqlValue::Text(s.key.into()),
+                        SqlValue::Text(s.category.into()),
+                        SqlValue::Text(s.title.clone()),
+                        SqlValue::Text(s.body.clone()),
+                        link.clone().map_or(SqlValue::Null, SqlValue::Text),
+                        idem.clone().map_or(SqlValue::Null, SqlValue::Text),
+                    ],
+                )?;
+                if let Some(id) = r.rows.first().and_then(|r| int(&r[0])) {
+                    jobs::schedule_once(
+                        "deliver",
+                        time::now(),
+                        &json!({ "outbox_id": id }).to_string(),
+                        Some(&format!("outbox:{id}")),
+                    )?;
+                    delivered = true;
+                }
+            }
+        }
+        if !s.channels.iter().any(|c| c == "center") || !enabled(*uid, s.category, "center")? {
+            if delivered {
+                sent += 1;
+            } else {
+                skipped += 1;
+            }
             continue;
         }
         sql::execute(
@@ -140,7 +225,7 @@ fn send(s: Send<'_>) -> R<(u32, u32)> {
                 SqlValue::Text(s.title.clone()),
                 SqlValue::Text(s.body.clone()),
                 link.clone().map_or(SqlValue::Null, SqlValue::Text),
-                s.idem.as_ref().map_or(SqlValue::Null, |k| SqlValue::Text(if s.users.len() > 1 { format!("{k}:{i}") } else { k.clone() })),
+                idem.map_or(SqlValue::Null, SqlValue::Text),
             ],
         )?;
         sent += 1;
@@ -164,7 +249,13 @@ impl service_provider::Guest for Notify {
                 .as_array()
                 .map(|x| x.iter().filter_map(Value::as_i64).take(1000).collect())
                 .unwrap_or_default(),
-            "channels_of" => return Ok(json!(["center"]).to_string()),
+            "channels_of" => {
+                let mut chs = vec!["center"];
+                if email_config().is_some() {
+                    chs.push("email");
+                }
+                return Ok(json!(chs).to_string());
+            }
             other => {
                 return Err(err(
                     "kernel.not_found",
@@ -173,6 +264,16 @@ impl service_provider::Guest for Notify {
             }
         };
         let args_v = a.get("args").cloned().unwrap_or(json!({}));
+        // 渠道：调用方可限定；缺省为全部（再按用户偏好过滤）
+        let channels: Vec<String> = match a.get("channels").and_then(Value::as_array) {
+            Some(list) => list
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|c| CHANNELS.contains(c))
+                .map(str::to_owned)
+                .collect(),
+            None => CHANNELS.iter().map(|c| (*c).to_owned()).collect(),
+        };
         let (sent, skipped) = send(Send {
             users,
             key: a["template_key"].as_str().unwrap_or(""),
@@ -185,8 +286,9 @@ impl service_provider::Guest for Notify {
                 .as_str()
                 .filter(|k| !k.is_empty())
                 .map(|k| k.chars().take(200).collect()),
+            channels: channels.clone(),
         })?;
-        Ok(json!({ "sent": sent, "skipped": skipped, "channels": ["center"] }).to_string())
+        Ok(json!({ "sent": sent, "skipped": skipped, "channels": channels }).to_string())
     }
 }
 
@@ -215,8 +317,34 @@ fn unread(uid: i64) -> R<i64> {
     Ok(r.rows.first().and_then(|row| int(&row[0])).unwrap_or(0))
 }
 
+/// 退订（LLD §1.7，公开路由，凭签名令牌）：GET 只校验，POST 关闭该类别的邮件
+fn unsubscribe(req: &http_handler::Request, apply: bool) -> R<http_handler::Response> {
+    let secret = static_config()["unsubscribe_secret"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned();
+    let t = query(req, "t").unwrap_or("");
+    let Some((uid, category)) = email::verify_token(&secret, t, time::now() / 1000)
+        .filter(|(_, c)| CATEGORIES.contains(&c.as_str()) && c != "security")
+    else {
+        return Err(err(
+            "notify.unsubscribe_invalid",
+            "unsubscribe link is invalid or expired",
+        ));
+    };
+    if apply {
+        set_pref(uid, &category, "email", false)?;
+    }
+    Ok(resp(200, &json!({ "category": category, "unsubscribed": apply })))
+}
+
 impl http_handler::Guest for Notify {
     fn handle(req: http_handler::Request) -> R<http_handler::Response> {
+        match req.route_id.as_str() {
+            "unsubscribe_check" => return unsubscribe(&req, false),
+            "unsubscribe" => return unsubscribe(&req, true),
+            _ => {}
+        }
         let uid = me()?;
         let b: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
         match req.route_id.as_str() {
@@ -267,31 +395,37 @@ impl http_handler::Guest for Notify {
             }
             "get_prefs" => {
                 let r = sql::query(
-                    "SELECT category, enabled FROM prefs WHERE user_id = $1 AND channel = 'center'",
+                    "SELECT category, channel, enabled FROM prefs WHERE user_id = $1",
                     &[SqlValue::Int(uid)],
                 )?;
+                let email_available = email_config().is_some();
                 let mut out = serde_json::Map::new();
                 for c in CATEGORIES {
-                    let enabled = r
-                        .rows
-                        .iter()
-                        .find(|row| text(&row[0]).as_deref() == Some(c))
-                        .is_none_or(|row| matches!(row[1], SqlValue::Boolean(true)));
+                    let get = |ch: &str| {
+                        *c == "security"
+                            || r.rows
+                                .iter()
+                                .find(|row| {
+                                    text(&row[0]).as_deref() == Some(c)
+                                        && text(&row[1]).as_deref() == Some(ch)
+                                })
+                                .map_or(default_enabled(c, ch), |row| {
+                                    matches!(row[2], SqlValue::Boolean(true))
+                                })
+                    };
                     out.insert(
                         (*c).into(),
-                        json!({ "center": enabled, "locked": *c == "security" }),
+                        json!({ "center": get("center"), "email": get("email"), "email_available": email_available, "locked": *c == "security" }),
                     );
                 }
                 Ok(resp(200, &Value::Object(out)))
             }
             "put_prefs" => {
                 for c in CATEGORIES.iter().filter(|c| **c != "security") {
-                    if let Some(enabled) = b[*c]["center"].as_bool() {
-                        sql::execute(
-                            "INSERT INTO prefs (user_id, category, channel, enabled) VALUES ($1, $2, 'center', $3)
-                             ON CONFLICT (user_id, category, channel) DO UPDATE SET enabled = EXCLUDED.enabled",
-                            &[SqlValue::Int(uid), SqlValue::Text((*c).into()), SqlValue::Boolean(enabled)],
-                        )?;
+                    for ch in CHANNELS {
+                        if let Some(on) = b[*c][*ch].as_bool() {
+                            set_pref(uid, c, ch, on)?;
+                        }
                     }
                 }
                 Ok(http_handler::Response {
@@ -305,16 +439,134 @@ impl http_handler::Guest for Notify {
     }
 }
 
+fn finish(id: i64, state: &str, error: Option<&str>) -> R<()> {
+    sql::execute(
+        "UPDATE outbox SET state = $2, last_error = $3, sent_at = CASE WHEN $2 = 'sent' THEN now() END WHERE id = $1",
+        &[
+            SqlValue::Int(id),
+            SqlValue::Text(state.into()),
+            error.map_or(SqlValue::Null, |e| SqlValue::Text(e.chars().take(300).collect())),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 投递一封邮件（延迟任务 `deliver`）：临时失败返回错误，由内核重试
+fn deliver(id: i64) -> R<()> {
+    let r = sql::query(
+        "SELECT user_id, category, title, body, link, state FROM outbox WHERE id = $1",
+        &[SqlValue::Int(id)],
+    )?;
+    let Some(row) = r.rows.first() else {
+        return Ok(());
+    };
+    if text(&row[5]).as_deref() != Some("pending") {
+        return Ok(());
+    }
+    let uid = int(&row[0]).unwrap_or(0);
+    let category = text(&row[1]).unwrap_or_default();
+    sql::execute(
+        "UPDATE outbox SET attempts = attempts + 1 WHERE id = $1",
+        &[SqlValue::Int(id)],
+    )?;
+    let Some(cfg) = email_config() else {
+        return finish(id, "skipped", Some("email channel is not configured"));
+    };
+    // 投递前再确认偏好（排队期间可能已退订）
+    if !enabled(uid, &category, "email")? {
+        return finish(id, "skipped", Some("unsubscribed"));
+    }
+    let addr = match services::call(
+        "ctx.users",
+        "get_sensitive",
+        &json!({ "id": uid, "field": "email" }).to_string(),
+    ) {
+        Ok(v) => serde_json::from_str::<Value>(&v).unwrap_or(Value::Null),
+        Err(e) if e.code == "kernel.capability_denied" => {
+            return finish(id, "skipped", Some("user.email is not granted to notify"));
+        }
+        Err(e) => return Err(e),
+    };
+    let Some(to) = addr["value"].as_str().filter(|_| addr["verified"] == true) else {
+        return finish(id, "skipped", Some("no verified email address"));
+    };
+    let unsub = (!cfg.unsubscribe_secret.is_empty() && category != "security" && !cfg.site_url.is_empty())
+        .then(|| {
+            let t = email::unsubscribe_token(
+                &cfg.unsubscribe_secret,
+                uid,
+                &category,
+                time::now() / 1000 + 90 * 86_400,
+            );
+            email::Unsubscribe {
+                page: format!("{}/p/notify/unsubscribe?t={t}", cfg.site_url),
+                one_click: format!("{}/api/p/notify/v1/unsubscribe?t={t}", cfg.site_url),
+            }
+        });
+    let m = email::compose(
+        &cfg,
+        to,
+        &text(&row[2]).unwrap_or_default(),
+        &text(&row[3]).unwrap_or_default(),
+        text(&row[4]).as_deref(),
+        unsub,
+    );
+    let req = email::request(&cfg, &m);
+    let resp = http_client::send(&http_client::OutboundRequest {
+        method: "POST".into(),
+        url: req.url,
+        headers: req
+            .headers
+            .into_iter()
+            .map(|(name, value)| http_client::Header { name, value })
+            .collect(),
+        body: Some(req.body),
+        timeout_ms: 15_000,
+    });
+    match resp {
+        Ok(r) => match email::classify(r.status) {
+            email::Outcome::Sent => finish(id, "sent", None),
+            email::Outcome::Permanent => {
+                finish(id, "failed", Some(&format!("provider returned {}", r.status)))
+            }
+            email::Outcome::Retry => {
+                let msg = format!("provider returned {}", r.status);
+                sql::execute(
+                    "UPDATE outbox SET last_error = $2 WHERE id = $1",
+                    &[SqlValue::Int(id), SqlValue::Text(msg.clone())],
+                )?;
+                Err(PluginError {
+                    code: "notify.delivery_failed".into(),
+                    message: msg,
+                    details: None,
+                    retryable: true,
+                })
+            }
+        },
+        Err(e) => Err(PluginError { retryable: true, ..e }),
+    }
+}
+
 impl on_cron::Guest for Notify {
     fn run(job: on_cron::JobInvocation) -> R<()> {
-        if job.name != "cleanup" {
-            return Err(err("kernel.not_found", "unknown job"));
+        match job.name.as_str() {
+            "deliver" => {
+                let p: Value = serde_json::from_str(&job.payload).unwrap_or(Value::Null);
+                deliver(p["outbox_id"].as_i64().unwrap_or(0))
+            }
+            "cleanup" => {
+                sql::execute(
+                    "DELETE FROM notifications WHERE created_at < now() - interval '180 days'",
+                    &[],
+                )?;
+                sql::execute(
+                    "DELETE FROM outbox WHERE created_at < now() - interval '30 days'",
+                    &[],
+                )?;
+                Ok(())
+            }
+            _ => Err(err("kernel.not_found", "unknown job")),
         }
-        sql::execute(
-            "DELETE FROM notifications WHERE created_at < now() - interval '180 days'",
-            &[],
-        )?;
-        Ok(())
     }
 }
 

@@ -11,7 +11,7 @@ name = "pt-server"
 path = "src/main.rs"
 
 [features]
-default = ["identity", "torrent", "ledger", "accounting", "search", "llm-claude", "mcp", "ai-assistant"]
+default = ["identity", "torrent", "ledger", "accounting", "search", "llm-claude", "mcp", "ai-assistant", "rss"]
 identity = ["dep:pt-plugin-identity"]
 torrent = ["identity", "dep:pt-plugin-torrent"]
 ledger = ["identity", "dep:pt-plugin-ledger"]
@@ -20,6 +20,7 @@ search = ["identity", "dep:pt-plugin-search-meilisearch"]
 llm-claude = ["dep:pt-plugin-llm-claude"]
 mcp = ["identity", "dep:pt-plugin-mcp"]
 ai-assistant = ["dep:pt-plugin-ai-assistant"]
+rss = ["identity", "torrent", "dep:pt-plugin-rss"]
 
 [dependencies]
 pt-kernel.workspace = true
@@ -32,6 +33,7 @@ pt-plugin-search-meilisearch = { path = "../../plugins/native/search-meilisearch
 pt-plugin-llm-claude = { path = "../../plugins/native/llm-claude", optional = true }
 pt-plugin-mcp = { path = "../../plugins/native/mcp", optional = true }
 pt-plugin-ai-assistant = { path = "../../plugins/native/ai-assistant", optional = true }
+pt-plugin-rss = { path = "../../plugins/native/rss", optional = true }
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true

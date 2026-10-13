@@ -1,4 +1,5 @@
-// notify 前端：用户菜单的未读通知数、通知中心（/p/notify/，按模板术语渲染，缺少术语时用回退文本）、设置页“通知”标签（按类别开关）。
+// notify 前端：用户菜单的未读通知数、通知中心（/p/notify/，按模板术语渲染，缺少术语时用回退文本）、设置页“通知”标签
+// （类别 × 渠道开关）、邮件退订确认页（/p/notify/unsubscribe?t=，无需登录）。
 import { useCallback, useEffect, useState } from 'react';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
@@ -13,6 +14,15 @@ registerMessages('zh-CN', {
   'notify.ui.tab': '通知',
   'notify.ui.locked': '安全通知不能关闭',
   'notify.ui.saved': '已保存',
+  'notify.ui.category': '类别',
+  'notify.ui.center': '站内',
+  'notify.ui.email': '邮件',
+  'notify.ui.email_unavailable': '本站未启用邮件通知',
+  'notify.ui.unsub_title': '退订邮件通知',
+  'notify.ui.unsub_confirm': '不再通过邮件接收“{category}”类通知？站内通知不受影响。',
+  'notify.ui.unsub_button': '确认退订',
+  'notify.ui.unsub_done': '已退订。可以随时在个人设置的“通知”中重新开启。',
+  'notify.ui.unsub_invalid': '退订链接无效或已过期。',
 });
 registerMessages('en', {
   'notify.ui.menu': 'Notifications ({n})',
@@ -23,6 +33,15 @@ registerMessages('en', {
   'notify.ui.tab': 'Notifications',
   'notify.ui.locked': 'Security notifications cannot be turned off',
   'notify.ui.saved': 'Saved',
+  'notify.ui.category': 'Category',
+  'notify.ui.center': 'On site',
+  'notify.ui.email': 'Email',
+  'notify.ui.email_unavailable': 'Email notifications are not enabled on this site',
+  'notify.ui.unsub_title': 'Unsubscribe from emails',
+  'notify.ui.unsub_confirm': 'Stop receiving “{category}” notifications by email? On-site notifications are not affected.',
+  'notify.ui.unsub_button': 'Unsubscribe',
+  'notify.ui.unsub_done': 'Unsubscribed. You can turn it back on any time under Settings → Notifications.',
+  'notify.ui.unsub_invalid': 'This unsubscribe link is invalid or has expired.',
 });
 
 interface Notification {
@@ -134,32 +153,100 @@ function Inbox({ api }: { api: PluginApi }) {
   );
 }
 
+interface Pref {
+  center: boolean;
+  email: boolean;
+  email_available: boolean;
+  locked: boolean;
+}
+
 function Prefs({ api }: SlotProps) {
-  const [prefs, setPrefs] = useState<Record<string, { center: boolean; locked: boolean }> | null>(null);
+  const [prefs, setPrefs] = useState<Record<string, Pref> | null>(null);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
-    void api.json<Record<string, { center: boolean; locked: boolean }>>('/api/p/notify/v1/preferences').then(setPrefs);
+    void api.json<Record<string, Pref>>('/api/p/notify/v1/preferences').then(setPrefs);
   }, [api]);
-  async function toggle(cat: string, on: boolean) {
+  async function toggle(cat: string, channel: 'center' | 'email', on: boolean) {
     if (!prefs) return;
-    const next = { ...prefs, [cat]: { ...prefs[cat], center: on, locked: false } };
-    setPrefs(next);
-    await api.fetch('/api/p/notify/v1/preferences', { method: 'PUT', json: { [cat]: { center: on } } });
+    setPrefs({ ...prefs, [cat]: { ...prefs[cat], [channel]: on } as Pref });
+    await api.fetch('/api/p/notify/v1/preferences', { method: 'PUT', json: { [cat]: { [channel]: on } } });
     setSaved(true);
   }
   if (!prefs) return null;
+  const emailOk = Object.values(prefs).some((p) => p.email_available);
   return (
     <Card title={api.t('notify.ui.tab')}>
-      <div className="pt-checks">
-        {Object.entries(prefs).map(([cat, p]) => (
-          <label key={cat} className="pt-check" title={p.locked ? api.t('notify.ui.locked') : undefined}>
-            <input type="checkbox" checked={p.center} disabled={p.locked} onChange={(e) => void toggle(cat, e.target.checked)} /> {api.t(`term:notify.category.${cat}`)}
-          </label>
-        ))}
-      </div>
+      <table className="pt-table">
+        <thead>
+          <tr>
+            <th>{api.t('notify.ui.category')}</th>
+            <th>{api.t('notify.ui.center')}</th>
+            {emailOk && <th>{api.t('notify.ui.email')}</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(prefs).map(([cat, p]) => (
+            <tr key={cat} title={p.locked ? api.t('notify.ui.locked') : undefined}>
+              <td>{api.t(`term:notify.category.${cat}`)}</td>
+              <td>
+                <input type="checkbox" checked={p.center} disabled={p.locked} onChange={(e) => void toggle(cat, 'center', e.target.checked)} />
+              </td>
+              {emailOk && (
+                <td>
+                  <input type="checkbox" checked={p.email} disabled={p.locked} onChange={(e) => void toggle(cat, 'email', e.target.checked)} />
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!emailOk && <p className="pt-muted">{api.t('notify.ui.email_unavailable')}</p>}
       {saved && <p className="pt-muted">{api.t('notify.ui.saved')}</p>}
     </Card>
   );
+}
+
+/** 退订确认页：GET 只校验令牌，点击确认后 POST */
+function Unsubscribe({ api }: { api: PluginApi }) {
+  const t = new URLSearchParams(window.location.search).get('t') ?? '';
+  const url = `/api/p/notify/v1/unsubscribe?t=${encodeURIComponent(t)}` as const;
+  const [state, setState] = useState<'loading' | 'ready' | 'done' | 'invalid'>('loading');
+  const [category, setCategory] = useState('');
+  useEffect(() => {
+    api
+      .json<{ category: string }>(url)
+      .then((r) => {
+        setCategory(r.category);
+        setState('ready');
+      })
+      .catch(() => setState('invalid'));
+  }, [api, url]);
+  async function confirm() {
+    try {
+      await api.json(url, { method: 'POST', json: {} });
+      setState('done');
+    } catch {
+      setState('invalid');
+    }
+  }
+  return (
+    <Card title={api.t('notify.ui.unsub_title')}>
+      {state === 'ready' && (
+        <>
+          <p>{api.t('notify.ui.unsub_confirm', { category: api.t(`term:notify.category.${category}`) })}</p>
+          <Button variant="primary" onClick={() => void confirm()}>
+            {api.t('notify.ui.unsub_button')}
+          </Button>
+        </>
+      )}
+      {state === 'done' && <p>{api.t('notify.ui.unsub_done')}</p>}
+      {state === 'invalid' && <p className="pt-error">{api.t('notify.ui.unsub_invalid')}</p>}
+    </Card>
+  );
+}
+
+function Pages({ api, path }: { api: PluginApi; path: string }) {
+  return path.startsWith('/p/notify/unsubscribe') ? <Unsubscribe api={api} /> : <Inbox api={api} />;
 }
 
 export default {
@@ -167,5 +254,5 @@ export default {
     'nav.user_menu': { component: MenuItem, order: 5 },
     'user.settings.tabs': { component: Prefs, order: 20, title_term: 'notify.ui.tab' },
   },
-  routes: [{ path: '/p/notify/*', component: Inbox }],
+  routes: [{ path: '/p/notify/*', component: Pages }],
 } satisfies PluginFrontend;

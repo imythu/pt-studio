@@ -1,0 +1,23 @@
+[package]
+name = "pt-plugin-rss"
+description = "PT Studio RSS and Torznab: personal feed keys, saved feeds, RSS 2.0 / Torznab XML and key-authenticated downloads"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pt-plugin-api.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tracing.workspace = true
+base64 = "0.22"
+
+[lints]
+workspace = true

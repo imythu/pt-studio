@@ -5,13 +5,25 @@ kind = "wasm"
 api = "pt:plugin@0.1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "站内通知中心：插件经 ctx.notify 发送，按类别的接收偏好，未读数与已读（邮件 / Telegram / Discord 渠道待接入）"
+description = "通知：插件经 ctx.notify 发送；站内通知中心（未读数与已读）与邮件渠道（http_relay / Postmark / SendGrid），按类别与渠道的接收偏好、一键退订（Telegram / Discord 待接入）"
 
 provides = ["ctx.notify@0.1.0"]
+optional_requires = ["ctx.users@^0.1"]
 
 [capabilities]
 sql = true
 views = ["identity.v_user_public"]
+# 邮件渠道需要 site.toml [grants.notify] sensitive = ["user.email"]；未授权时只有站内通知
+sensitive_optional = ["user.email"]
+http_outbound = [
+  "api.postmarkapp.com",
+  "api.sendgrid.com",
+  { config = "email_endpoint", allow_private = true },
+]
+
+[[jobs]]
+name = "deliver"
+timeout_secs = 60
 
 [[cron]]
 name = "cleanup"
@@ -36,6 +48,20 @@ id = "read"
 method = "POST"
 path = "/v1/inbox/read"
 auth = "user"
+
+[[http.routes]]
+id = "unsubscribe_check"
+method = "GET"
+path = "/v1/unsubscribe"
+auth = "public"
+rate_limit = "ip:30/m"
+
+[[http.routes]]
+id = "unsubscribe"
+method = "POST"
+path = "/v1/unsubscribe"
+auth = "public"
+rate_limit = "ip:30/m"
 
 [[http.routes]]
 id = "get_prefs"

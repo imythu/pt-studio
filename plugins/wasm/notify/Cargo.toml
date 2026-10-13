@@ -1,6 +1,6 @@
 [package]
 name = "pt-wasm-notify"
-description = "PT Studio notifications (WASM): in-site notification center with per-category preferences"
+description = "PT Studio notifications (WASM): in-site notification center and email channel with per-category preferences"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,5 +10,7 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+hmac = "0.12"
 serde_json = "1"
+sha2 = "0.10"
 wit-bindgen = "0.62"

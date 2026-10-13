@@ -91,7 +91,7 @@ default_roles = ["moderator"]
 
 [database]
 migrations = "migrations"
-views = ["v_user_totals", "v_snatch", "v_user_daily"]
+views = ["v_user_totals", "v_snatch", "v_user_daily", "v_torrent_peers"]
 
 [[database.partitions]]
 table = "user_daily"

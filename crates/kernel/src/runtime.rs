@@ -541,11 +541,20 @@ impl KernelLink for Shared {
             provider,
             self.cfg.kernel.service_timeout_ms.max(own),
         )?;
-        spec.caller_scopes = self
-            .plugins
-            .get(&*caller.plugin_id)
+        let rt = self.plugins.get(&*caller.plugin_id);
+        // 清单中自行声明的 `sensitive:*` 作用域无效；内核按 site.toml 授权的敏感能力补上（ctx.users.get_sensitive 使用）
+        let mut scopes: Vec<String> = rt
             .and_then(|rt| rt.scopes.get(service).cloned())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| !s.starts_with("sensitive:"))
+            .collect();
+        if let Some(rt) = rt {
+            let mut sens: Vec<&String> = rt.sensitive.iter().collect();
+            sens.sort();
+            scopes.extend(sens.into_iter().map(|s| format!("sensitive:{s}")));
+        }
+        spec.caller_scopes = scopes;
         let (ctx, _) = self.make_ctx(provider, spec)?;
         Ok(ctx)
     }

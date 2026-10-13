@@ -1141,7 +1141,7 @@ async fn http_delete(
 
 // ---------------- ctx.torrents（JSON 分派） ----------------
 
-struct TorrentsSvc;
+struct TorrentsSvc(Arc<Torrent>);
 
 #[async_trait]
 impl pt_plugin_api::JsonService for TorrentsSvc {
@@ -1213,6 +1213,19 @@ impl pt_plugin_api::JsonService for TorrentsSvc {
                     ))
                     .await?;
                 Ok(json!({ "updated": true }))
+            }
+            // 代用户生成下载文件（rss 的 feed key 下载；作用域 download，actor 为 feed key 认证出的用户，
+            // 权限、状态与 torrent.before_download 钩子与网页下载相同）
+            "build_download" => {
+                if !ctx.invocation.has_scope("download") {
+                    return Err(PluginError::forbidden("scope download required"));
+                }
+                let via = a.get("via").and_then(serde_json::Value::as_str).unwrap_or("rss");
+                let (bytes, filename) = build_download(&self.0, ctx, gid, via).await?;
+                use base64::Engine as _;
+                Ok(
+                    json!({ "file_b64": base64::engine::general_purpose::STANDARD.encode(bytes), "filename": filename }),
+                )
             }
             // 审核类插件改变种子状态（如 reports 的 disable_torrent；作用域 write:status，原始 actor 记为操作者）
             "set_status" => {
@@ -1340,10 +1353,10 @@ pub fn plugin() -> NativePlugin {
         manifest: MANIFEST,
         migrations: MIGRATIONS,
         lifecycle: Some(t.clone()),
-        http: Some(Arc::new(Routes(t))),
+        http: Some(Arc::new(Routes(t.clone()))),
         search_contributor: Some(Arc::new(search::Contributor)),
         mcp_tool: Some(Arc::new(Tools)),
-        json_services: vec![("ctx.torrents", Arc::new(TorrentsSvc))],
+        json_services: vec![("ctx.torrents", Arc::new(TorrentsSvc(t)))],
         ..Default::default()
     }
 }

@@ -34,6 +34,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0002_hourly_slots.sql",
         include_str!("../migrations/0002_hourly_slots.sql"),
     ),
+    (
+        "0003_torrent_peers_view.sql",
+        include_str!("../migrations/0003_torrent_peers_view.sql"),
+    ),
 ];
 pub const ACCOUNTING: &str = "ctx.accounting";
 

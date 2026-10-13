@@ -1,5 +1,5 @@
 //! 个人 API token 与 MCP token（identity 03 §1.5）：格式 `<前缀><base62(32 字节随机)><base62(CRC32, 6 位)>`，
-//! 前缀 `pts_`（api）、`ptm_`（mcp）；只存 SHA-256。Principal 的 credential_id 为 `tok:<id>`，与会话 ID 区分。
+//! 前缀 `pts_`（api）、`ptm_`（mcp）、`ptf_`（feed，rss 等插件签发、只对签发插件有效、不过期）；只存 SHA-256。Principal 的 credential_id 为 `tok:<id>`，与会话 ID 区分。
 
 use axum::{
     Json,
@@ -23,6 +23,7 @@ const TOUCH_SECS: i64 = 300;
 pub enum Kind {
     Api,
     Mcp,
+    Feed,
 }
 
 impl Kind {
@@ -30,6 +31,7 @@ impl Kind {
         match s {
             "api" => Some(Self::Api),
             "mcp" => Some(Self::Mcp),
+            "feed" => Some(Self::Feed),
             _ => None,
         }
     }
@@ -37,12 +39,14 @@ impl Kind {
         match self {
             Self::Api => "api",
             Self::Mcp => "mcp",
+            Self::Feed => "feed",
         }
     }
     fn prefix(self) -> &'static str {
         match self {
             Self::Api => "pts_",
             Self::Mcp => "ptm_",
+            Self::Feed => "ptf_",
         }
     }
     /// 允许的作用域
@@ -50,6 +54,7 @@ impl Kind {
         match self {
             Self::Api => scope == "read" || scope == "write",
             Self::Mcp => matches!(scope, "read" | "write" | "admin"),
+            Self::Feed => matches!(scope, "rss" | "download"),
         }
     }
     /// 最长有效期（天）
@@ -57,6 +62,7 @@ impl Kind {
         match self {
             Self::Api => 365,
             Self::Mcp => 90,
+            Self::Feed => 0,
         }
     }
 }
@@ -106,7 +112,7 @@ pub fn format_secret(kind: Kind, random: &[u8]) -> String {
 
 /// 前缀与校验和（不查库即可拒绝打错 / 伪造的 token）
 pub fn parse_secret(s: &str) -> Option<Kind> {
-    let kind = [Kind::Api, Kind::Mcp]
+    let kind = [Kind::Api, Kind::Mcp, Kind::Feed]
         .into_iter()
         .find(|k| s.starts_with(k.prefix()))?;
     let rest = &s[kind.prefix().len()..];
@@ -137,7 +143,8 @@ pub async fn issue(
             kind.as_str()
         )));
     }
-    if !(60..=kind.max_days() * 86_400).contains(&ttl_secs) {
+    // feed key 不过期（ttl 忽略），靠重置 / 撤销失效
+    if kind != Kind::Feed && !(60..=kind.max_days() * 86_400).contains(&ttl_secs) {
         return Err(PluginError::validation(format!(
             "ttl must be 60 s .. {} days",
             kind.max_days()
@@ -171,8 +178,9 @@ pub async fn issue(
     let id = ctx.random.uuid_v7();
     let secret = format_secret(kind, &ctx.random.bytes(32));
     let expires = Utc::now() + Duration::seconds(ttl_secs);
+    let feed = kind == Kind::Feed;
     sqlx::query(
-        "INSERT INTO tokens (id, user_id, kind, name, scopes, token_hash, issued_by, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        "INSERT INTO tokens (id, user_id, kind, name, scopes, token_hash, issued_by, expires_at, audience_plugin) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(id)
     .bind(user_id)
@@ -181,7 +189,8 @@ pub async fn issue(
     .bind(scopes)
     .bind(crypto::sha256(secret.as_bytes()))
     .bind(issued_by)
-    .bind(expires)
+    .bind((!feed).then_some(expires))
+    .bind(feed.then_some(issued_by))
     .execute(&mut *conn)
     .await?;
     drop(conn);
@@ -195,14 +204,18 @@ pub async fn issue(
     Ok((id, secret, expires))
 }
 
-/// Bearer 凭据 → Principal（无效 / 过期 / 撤销 / 用户封禁或待验证 → None）
-pub async fn authenticate(ctx: &Ctx, secret: &str) -> PResult<Option<Principal>> {
+/// Bearer / feed 凭据 → Principal（无效 / 过期 / 撤销 / 用户封禁或待验证 → None）。
+/// `audience` 为 Some 时只接受由该插件签发的 feed key；为 None 时只接受 api / mcp token。
+pub async fn authenticate(ctx: &Ctx, secret: &str, audience: Option<&str>) -> PResult<Option<Principal>> {
     let Some(kind) = parse_secret(secret) else {
         return Ok(None);
     };
+    if (kind == Kind::Feed) != audience.is_some() {
+        return Ok(None);
+    }
     let mut conn = ctx.sql.conn().await?;
     let row = sqlx::query(
-        "SELECT t.id, t.user_id, t.kind, t.scopes, t.expires_at, t.revoked_at, t.last_used_at, u.status
+        "SELECT t.id, t.user_id, t.kind, t.scopes, t.expires_at, t.revoked_at, t.last_used_at, u.status, t.audience_plugin
            FROM tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = $1",
     )
     .bind(crypto::sha256(secret.as_bytes()))
@@ -216,7 +229,11 @@ pub async fn authenticate(ctx: &Ctx, secret: &str) -> PResult<Option<Principal>>
     let last_used: Option<DateTime<Utc>> = r.get(6);
     let status: String = r.get(7);
     let now = Utc::now();
-    if r.get::<String, _>(2) != kind.as_str() || revoked.is_some() || expires.is_some_and(|e| now > e) {
+    if r.get::<String, _>(2) != kind.as_str()
+        || revoked.is_some()
+        || expires.is_some_and(|e| now > e)
+        || r.get::<Option<String>, _>(8).as_deref() != audience
+    {
         return Ok(None);
     }
     if matches!(status.as_str(), "banned" | "deleted" | "pending") {
@@ -231,10 +248,10 @@ pub async fn authenticate(ctx: &Ctx, secret: &str) -> PResult<Option<Principal>>
     Ok(Some(Principal {
         user_id: u64::try_from(uid).unwrap_or_default(),
         credential_id: format!("tok:{id}"),
-        credential_kind: if kind == Kind::Mcp {
-            "mcp".into()
-        } else {
-            "token".into()
+        credential_kind: match kind {
+            Kind::Mcp => "mcp".into(),
+            Kind::Feed => "feed".into(),
+            Kind::Api => "token".into(),
         },
         scopes: r.get(3),
         reauth_at: None,
@@ -320,7 +337,9 @@ fn default_days() -> i64 {
 
 pub async fn http_create(ctx: RequestCtx, Json(b): Json<CreateBody>) -> PResult<Response> {
     let uid = session_user(&ctx)?;
-    let kind = Kind::parse(&b.kind).ok_or_else(|| PluginError::validation("kind must be api or mcp"))?;
+    let kind = Kind::parse(&b.kind)
+        .filter(|k| *k != Kind::Feed)
+        .ok_or_else(|| PluginError::validation("kind must be api or mcp"))?;
     if !(1..=kind.max_days()).contains(&b.ttl_days) {
         return Err(PluginError::validation(format!(
             "ttl_days must be 1..={}",
@@ -371,6 +390,9 @@ mod tests {
         bad.replace_range(10..11, if &s[10..11] == "A" { "B" } else { "A" });
         assert_eq!(parse_secret(&bad), None);
         assert_eq!(parse_secret("pts_short"), None);
+        let f = format_secret(Kind::Feed, &[9u8; 32]);
+        assert!(f.starts_with("ptf_"), "{f}");
+        assert_eq!(parse_secret(&f), Some(Kind::Feed));
         assert_eq!(
             parse_secret(&format_secret(Kind::Api, &[255u8; 32])),
             Some(Kind::Api)

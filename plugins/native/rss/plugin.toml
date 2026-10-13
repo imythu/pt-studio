@@ -1,0 +1,144 @@
+id = "rss"
+name = "RSS 与 Torznab"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "个人 feed key、保存的订阅（类型 / 关键词 / 字段 / 促销 / 体积 / 排除词）、RSS 2.0 与 Torznab 接口、凭 key 下载种子"
+
+requires = ["ctx.auth@^0.1", "ctx.torrents@^0.1"]
+optional_requires = ["ctx.promotions@^0.1"]
+
+[capabilities]
+sql = true
+redis = true
+views = ["torrent.v_torrent_public", "torrent.v_torrent_fields", "torrent.v_torrent_tracker", "torrent.v_group_fields", "accounting.v_torrent_peers"]
+
+[capabilities.scopes]
+"ctx.auth" = ["tokens:issue"]
+"ctx.torrents" = ["download"]
+
+[[http.routes]]
+id = "key_get"
+method = "GET"
+path = "/v1/me/key"
+auth = "user"
+permission = "rss.use"
+
+[[http.routes]]
+id = "key_reset"
+method = "POST"
+path = "/v1/me/key"
+auth = "user"
+permission = "rss.use"
+rate_limit = "user:10/h"
+
+[[http.routes]]
+id = "key_revoke"
+method = "DELETE"
+path = "/v1/me/key"
+auth = "user"
+permission = "rss.use"
+
+[[http.routes]]
+id = "feeds_list"
+method = "GET"
+path = "/v1/me/feeds"
+auth = "user"
+permission = "rss.use"
+
+[[http.routes]]
+id = "feeds_create"
+method = "POST"
+path = "/v1/me/feeds"
+auth = "user"
+permission = "rss.use"
+max_body_kb = 16
+
+[[http.routes]]
+id = "feeds_update"
+method = "PUT"
+path = "/v1/me/feeds/{id}"
+auth = "user"
+permission = "rss.use"
+max_body_kb = 16
+
+[[http.routes]]
+id = "feeds_delete"
+method = "DELETE"
+path = "/v1/me/feeds/{id}"
+auth = "user"
+permission = "rss.use"
+
+[[http.routes]]
+id = "feed_xml"
+method = "GET"
+path = "/v1/feeds/{file}"
+auth = "public"
+rate_limit = "ip:120/m"
+
+[[http.routes]]
+id = "torznab"
+method = "GET"
+path = "/v1/torznab/api"
+auth = "public"
+rate_limit = "ip:120/m"
+
+[[http.routes]]
+id = "download"
+method = "GET"
+path = "/v1/dl/{id}"
+auth = "public"
+rate_limit = "ip:120/m"
+
+[[permissions]]
+name = "rss.use"
+description_term = "rss.perm.use"
+default_roles = ["user"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["user.settings.tabs"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.site_name]
+type = "string"
+maxLength = 60
+title = "站点名称（订阅标题与 Torznab caps 中使用）"
+default = "PT Studio"
+
+[settings_schema.properties.site_url]
+type = "string"
+maxLength = 200
+title = "站点地址（订阅链接使用；为空时按请求的 Host 推断）"
+
+[settings_schema.properties.items_per_feed]
+type = "integer"
+minimum = 1
+maximum = 100
+title = "每个订阅返回的条目数"
+default = 50
+
+[settings_schema.properties.max_feeds_per_user]
+type = "integer"
+minimum = 1
+maximum = 100
+title = "每人最多保存的订阅数"
+default = 20
+
+[settings_schema.properties.requests_per_minute]
+type = "integer"
+minimum = 1
+title = "每个 key 每分钟的请求上限（订阅、Torznab 与下载合计）"
+default = 60
+
+[terms]
+"rss.name" = { zh-CN = "RSS 订阅", en = "RSS feeds" }
+"rss.perm.use" = { zh-CN = "使用 RSS 订阅与 Torznab", en = "Use RSS feeds and Torznab" }

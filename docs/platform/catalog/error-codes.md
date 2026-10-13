@@ -147,6 +147,14 @@
 | `ai-moderation.spam_detected` | 422 | ai-moderation | 发表前钩子拒绝（本地规则高置信垃圾） |
 | `notify.template_not_owned` | 403 | notify | 模板键前缀不是调用方插件 ID |
 | `notify.args_invalid` | 422 | notify | 通知参数、类别、标题或正文不合法 |
+| `notify.unsubscribe_invalid` | 400 | notify | 退订链接无效或已过期 |
+| `notify.delivery_failed` | 502 | notify | 邮件提供方暂时不可用（投递任务重试） |
+| `rss.key_invalid` | 401 | rss | feed key 无效 / 已吊销 / 用户不可用（统一错误） |
+| `rss.rate_limited` | 429 | rss | 该 key 请求过于频繁 |
+| `rss.feed_not_found` | 404 | rss | 订阅不存在或不属于该 key 的用户 |
+| `rss.too_many_feeds` | 422 | rss | 订阅数量达到上限 |
+| `rss.filter_invalid` | 422 | rss | 订阅条件不合法 |
+| `rss.torznab_function_unsupported` | 400 | rss | Torznab 不支持的 `t`（以 Newznab 错误 202 返回） |
 | `messages.not_found` | 404 | messages | 会话或消息不存在（或不是参与者） |
 | `messages.recipient_not_found` | 404 | messages | 收件人不存在 |
 | `messages.blocked` | 403 | messages | 收件人已拉黑你 |

@@ -261,8 +261,11 @@ pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Princip
                 status,
             }))
         }
-        // 个人 / MCP token（03 §1.5）；feed key 尚未实现
-        Credential::Bearer(secret) => crate::tokens::authenticate(ctx, &secret).await,
-        Credential::Feed(_) => Ok(None),
+        // 个人 / MCP token（03 §1.5）
+        Credential::Bearer(secret) => crate::tokens::authenticate(ctx, &secret, None).await,
+        // feed key：只对签发它的插件（调用方）有效
+        Credential::Feed(secret) => {
+            crate::tokens::authenticate(ctx, &secret, Some(&ctx.invocation.caller_plugin)).await
+        }
     }
 }
