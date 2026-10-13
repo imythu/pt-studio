@@ -84,6 +84,16 @@ try {
   const dl = p.getByRole('link', { name: '下载种子' });
   if ((await dl.getAttribute('href')) !== `/api/p/torrent/v1/torrents/${TID}/download`) throw new Error('download link');
 
+  // 4a. 评论（comments 插槽）与举报按钮（reports 插槽）
+  step('comments and reports');
+  await p.getByRole('tab', { name: '评论' }).click();
+  await p.getByLabel('写下你的评论…').fill('**好资源** <b>x</b>');
+  await p.getByRole('button', { name: '发表' }).click();
+  await p.getByTestId('comment').locator('strong', { hasText: '好资源' }).waitFor();
+  if (await p.getByTestId('comment').locator('b').count()) throw new Error('raw HTML must not render in comments');
+  await p.getByRole('button', { name: '举报' }).first().click();
+  await p.getByLabel('理由').first().waitFor();
+
   // 4b. 按资源类型发布：电影（发布名补全 + IMDb 链接）→ 详情字段 → 作品页
   step('typed upload (movie) and group page');
   await p.goto(`${BASE}/upload`);

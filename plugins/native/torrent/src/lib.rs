@@ -1025,19 +1025,12 @@ struct StatusBody {
 }
 
 /// 审核状态（`torrent.update`）：candidate / pending / approved / rejected / disabled
-async fn http_set_status(
-    ctx: RequestCtx,
-    Path(id): Path<i64>,
-    Json(b): Json<StatusBody>,
-) -> PResult<Response> {
-    if !matches!(
-        b.to.as_str(),
-        "candidate" | "pending" | "approved" | "rejected" | "disabled"
-    ) {
+/// 改变种子状态（HTTP 与 `ctx.torrents.set_status` 共用）；状态未变返回 false
+async fn set_status(ctx: &Ctx, id: i64, to: &str, reason: Option<String>, by: Option<u64>) -> PResult<bool> {
+    if !matches!(to, "candidate" | "pending" | "approved" | "rejected" | "disabled") {
         return Err(PluginError::validation("unknown status"));
     }
-    let reason = b.reason.map(|r| r.chars().take(500).collect::<String>());
-    let by = ctx.user_id();
+    let reason = reason.map(|r| r.chars().take(500).collect::<String>());
     let mut c = ctx.sql.conn().await?;
     let from: Option<String> =
         sqlx::query_scalar("SELECT status FROM torrents WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
@@ -1045,12 +1038,12 @@ async fn http_set_status(
             .fetch_optional(&mut *c)
             .await?;
     let from = from.ok_or_else(|| PluginError::not_found("torrent not found"))?;
-    if from == b.to {
-        return Ok(StatusCode::NO_CONTENT.into_response());
+    if from == to {
+        return Ok(false);
     }
     sqlx::query("UPDATE torrents SET status = $2, status_reason = $3, updated_at = now(), version = version + 1 WHERE id = $1")
         .bind(id)
-        .bind(&b.to)
+        .bind(to)
         .bind(&reason)
         .execute(&mut *c)
         .await?;
@@ -1060,16 +1053,26 @@ async fn http_set_status(
             "torrent.status_changed",
             format!("torrent:{id}"),
             json!({
-            "torrent_id": id, "from": from, "to": b.to, "reason": reason, "by_user_id": by }),
+            "torrent_id": id, "from": from, "to": to, "reason": reason, "by_user_id": by }),
         ))
         .await?;
     ctx.audit
         .write(pt_plugin_api::AuditEntry {
             action: "torrent.status_change".into(),
             target: format!("torrent:{id}"),
-            details: json!({ "from": from, "to": b.to, "reason": reason }),
+            details: json!({ "from": from, "to": to, "reason": reason }),
         })
         .await?;
+    Ok(true)
+}
+
+async fn http_set_status(
+    ctx: RequestCtx,
+    Path(id): Path<i64>,
+    Json(b): Json<StatusBody>,
+) -> PResult<Response> {
+    let by = ctx.user_id();
+    set_status(&ctx, id, &b.to, b.reason, by).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -1210,6 +1213,22 @@ impl pt_plugin_api::JsonService for TorrentsSvc {
                     ))
                     .await?;
                 Ok(json!({ "updated": true }))
+            }
+            // 审核类插件改变种子状态（如 reports 的 disable_torrent；作用域 write:status，原始 actor 记为操作者）
+            "set_status" => {
+                if !ctx.invocation.has_scope("write:status") {
+                    return Err(PluginError::forbidden("scope write:status required"));
+                }
+                let to = a
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| PluginError::validation("status"))?;
+                let reason = a
+                    .get("reason")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                let changed = set_status(ctx, gid, to, reason, ctx.invocation.actor.user_id).await?;
+                Ok(json!({ "changed": changed }))
             }
             // 资源类型插件写回种子字段（如 type-music 的 log 分数；作用域 write:fields，只能更新本类型的种子）
             "update_fields" => {

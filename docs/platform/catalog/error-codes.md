@@ -117,6 +117,27 @@
 | `ai-assistant.unavailable` | 503 | ai-assistant | 全站预算用尽或模型未配置 |
 | `ai-assistant.session_not_found` | 404 | ai-assistant | 会话不存在 |
 | `ai-assistant.question_too_long` | 422 | ai-assistant | 问题为空或超过 2000 字 |
+| `comments.target_not_found` | 404 | comments | 目标不存在或不可见 |
+| `comments.target_disabled` | 403 | comments | 该目标类型未启用评论 |
+| `comments.target_locked` | 403 | comments | 目标不允许评论 |
+| `comments.rate_limited` | 429 | comments | 发言过快 |
+| `comments.duplicate` | 422 | comments | 与近期的评论内容重复 |
+| `comments.too_many_links` | 422 | comments | 链接过多 |
+| `comments.too_long` | 422 | comments | 评论为空或超长 |
+| `comments.reply_invalid` | 422 | comments | 回复 / 引用对象不合法 |
+| `comments.edit_window_expired` | 403 | comments | 超过编辑时限 |
+| `comments.not_found` | 404 | comments | 评论不存在 |
+| `reports.target_not_found` | 404 | reports | 举报对象不存在 |
+| `reports.reason_invalid` | 422 | reports | 理由不属于该目标类型 |
+| `reports.note_required` | 422 | reports | 该理由要求填写说明 |
+| `reports.already_reported` | 409 | reports | 已举报过该对象 |
+| `reports.self_report` | 422 | reports | 不能举报自己 |
+| `reports.rate_limited` | 429 | reports | 举报过于频繁 |
+| `reports.temporarily_banned` | 403 | reports | 因多次无效举报暂时禁止举报 |
+| `reports.case_not_found` | 404 | reports | 工单不存在或已结案 |
+| `reports.claimed_by_other` | 409 | reports | 工单已被其他人认领 |
+| `reports.action_unavailable` | 422 | reports | 动作不适用于该对象或依赖插件未启用 |
+| `reports.escalation_required` | 403 | reports | 升级工单需管理员处理 |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `mcp.confirmation_invalid` | 409 | mcp | 确认项不存在、已处理、过期或参数不一致 |
 | `mcp.confirmation_pending` | 409 | mcp | 用户尚未确认（工具结果中返回） |

@@ -1,0 +1,175 @@
+id = "comments"
+name = "评论"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "种子与作品的评论：Markdown / BBCode、楼层与回复、引用、@提醒、防刷、感谢、编辑历史（ctx.comments）"
+
+provides = ["ctx.comments@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+publishes = ["comment.created", "comment.updated", "comment.deleted"]
+
+[capabilities]
+sql = true
+redis = true
+views = ["torrent.v_torrent_public", "torrent.v_group_public", "identity.v_user_public"]
+
+[[hook_points]]
+name = "comment.before_create"
+input_schema = "schemas/hooks/comment.before_create.json"
+
+[[http.routes]]
+id = "list"
+method = "GET"
+path = "/v1/targets/{target}/comments"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "create"
+method = "POST"
+path = "/v1/targets/{target}/comments"
+auth = "user"
+permission = "comments.create"
+rate_limit = "user:30/m"
+idempotent = true
+max_body_kb = 96
+
+[[http.routes]]
+id = "get"
+method = "GET"
+path = "/v1/comments/{id}"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "update"
+method = "PATCH"
+path = "/v1/comments/{id}"
+auth = "user"
+permission = "comments.update_own"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "delete"
+method = "DELETE"
+path = "/v1/comments/{id}"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "thanks"
+method = "POST"
+path = "/v1/comments/{id}/thanks"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "preview"
+method = "POST"
+path = "/v1/preview"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "edits"
+method = "GET"
+path = "/v1/comments/{id}/edits"
+auth = "user"
+permission = "comments.moderate"
+
+[[http.routes]]
+id = "user_comments"
+method = "GET"
+path = "/v1/users/{id}/comments"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[permissions]]
+name = "comments.create"
+description_term = "comments.perm.create"
+default_roles = ["user"]
+
+[[permissions]]
+name = "comments.update_own"
+description_term = "comments.perm.update_own"
+default_roles = ["user"]
+
+[[permissions]]
+name = "comments.moderate"
+description_term = "comments.perm.moderate"
+default_roles = ["moderator"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.detail.tabs", "group.detail.tabs"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.max_length]
+type = "integer"
+minimum = 100
+maximum = 60000
+title = "评论最大字数"
+default = 10000
+
+[settings_schema.properties.edit_window_minutes]
+type = "integer"
+minimum = 0
+title = "作者可编辑的时限（分钟）"
+default = 60
+
+[settings_schema.properties.rate_per_30s]
+type = "integer"
+minimum = 1
+title = "每 30 秒最多评论数"
+default = 3
+
+[settings_schema.properties.rate_per_hour]
+type = "integer"
+minimum = 1
+title = "每小时最多评论数"
+default = 60
+
+[settings_schema.properties.new_user_days]
+type = "integer"
+minimum = 0
+title = "新用户天数"
+default = 7
+
+[settings_schema.properties.new_user_daily_limit]
+type = "integer"
+minimum = 1
+title = "新用户每日最多评论数"
+default = 20
+
+[settings_schema.properties.max_links]
+type = "integer"
+minimum = 0
+title = "每条评论最多链接数"
+default = 10
+
+[settings_schema.properties.image_hosts]
+type = "array"
+items = { type = "string" }
+title = "允许的外部图片主机（https）"
+default = []
+
+[settings_schema.properties.disabled_targets]
+type = "array"
+items = { type = "string", enum = ["torrent", "group"] }
+title = "关闭评论的目标类型"
+default = []
+
+[terms]
+"comments.name" = { zh-CN = "评论", en = "Comments" }
+"comments.perm.create" = { zh-CN = "发表评论", en = "Post comments" }
+"comments.perm.update_own" = { zh-CN = "编辑自己的评论", en = "Edit own comments" }
+"comments.perm.moderate" = { zh-CN = "管理评论", en = "Moderate comments" }

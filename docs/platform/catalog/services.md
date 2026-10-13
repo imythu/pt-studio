@@ -76,7 +76,7 @@ WASM 插件通过 `pt:plugin` 的宿主接口使用；Native 插件通过 `Ctx` 
 | `ctx.promotions` | promotion | single | `current(torrent_id) -> Option<PromotionState>`、`current_many(ids)`、`create(PromotionDef) -> id`、`end(id)`、`active_global()` | `write` | 0.1.0 |
 | `ctx.search` | search-meilisearch | single | `query(SearchRequest) -> SearchResult`（服务端强制可见性过滤）、`suggest(index, prefix)`、`register_index(IndexDef)`、`reindex(index)`、`remove(index, id)`（高优先级删除） | `admin` | 0.1.0 |
 | `ctx.mediainfo` | mediainfo | single | `parse(text) -> MediaInfo`、`parse_nfo(text) -> Nfo` | — | 0.1.0 |
-| `ctx.comments` | comments | single | `count(target) -> u64`、`list(target, cursor)`、`create(author_id, target, body)`、`delete(id, reason)` | `write` | 0.1.0 |
+| `ctx.comments` | comments | single | `count(target) -> u64`、`count_many(targets)`、`exists(id)`（目标、作者、状态、摘要）、`get(id)`（原文与纯文本，需 `read:raw`）、`create(author_id, target, body)`、`delete(id, reason)` | `read:raw`、`write` | 0.1.0 |
 | `ctx.forum` | forum | single | `create_topic(forum_id, author_id, title, body) -> topic_id`、`get_topic(id)`、`link_topic(target, topic_id)` | `write` | 0.1.0 |
 | `ctx.messages` | messages | single | `send_system(user_id, subject_term, body_template, args)`、`unread_count(user_id)` | `send` | 0.1.0 |
 | `ctx.requests` | requests | single | `get(id)`、`fill(request_id, torrent_id, filler_id)` | `write` | 0.1.0 |

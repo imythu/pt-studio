@@ -126,8 +126,11 @@ export function Tabs({ tabs, value, onChange }: { tabs: { id: string; label: Rea
 
 // ---------------- 用户内容（唯一允许插入 HTML 的组件，web LLD §7） ----------------
 
-const ALLOWED_TAGS = ['a', 'b', 'strong', 'i', 'em', 'u', 's', 'del', 'p', 'br', 'hr', 'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'span', 'details', 'summary'];
-const ALLOWED_ATTR = ['href', 'src', 'alt', 'title', 'colspan', 'rowspan'];
+const ALLOWED_TAGS = ['a', 'b', 'strong', 'i', 'em', 'u', 's', 'del', 'p', 'br', 'hr', 'ul', 'ol', 'li', 'blockquote', 'cite', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'span', 'div', 'details', 'summary', 'input'];
+const ALLOWED_ATTR = ['href', 'src', 'alt', 'title', 'colspan', 'rowspan', 'width', 'height', 'loading', 'class', 'style', 'type', 'disabled', 'checked'];
+/** 服务端渲染器（pt-markup）只生成这些 class 与样式属性 */
+const ALLOWED_CLASSES = new Set(['mention', 'center', 'mediainfo', 'emoji']);
+const ALLOWED_STYLES = ['color', 'font-size'];
 
 export function sanitize(html: string): string {
   const clean = DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false });
@@ -136,6 +139,22 @@ export function sanitize(html: string): string {
   doc.querySelectorAll('a').forEach((a) => {
     a.setAttribute('rel', 'nofollow noopener noreferrer ugc');
     a.setAttribute('target', '_blank');
+  });
+  // 样式只保留颜色与字号，class 只保留渲染器生成的，输入框只允许只读复选框（任务列表）
+  doc.querySelectorAll<HTMLElement>('[style]').forEach((el) => {
+    const keep = ALLOWED_STYLES.map((p) => [p, el.style.getPropertyValue(p)] as const).filter(([, v]) => v && !/url\(|expression/i.test(v));
+    el.removeAttribute('style');
+    for (const [p, v] of keep) el.style.setProperty(p, v);
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+  });
+  doc.querySelectorAll('[class]').forEach((el) => {
+    const cls = [...el.classList].filter((c) => ALLOWED_CLASSES.has(c));
+    if (cls.length) el.setAttribute('class', cls.join(' '));
+    else el.removeAttribute('class');
+  });
+  doc.querySelectorAll('input').forEach((el) => {
+    if (el.getAttribute('type') !== 'checkbox') el.remove();
+    else el.setAttribute('disabled', '');
   });
   return doc.body.firstElementChild?.innerHTML ?? '';
 }

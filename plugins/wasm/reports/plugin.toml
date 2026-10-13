@@ -1,0 +1,161 @@
+id = "reports"
+name = "举报"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "举报与工单：按目标合并、优先级、认领、处理动作（删除评论、禁用种子、限制用户）、无效举报滥用防护（ctx.reports）"
+
+provides = ["ctx.reports@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+optional_requires = ["ctx.comments@^0.1", "ctx.torrents@^0.1", "ctx.users@^0.1"]
+publishes = ["report.created", "report.resolved"]
+
+[capabilities]
+sql = true
+redis = true
+views = ["torrent.v_torrent_public", "torrent.v_group_public", "identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.comments" = ["write"]
+"ctx.torrents" = ["write:status"]
+"ctx.users" = ["write:status"]
+
+[[http.routes]]
+id = "reasons"
+method = "GET"
+path = "/v1/reasons"
+auth = "user"
+
+[[http.routes]]
+id = "create"
+method = "POST"
+path = "/v1/reports"
+auth = "user"
+permission = "reports.create"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "my_reports"
+method = "GET"
+path = "/v1/my-reports"
+auth = "user"
+
+[[http.routes]]
+id = "list_cases"
+method = "GET"
+path = "/v1/cases"
+auth = "user"
+permission = "reports.moderate"
+
+[[http.routes]]
+id = "get_case"
+method = "GET"
+path = "/v1/cases/{id}"
+auth = "user"
+permission = "reports.moderate"
+
+[[http.routes]]
+id = "claim"
+method = "POST"
+path = "/v1/cases/{id}/claim"
+auth = "user"
+permission = "reports.moderate"
+
+[[http.routes]]
+id = "resolve"
+method = "POST"
+path = "/v1/cases/{id}/resolve"
+auth = "user"
+permission = "reports.moderate"
+rate_limit = "user:60/m"
+
+[[mcp.tools]]
+name = "admin_list_reports"
+title = "举报列表"
+description = "管理员：列出待处理的举报工单（按优先级与举报数排序），可按 state（open / claimed / escalated / closed）与 kind（torrent / comment / user / group）筛选。"
+audience = "admin"
+permission = "reports.moderate"
+input_schema = { type = "object", additionalProperties = false, properties = { state = { type = "string", enum = ["open", "claimed", "escalated", "closed"] }, kind = { type = "string", maxLength = 16 } } }
+
+[[mcp.tools]]
+name = "admin_resolve_report"
+title = "处理举报"
+description = "管理员：处理举报工单。code 为 resolved（确认属实，可附动作 delete_content / disable_torrent / restrict_user）、invalid（无效举报）或 escalated（升级给管理员）。"
+audience = "admin"
+write = true
+destructive = true
+permission = "reports.moderate"
+input_schema = { type = "object", additionalProperties = false, required = ["case_id", "code"], properties = { case_id = { type = "integer", minimum = 1 }, code = { type = "string", enum = ["resolved", "invalid", "escalated"] }, note_public = { type = "string", maxLength = 2000 }, note_internal = { type = "string", maxLength = 2000 }, actions = { type = "array", items = { type = "object" } } } }
+
+[[permissions]]
+name = "reports.create"
+description_term = "reports.perm.create"
+default_roles = ["user"]
+
+[[permissions]]
+name = "reports.moderate"
+description_term = "reports.perm.moderate"
+default_roles = ["moderator"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.detail.actions", "nav.user_menu"]
+routes = ["/p/reports/*", "/admin/p/reports/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.rate_per_hour]
+type = "integer"
+minimum = 1
+title = "每小时最多举报数"
+default = 20
+
+[settings_schema.properties.claim_minutes]
+type = "integer"
+minimum = 1
+title = "认领有效期（分钟）"
+default = 30
+
+[settings_schema.properties.abuse_threshold]
+type = "integer"
+minimum = 1
+title = "30 天内无效举报次数达到此值时暂停举报"
+default = 5
+
+[settings_schema.properties.abuse_ban_days]
+type = "integer"
+minimum = 1
+title = "暂停举报的天数"
+default = 7
+
+[terms]
+"reports.name" = { zh-CN = "举报", en = "Reports" }
+"reports.perm.create" = { zh-CN = "举报", en = "Report content" }
+"reports.perm.moderate" = { zh-CN = "处理举报", en = "Handle reports" }
+"reports.reason.torrent.dupe" = { zh-CN = "重复", en = "Duplicate" }
+"reports.reason.torrent.trump" = { zh-CN = "有更好的版本", en = "Trumped" }
+"reports.reason.torrent.bad_file" = { zh-CN = "文件损坏或错误", en = "Bad files" }
+"reports.reason.torrent.wrong_info" = { zh-CN = "信息错误", en = "Wrong information" }
+"reports.reason.torrent.spam" = { zh-CN = "垃圾内容", en = "Spam" }
+"reports.reason.torrent.illegal" = { zh-CN = "违法内容", en = "Illegal content" }
+"reports.reason.torrent.other" = { zh-CN = "其他", en = "Other" }
+"reports.reason.comment.spam" = { zh-CN = "垃圾内容", en = "Spam" }
+"reports.reason.comment.abuse" = { zh-CN = "辱骂 / 人身攻击", en = "Abuse" }
+"reports.reason.comment.off_topic" = { zh-CN = "无关内容", en = "Off topic" }
+"reports.reason.comment.illegal" = { zh-CN = "违法内容", en = "Illegal content" }
+"reports.reason.comment.personal_info" = { zh-CN = "泄露个人信息", en = "Personal information" }
+"reports.reason.comment.other" = { zh-CN = "其他", en = "Other" }
+"reports.reason.user.spam" = { zh-CN = "垃圾内容", en = "Spam" }
+"reports.reason.user.abuse" = { zh-CN = "辱骂", en = "Abuse" }
+"reports.reason.user.impersonation" = { zh-CN = "冒充他人", en = "Impersonation" }
+"reports.reason.user.cheating" = { zh-CN = "作弊", en = "Cheating" }
+"reports.reason.user.other" = { zh-CN = "其他", en = "Other" }
+"reports.reason.group.wrong_info" = { zh-CN = "信息错误", en = "Wrong information" }
+"reports.reason.group.other" = { zh-CN = "其他", en = "Other" }
