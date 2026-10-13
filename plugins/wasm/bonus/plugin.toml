@@ -36,6 +36,12 @@ tx = "manual"
 name = "on_torrent_created"
 event = "torrent.created"
 
+[[mcp.tools]]
+name = "get_my_bonus"
+title = "我的魔力值"
+description = "查询当前用户各币种（魔力值等）的余额与可用余额。"
+input_schema = { type = "object", additionalProperties = false, properties = {} }
+
 [[http.routes]]
 id = "my_summary"
 method = "GET"

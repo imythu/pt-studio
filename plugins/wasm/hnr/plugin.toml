@@ -58,6 +58,12 @@ schedule = "50 3 * * *"
 timeout_secs = 1800
 tx = "manual"
 
+[[mcp.tools]]
+name = "list_my_hnr"
+title = "我的 H&R"
+description = "查询当前用户的 H&R（下载后未达做种要求）记录与限制状态；state 可选 open / pending / failed / forgiven / passed 筛选。"
+input_schema = { type = "object", additionalProperties = false, properties = { state = { type = "string", maxLength = 16 } } }
+
 [[http.routes]]
 id = "me"
 method = "GET"

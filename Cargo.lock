@@ -2061,6 +2061,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-plugin-ai-assistant"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "pt-plugin-api",
+ "serde_json",
+ "sqlx",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "pt-plugin-api"
 version = "0.1.0"
 dependencies = [
@@ -2218,6 +2232,7 @@ dependencies = [
  "http",
  "pt-kernel",
  "pt-plugin-accounting",
+ "pt-plugin-ai-assistant",
  "pt-plugin-api",
  "pt-plugin-identity",
  "pt-plugin-ledger",

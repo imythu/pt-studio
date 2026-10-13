@@ -218,6 +218,9 @@ pub struct McpToolDef {
     /// `user` | `admin`
     #[serde(default = "default_audience")]
     pub audience: String,
+    /// 调用超时（缺省 10 s，最长 120 s；如需要调用模型的工具）
+    #[serde(default)]
+    pub timeout_ms: Option<i64>,
 }
 
 fn default_audience() -> String {

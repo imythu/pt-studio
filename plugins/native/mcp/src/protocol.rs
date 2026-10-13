@@ -187,6 +187,7 @@ mod tests {
             confirm_locked: false,
             destructive: None,
             audience: audience.into(),
+            timeout_ms: None,
         }
     }
 

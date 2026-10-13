@@ -424,6 +424,13 @@ impl Shared {
         }
     }
 
+    fn whitelisted_tools(&self, caller: &Ctx) -> Vec<String> {
+        self.plugins
+            .get(&*caller.plugin_id)
+            .map(|rt| rt.manifest.capabilities.mcp_tools.clone())
+            .unwrap_or_default()
+    }
+
     /// 经 `ctx.rbac.check_principal` 检查（token 作用域与权限点）
     async fn principal_allowed(
         &self,
@@ -698,8 +705,21 @@ impl KernelLink for Shared {
     }
 
     fn mcp_tools(&self, caller: &Ctx) -> PResult<Vec<pt_plugin_api::McpToolDef>> {
-        self.require_mcp_provider(caller)?;
-        Ok(self.mcp_tools.clone())
+        if self.require_mcp_provider(caller).is_ok() {
+            return Ok(self.mcp_tools.clone());
+        }
+        let allowed = self.whitelisted_tools(caller);
+        if allowed.is_empty() {
+            return Err(PluginError::capability_denied(
+                "only the ctx.mcp provider or plugins declaring capabilities.mcp_tools may list MCP tools",
+            ));
+        }
+        Ok(self
+            .mcp_tools
+            .iter()
+            .filter(|d| !d.write && allowed.contains(&d.name))
+            .cloned()
+            .collect())
     }
 
     async fn mcp_call(
@@ -710,7 +730,16 @@ impl KernelLink for Shared {
         principal: &Principal,
         confirmed: bool,
     ) -> PResult<Json> {
-        self.require_mcp_provider(caller)?;
+        // ctx.mcp 提供方可调用全部工具；其他插件只能调用清单 capabilities.mcp_tools 中的只读工具
+        if self.require_mcp_provider(caller).is_err() {
+            let ok = self.whitelisted_tools(caller).iter().any(|t| t == tool)
+                && self.mcp_tools.iter().any(|d| d.name == tool && !d.write);
+            if !ok {
+                return Err(PluginError::capability_denied(format!(
+                    "tool `{tool}` is not in capabilities.mcp_tools (read-only tools only)"
+                )));
+            }
+        }
         let authed = caller
             .authenticated
             .lock()
@@ -762,7 +791,11 @@ impl KernelLink for Shared {
             .get(&def.plugin)
             .and_then(|rt| rt.mcp_tool.clone())
             .ok_or_else(|| PluginError::unavailable(format!("plugin `{}` is not available", def.plugin)))?;
-        let mut spec = self.child_spec(caller, InvocationKind::Mcp, &def.plugin, MCP_TOOL_TIMEOUT_MS)?;
+        let timeout = def
+            .timeout_ms
+            .unwrap_or(MCP_TOOL_TIMEOUT_MS)
+            .clamp(1_000, 120_000);
+        let mut spec = self.child_spec(caller, InvocationKind::Mcp, &def.plugin, timeout)?;
         spec.actor = pt_plugin_api::Actor {
             kind: pt_plugin_api::ActorKind::Mcp,
             user_id: Some(principal.user_id),
@@ -770,6 +803,10 @@ impl KernelLink for Shared {
             credential_id: Some(principal.credential_id.clone()),
         };
         let (ctx, uow) = self.make_ctx(&def.plugin, spec)?;
+        // 工具以该用户身份运行（可再调用白名单中的工具，如 ask_site_help）
+        if let Ok(mut l) = ctx.authenticated.lock() {
+            l.push(principal.user_id);
+        }
         let budget = std::time::Duration::from_millis(
             u64::try_from((ctx.invocation.deadline - now_ms()).max(0)).unwrap_or(0),
         );

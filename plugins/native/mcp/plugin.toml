@@ -34,7 +34,7 @@ path = "/mcp"
 auth = "public"
 rate_limit = "ip:600/m"
 max_body_kb = 256
-timeout_ms = 30000
+timeout_ms = 120000
 
 [[http.root_routes]]
 id = "mcp_get"

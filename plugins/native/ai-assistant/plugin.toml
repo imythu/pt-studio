@@ -1,0 +1,174 @@
+id = "ai-assistant"
+name = "站内助手"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "站内规则问答：依据规则文档回答并标注来源，可查看提问者自己的账号状态（只读工具），也作为 MCP 工具 ask_site_help 提供"
+
+requires = ["ctx.llm@^0.1", "ctx.users@^0.1"]
+
+[capabilities]
+kv = true
+sql = true
+redis = true
+mcp_tools = ["get_my_profile", "get_my_stats", "get_my_level", "get_my_bonus", "list_my_hnr"]
+
+[capabilities.scopes]
+"ctx.llm" = ["use"]
+
+[[cron]]
+name = "cleanup"
+schedule = "40 4 * * *"
+timeout_secs = 300
+
+[[http.routes]]
+id = "ask"
+method = "POST"
+path = "/v1/ask"
+auth = "user"
+permission = "ai-assistant.use"
+rate_limit = "user:10/m"
+max_body_kb = 16
+timeout_ms = 120000
+
+[[http.routes]]
+id = "sessions"
+method = "GET"
+path = "/v1/sessions"
+auth = "user"
+permission = "ai-assistant.use"
+
+[[http.routes]]
+id = "session"
+method = "GET"
+path = "/v1/sessions/{id}"
+auth = "user"
+permission = "ai-assistant.use"
+
+[[http.routes]]
+id = "delete_session"
+method = "DELETE"
+path = "/v1/sessions/{id}"
+auth = "user"
+permission = "ai-assistant.use"
+
+[[http.routes]]
+id = "feedback"
+method = "POST"
+path = "/v1/messages/{id}/feedback"
+auth = "user"
+permission = "ai-assistant.use"
+
+[[http.routes]]
+id = "doc"
+method = "GET"
+path = "/v1/docs/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "admin_docs"
+method = "GET"
+path = "/v1/admin/docs"
+auth = "admin"
+permission = "ai-assistant.manage"
+
+[[http.routes]]
+id = "admin_create_doc"
+method = "POST"
+path = "/v1/admin/docs"
+auth = "admin"
+permission = "ai-assistant.manage"
+max_body_kb = 256
+
+[[http.routes]]
+id = "admin_update_doc"
+method = "PUT"
+path = "/v1/admin/docs/{id}"
+auth = "admin"
+permission = "ai-assistant.manage"
+max_body_kb = 256
+
+[[http.routes]]
+id = "admin_delete_doc"
+method = "DELETE"
+path = "/v1/admin/docs/{id}"
+auth = "admin"
+permission = "ai-assistant.manage"
+
+[[mcp.tools]]
+name = "ask_site_help"
+title = "站点规则问答"
+description = "回答关于本站规则与使用方法的问题（分享率、H&R、等级、魔力值、上传规范等），依据站点规则文档并给出来源；必要时会查看当前用户自己的账号状态。"
+permission = "ai-assistant.use"
+timeout_ms = 90000
+input_schema = { type = "object", additionalProperties = false, required = ["question"], properties = { question = { type = "string", maxLength = 2000 } } }
+
+[[permissions]]
+name = "ai-assistant.use"
+description_term = "ai-assistant.perm.use"
+default_roles = ["user"]
+
+[[permissions]]
+name = "ai-assistant.manage"
+description_term = "ai-assistant.perm.manage"
+default_roles = ["admin"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu"]
+routes = ["/p/ai-assistant/*", "/admin/p/ai-assistant/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.site_name]
+type = "string"
+maxLength = 60
+title = "站点名称（系统提示中使用）"
+
+[settings_schema.properties.fallback_contact]
+type = "string"
+maxLength = 200
+title = "资料中没有答案时建议的去处"
+default = "论坛的求助区"
+
+[settings_schema.properties.profile]
+type = "string"
+title = "模型配置（profile）"
+default = "default"
+
+[settings_schema.properties.daily_questions_per_user]
+type = "integer"
+minimum = 0
+title = "每人每日提问次数"
+default = 20
+
+[settings_schema.properties.daily_budget]
+type = "integer"
+minimum = 0
+title = "全站每日提问上限"
+default = 2000
+
+[settings_schema.properties.max_tool_rounds]
+type = "integer"
+minimum = 0
+maximum = 5
+title = "每次回答最多调用工具的轮数"
+default = 3
+
+[settings_schema.properties.retention_days]
+type = "integer"
+minimum = 1
+title = "会话保留天数"
+default = 90
+
+[terms]
+"ai-assistant.name" = { zh-CN = "站内助手", en = "Site assistant" }
+"ai-assistant.perm.use" = { zh-CN = "使用站内助手", en = "Use the site assistant" }
+"ai-assistant.perm.manage" = { zh-CN = "管理站内助手与规则文档", en = "Manage the site assistant" }

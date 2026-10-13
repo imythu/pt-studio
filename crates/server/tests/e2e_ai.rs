@@ -45,6 +45,21 @@ async fn mock_anthropic(m: Mock) -> String {
                     return (StatusCode::from_u16(529).unwrap(), [("retry-after", "1")], axum::Json(json!({ "type": "error", "error": { "type": "overloaded_error", "message": "overloaded" } })))
                         .into_response();
                 }
+                // 站内助手：有工具且还没有工具结果 → 调用 get_my_profile；有工具结果 → 带引用作答（含一个伪造的引用）
+                if b["tools"].as_array().is_some_and(|t| !t.is_empty()) {
+                    let raw = b.to_string();
+                    let has_result = raw.contains("\"tool_result\"");
+                    let content = if has_result {
+                        let doc = raw.split("[doc:").nth(1).and_then(|t| t.split(']').next()).unwrap_or("0#0").to_owned();
+                        json!([{ "type": "text", "text": format!("你的账号状态正常。分享率低于 0.5 会进入警告期 [doc:{doc}]，另见 [doc:999#1]。") }])
+                    } else {
+                        json!([{ "type": "text", "text": "我查一下" }, { "type": "tool_use", "id": "tu_1", "name": "get_my_profile", "input": {} }])
+                    };
+                    return axum::Json(json!({ "id": "msg_2", "type": "message", "role": "assistant", "model": b["model"],
+                        "stop_reason": if has_result { "end_turn" } else { "tool_use" }, "content": content,
+                        "usage": { "input_tokens": 300, "output_tokens": 40, "cache_read_input_tokens": 0 } }))
+                    .into_response();
+                }
                 let text = if b["output_config"]["format"].is_object() {
                     json!({ "verdict": "warn", "confidence": 0.7, "findings": [{ "code": "title_format", "severity": "low", "message": "标题不规范" }] }).to_string()
                 } else {
@@ -293,5 +308,210 @@ async fn ai_end_to_end() {
         r.body
     );
     assert!(items.iter().any(|i| i["key"] == "llm-claude"));
+    kernel.shutdown().await;
+}
+
+#[tokio::test]
+async fn assistant_end_to_end() {
+    let _guard = common::LOCK.lock().await;
+    let dir = common::package_wasm_plugins();
+    let mock = Mock::default();
+    let base = mock_anthropic(mock.clone()).await;
+    reset().await;
+    let kernel = Kernel::start(config(&dir, &base), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+    let admin = register_login(&app, "as_admin").await;
+    common::grant_role(admin.id, "admin").await;
+    let u = register_login(&app, "as_user").await;
+
+    // 规则文档：按二级标题切段
+    let rules = "本站规则总览。\n\n## 分享率要求\n\n下载量超过 20 GB 后，分享率低于 0.5 会进入警告期，警告期内仍未达标将禁止下载。\n\n## 保种与 H&R\n\n下载完成后需要做种 72 小时，否则记为 H&R。";
+    let r = call(
+        &app,
+        "POST",
+        "/api/p/ai-assistant/v1/admin/docs",
+        Some(json!({ "title": "站点规则", "body_md": rules, "tags": ["rules"] })),
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let doc = r.body["id"].as_i64().unwrap();
+    let r = call(
+        &app,
+        "GET",
+        "/api/p/ai-assistant/v1/admin/docs",
+        None,
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(r.body["items"][0]["chunks"], 3);
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            "/api/p/ai-assistant/v1/admin/docs",
+            None,
+            &hv(&u.headers())
+        )
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+
+    // 提问：检索 → 模型调用 get_my_profile（以提问者身份）→ 带引用作答；伪造的引用被去掉
+    let r = call(
+        &app,
+        "POST",
+        "/api/p/ai-assistant/v1/ask",
+        Some(json!({ "question": "为什么我不能下载？分享率有什么要求" })),
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let cited = format!("{doc}#2");
+    let answer = r.body["answer"].as_str().unwrap().to_owned();
+    assert!(
+        answer.contains(&format!("[doc:{cited}]")) && !answer.contains("999#1"),
+        "{answer}"
+    );
+    assert_eq!(r.body["citations"][0]["id"], cited.as_str());
+    assert_eq!(
+        r.body["citations"][0]["url"],
+        format!("/p/ai-assistant/docs/{doc}")
+    );
+    assert_eq!(r.body["tools_used"], json!(["get_my_profile"]));
+    let sid = r.body["session_id"].as_str().unwrap().to_owned();
+    let mid = r.body["message_id"].as_i64().unwrap();
+    {
+        let bodies = mock.bodies.lock().unwrap();
+        let last = bodies.last().unwrap().to_string();
+        assert!(
+            last.contains("as_user"),
+            "tool result must carry the asker's own profile"
+        );
+        assert!(last.contains("<docs>") && last.contains("<user_content>") && last.contains("tool_result"));
+        assert!(
+            bodies.last().unwrap()["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["name"] == "get_my_level")
+        );
+    }
+
+    // 追问：历史（含助手消息原样）回放
+    let before = mock.bodies.lock().unwrap().len();
+    let r = call(
+        &app,
+        "POST",
+        "/api/p/ai-assistant/v1/ask",
+        Some(json!({ "session_id": sid, "question": "H&R 要做种多久？" })),
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    {
+        let bodies = mock.bodies.lock().unwrap();
+        let first_of_turn = &bodies[before];
+        assert!(
+            first_of_turn["messages"].as_array().unwrap().len() >= 5,
+            "history must be replayed: {first_of_turn}"
+        );
+        assert_eq!(
+            first_of_turn["messages"][1]["content"][1]["type"], "tool_use",
+            "assistant blocks replayed verbatim"
+        );
+    }
+    let r = call(
+        &app,
+        "GET",
+        &format!("/api/p/ai-assistant/v1/sessions/{sid}"),
+        None,
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.body["messages"].as_array().map(Vec::len), Some(2));
+    let r = call(
+        &app,
+        "POST",
+        &format!("/api/p/ai-assistant/v1/messages/{mid}/feedback"),
+        Some(json!({ "useful": true })),
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    // 别人的会话不可见
+    let r = call(
+        &app,
+        "GET",
+        &format!("/api/p/ai-assistant/v1/sessions/{sid}"),
+        None,
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        &app,
+        "GET",
+        &format!("/api/p/ai-assistant/v1/docs/{doc}"),
+        None,
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.body["title"], "站点规则");
+
+    // MCP：ask_site_help（单轮，以 token 用户身份调用工具）
+    let t = call(
+        &app,
+        "POST",
+        "/api/p/identity/v1/users/me/tokens",
+        Some(json!({ "kind": "mcp", "name": "c", "scopes": ["read"] })),
+        &hv(&u.headers()),
+    )
+    .await;
+    let tok = t.body["token"].as_str().unwrap().to_owned();
+    let auth = format!("Bearer {tok}");
+    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "ask_site_help", "arguments": { "question": "分享率要求是什么" } } });
+    let r = common::send(&app, "POST", "/mcp", &[], |b| {
+        b.header("authorization", &auth)
+            .header("content-type", "application/json")
+            .header("mcp-protocol-version", "2026-07-28")
+            .header("mcp-method", "tools/call")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap()
+    })
+    .await;
+    let sc = &r.body["result"]["structuredContent"];
+    assert!(
+        sc["answer"]
+            .as_str()
+            .unwrap_or("")
+            .contains(&format!("[doc:{cited}]")),
+        "{:?}",
+        r.body
+    );
+    assert_eq!(sc["tools_used"], json!(["get_my_profile"]));
+
+    // 删除会话
+    let r = call(
+        &app,
+        "DELETE",
+        &format!("/api/p/ai-assistant/v1/sessions/{sid}"),
+        None,
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(
+        &app,
+        "GET",
+        "/api/p/ai-assistant/v1/sessions",
+        None,
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.body["items"].as_array().map(Vec::len), Some(0));
     kernel.shutdown().await;
 }

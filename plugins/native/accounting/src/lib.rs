@@ -572,6 +572,21 @@ async fn can_read_others(ctx: &Ctx) -> PResult<bool> {
         .await
 }
 
+struct Tools;
+
+#[async_trait]
+impl pt_plugin_api::McpTool for Tools {
+    async fn call(&self, ctx: &Ctx, tool: &str, _a: serde_json::Value) -> PResult<serde_json::Value> {
+        match tool {
+            "get_my_stats" => {
+                let uid = u2i(ctx.require_user()?)?;
+                stats_json(ctx, uid, true).await
+            }
+            other => Err(PluginError::not_found(format!("unknown tool `{other}`"))),
+        }
+    }
+}
+
 async fn http_my_stats(ctx: RequestCtx) -> PResult<Response> {
     let uid = u2i(ctx.require_user()?)?;
     Ok(Json(stats_json(&ctx, uid, true).await?).into_response())
@@ -701,6 +716,7 @@ pub fn plugin() -> NativePlugin {
         on_event: Some(a.clone()),
         on_cron: Some(a.clone()),
         http: Some(Arc::new(Routes)),
+        mcp_tool: Some(Arc::new(Tools)),
         workers: vec![("ingest", a.clone())],
         services: vec![(ACCOUNTING, service_object::<dyn AccountingService>(a.clone()))],
         json_services: vec![(ACCOUNTING, a)],

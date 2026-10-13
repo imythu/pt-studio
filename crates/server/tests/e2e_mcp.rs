@@ -215,6 +215,19 @@ async fn mcp_end_to_end() {
     let b = tool(&app, &tok, "get_my_level", json!({}), None).await;
     assert_eq!(b["result"]["isError"], false, "{b}");
     assert!(b["result"]["structuredContent"].is_object());
+    // 其他插件提供的只读工具（accounting Native；bonus、hnr WASM）
+    for (name, key) in [
+        ("get_my_stats", "uploaded"),
+        ("get_my_bonus", "balances"),
+        ("list_my_hnr", "status"),
+    ] {
+        let b = tool(&app, &tok, name, json!({}), None).await;
+        assert_eq!(b["result"]["isError"], false, "{name}: {b}");
+        assert!(
+            b["result"]["structuredContent"].to_string().contains(key),
+            "{name}: {b}"
+        );
+    }
     let b = tool(&app, &tok, "get_torrent", json!({ "torrent_id": "x" }), None).await;
     assert_eq!(b["result"]["isError"], true, "argument validation: {b}");
     let b = tool(&app, &tok, "get_torrent", json!({ "torrent_id": 999 }), None).await;

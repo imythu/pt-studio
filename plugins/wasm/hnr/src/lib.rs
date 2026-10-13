@@ -12,7 +12,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use exports::pt::plugin::{hooks, http_handler, on_cron, on_event, service_provider};
+use exports::pt::plugin::{hooks, http_handler, mcp_tool, on_cron, on_event, service_provider};
 use pt::plugin::{
     audit, config, events, invocation, services,
     sql::{self, SqlValue},
@@ -750,6 +750,21 @@ impl service_provider::Guest for Hnr {
             _ => return Err(err("kernel.not_found", "unknown method")),
         };
         Ok(out.to_string())
+    }
+}
+
+impl mcp_tool::Guest for Hnr {
+    fn call(tool: String, arguments: String) -> R<String> {
+        let a: Value = serde_json::from_str(&arguments).unwrap_or(Value::Null);
+        match tool.as_str() {
+            "list_my_hnr" => {
+                let me = me()?;
+                let mut v = records(me, a["state"].as_str(), None)?;
+                v["status"] = status(me)?;
+                Ok(v.to_string())
+            }
+            _ => Err(err("kernel.not_found", "unknown tool")),
+        }
     }
 }
 

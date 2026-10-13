@@ -18,7 +18,7 @@ pub mod expr;
 pub mod hourly;
 pub mod rules;
 
-use exports::pt::plugin::{http_handler, lifecycle, on_cron, on_event, service_provider};
+use exports::pt::plugin::{http_handler, lifecycle, mcp_tool, on_cron, on_event, service_provider};
 use pt::plugin::{
     events, invocation, log, services,
     sql::{self, SqlValue},
@@ -227,34 +227,37 @@ fn json_response(status: u16, v: &Value) -> http_handler::Response {
     }
 }
 
+/// 本人各币种余额（HTTP `my_summary` 与 MCP `get_my_bonus` 共用）
+fn my_balances() -> R<Value> {
+    let me = invocation::current()
+        .actor
+        .user_id
+        .ok_or_else(|| err("kernel.unauthenticated", "login required"))?;
+    let ours = sql::query(
+        "SELECT code, scale, name_term FROM currencies WHERE is_active ORDER BY code",
+        &[],
+    )?;
+    let balances = ledger("balances", &json!({ "user": me }))?;
+    let items: Vec<Value> = ours
+        .rows
+        .iter()
+        .map(|r| {
+            let code = text(&r[0]);
+            let b = balances
+                .as_array()
+                .and_then(|a| a.iter().find(|x| x["currency"] == code.as_str()));
+            json!({ "currency": code, "scale": int(&r[1]), "name_term": text(&r[2]),
+                        "balance": b.map_or(json!(0), |x| x["balance"].clone()),
+                        "available": b.map_or(json!(0), |x| x["available"].clone()) })
+        })
+        .collect();
+    Ok(json!({ "balances": items }))
+}
+
 impl http_handler::Guest for Bonus {
     fn handle(req: http_handler::Request) -> R<http_handler::Response> {
         match req.route_id.as_str() {
-            "my_summary" => {
-                let me = invocation::current()
-                    .actor
-                    .user_id
-                    .ok_or_else(|| err("kernel.unauthenticated", "login required"))?;
-                let ours = sql::query(
-                    "SELECT code, scale, name_term FROM currencies WHERE is_active ORDER BY code",
-                    &[],
-                )?;
-                let balances = ledger("balances", &json!({ "user": me }))?;
-                let items: Vec<Value> = ours
-                    .rows
-                    .iter()
-                    .map(|r| {
-                        let code = text(&r[0]);
-                        let b = balances
-                            .as_array()
-                            .and_then(|a| a.iter().find(|x| x["currency"] == code.as_str()));
-                        json!({ "currency": code, "scale": int(&r[1]), "name_term": text(&r[2]),
-                                "balance": b.map_or(json!(0), |x| x["balance"].clone()),
-                                "available": b.map_or(json!(0), |x| x["available"].clone()) })
-                    })
-                    .collect();
-                Ok(json_response(200, &json!({ "balances": items })))
-            }
+            "my_summary" => Ok(json_response(200, &my_balances()?)),
             _ => Err(err("kernel.not_found", "no such route")),
         }
     }
@@ -367,6 +370,15 @@ impl service_provider::Guest for Bonus {
             _ => return Err(err("kernel.not_found", "unknown service method")),
         };
         Ok(out.to_string())
+    }
+}
+
+impl mcp_tool::Guest for Bonus {
+    fn call(tool: String, _arguments: String) -> R<String> {
+        match tool.as_str() {
+            "get_my_bonus" => Ok(my_balances()?.to_string()),
+            _ => Err(err("kernel.not_found", "unknown tool")),
+        }
     }
 }
 

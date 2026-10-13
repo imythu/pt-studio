@@ -101,6 +101,9 @@ pub struct Capabilities {
     pub sensitive_optional: Vec<String>,
     #[serde(default)]
     pub search_contributor: bool,
+    /// 可调用的 MCP 工具（只读；如 ai-assistant 以提问者身份查询账号状态）。`ctx.mcp` 提供方不需要声明
+    #[serde(default)]
+    pub mcp_tools: Vec<String>,
     /// 实现 `content-type` 导出（资源类型插件；经 `ctx.content_types` 聚合调用）
     #[serde(default)]
     pub content_type: bool,

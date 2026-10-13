@@ -61,3 +61,9 @@ h2 { font-size: 16px; margin: 0; }
 .pt-toast-success { border-color: var(--pt-color-success); }
 .pt-user-content img { max-width: 100%; }
 .pt-slot { display: contents; }
+.pt-prewrap { white-space: pre-wrap; word-break: break-word; }
+.pt-align-start { align-items: flex-start; }
+.pt-side { flex: 0 0 16rem; max-width: 100%; }
+.pt-list { list-style: none; padding: 0; margin: 0.5rem 0 0; display: grid; gap: 0.25rem; }
+.pt-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+.pt-stack { display: grid; gap: 0.75rem; }

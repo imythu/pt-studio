@@ -20,5 +20,7 @@ pub fn native_plugins() -> Vec<NativePlugin> {
     v.push(pt_plugin_llm_claude::plugin());
     #[cfg(feature = "mcp")]
     v.push(pt_plugin_mcp::plugin());
+    #[cfg(feature = "ai-assistant")]
+    v.push(pt_plugin_ai_assistant::plugin());
     v
 }

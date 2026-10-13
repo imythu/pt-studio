@@ -38,6 +38,12 @@ tx = "manual"
 name = "mirror_torrent"
 event = "torrent.created"
 
+[[mcp.tools]]
+name = "get_my_stats"
+title = "我的流量"
+description = "查询当前用户的上传量、下载量、分享率、做种时间等统计。"
+input_schema = { type = "object", additionalProperties = false, properties = {} }
+
 [[http.routes]]
 id = "my_stats"
 method = "GET"

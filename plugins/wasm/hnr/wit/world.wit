@@ -7,4 +7,5 @@ world hnr {
   export pt:plugin/on-cron@0.1.0;
   export pt:plugin/http-handler@0.1.0;
   export pt:plugin/service-provider@0.1.0;
+  export pt:plugin/mcp-tool@0.1.0;
 }

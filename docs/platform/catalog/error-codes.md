@@ -113,6 +113,10 @@
 | `llm-claude.input_too_large` | 413 | llm-claude | 输入超过模型上限 |
 | `ai-upload-review.not_found` | 404 | ai-upload-review | 没有该种子的预审报告 |
 | `ai-upload-review.budget_exhausted` | 429 | ai-upload-review | 手动重审时当日模型预算用尽 |
+| `ai-assistant.rate_limited` | 429 | ai-assistant | 今日提问次数用尽 |
+| `ai-assistant.unavailable` | 503 | ai-assistant | 全站预算用尽或模型未配置 |
+| `ai-assistant.session_not_found` | 404 | ai-assistant | 会话不存在 |
+| `ai-assistant.question_too_long` | 422 | ai-assistant | 问题为空或超过 2000 字 |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `mcp.confirmation_invalid` | 409 | mcp | 确认项不存在、已处理、过期或参数不一致 |
 | `mcp.confirmation_pending` | 409 | mcp | 用户尚未确认（工具结果中返回） |
