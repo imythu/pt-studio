@@ -1,0 +1,45 @@
+id = "llm-claude"
+name = "大模型：Claude"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "ctx.llm 的 Claude 实现：对话、工具、结构化输出、不可信内容包裹、敏感模式脱敏、配额与用量统计（需在 site.toml 配置 API key）"
+
+provides = ["ctx.llm@0.1.0"]
+publishes = ["llm.usage_recorded"]
+
+[capabilities]
+kv = true
+sql = true
+redis = true
+http_outbound = ["api.anthropic.com", { config = "api_base", allow_private = true }]
+
+[[http.routes]]
+id = "admin_usage"
+method = "GET"
+path = "/v1/admin/usage"
+auth = "admin"
+permission = "llm-claude.manage"
+
+[[http.routes]]
+id = "admin_test"
+method = "POST"
+path = "/v1/admin/test"
+auth = "admin"
+permission = "llm-claude.manage"
+rate_limit = "user:10/m"
+timeout_ms = 60000
+
+[[permissions]]
+name = "llm-claude.manage"
+description_term = "llm-claude.perm.manage"
+default_roles = ["sysop"]
+
+[database]
+migrations = "migrations"
+
+[terms]
+"llm-claude.name" = { zh-CN = "Claude", en = "Claude" }
+"llm-claude.perm.manage" = { zh-CN = "管理大模型配置与用量", en = "Manage the LLM provider" }

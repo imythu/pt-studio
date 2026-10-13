@@ -104,6 +104,14 @@
 | `type-music.log_missing` | 422 | type-music | 声明有 log 但种子中没有 .log 文件 |
 | `type-music.cue_missing` | 422 | type-music | 声明有 cue 但种子中没有 .cue 文件 |
 | `type-music.forbidden_file` | 422 | type-music | 种子中含可执行文件 |
-| `type-music.log_too_large` | 413 | type-music | log 超过 512 KiB |
+| `type-music.log_too_large` | 413 | type-music | 预检的 log 超过 512 KiB，或随种子保存的 log 总量超过 56 KiB |
+| `llm-claude.not_configured` | 503 | llm-claude | 未配置 API key、key 无效或模型不可用 |
+| `llm-claude.rate_limited` | 429 | llm-claude | 上游限流（重试后仍失败） |
+| `llm-claude.quota_exceeded` | 429 | llm-claude | 站内每日 token 配额用尽 |
+| `llm-claude.structured_invalid` | 502 | llm-claude | 结构化输出未通过本地校验 |
+| `llm-claude.unsupported` | 501 | llm-claude | 不支持的能力（嵌入、图片） |
+| `llm-claude.input_too_large` | 413 | llm-claude | 输入超过模型上限 |
+| `ai-upload-review.not_found` | 404 | ai-upload-review | 没有该种子的预审报告 |
+| `ai-upload-review.budget_exhausted` | 429 | ai-upload-review | 手动重审时当日模型预算用尽 |
 | `mcp.confirmation_required` | 202 | mcp | 写操作待用户确认（MCP 层返回，不是失败） |
 | `llm-claude.upstream_error`、`llm-openai-compat.upstream_error` | 502 | llm-* | 模型服务出错 |

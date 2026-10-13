@@ -1,0 +1,108 @@
+id = "ai-upload-review"
+name = "AI 上传预审"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@0.1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "上传后自动预审：确定性规则 + 大模型（ctx.llm）检查，生成报告供审核员参考，不自动处置"
+
+requires = ["ctx.llm@^0.1"]
+publishes = ["ai.upload_reviewed"]
+
+[capabilities]
+sql = true
+redis = true
+views = ["torrent.v_torrent_review"]
+
+[capabilities.scopes]
+"ctx.llm" = ["use", "profile:cheap"]
+
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+
+[[jobs]]
+name = "review"
+timeout_secs = 150
+
+[[http.routes]]
+id = "get_report"
+method = "GET"
+path = "/v1/torrents/{id}"
+auth = "user"
+permission = "ai-upload-review.read"
+
+[[http.routes]]
+id = "rerun"
+method = "POST"
+path = "/v1/torrents/{id}/rerun"
+auth = "user"
+permission = "ai-upload-review.read"
+rate_limit = "user:20/m"
+timeout_ms = 130000
+
+[[http.routes]]
+id = "feedback"
+method = "POST"
+path = "/v1/reports/{id}/feedback"
+auth = "user"
+permission = "ai-upload-review.read"
+
+[[http.routes]]
+id = "stats"
+method = "GET"
+path = "/v1/admin/stats"
+auth = "admin"
+permission = "ai-upload-review.manage"
+
+[[permissions]]
+name = "ai-upload-review.read"
+description_term = "ai-upload-review.perm.read"
+default_roles = ["moderator"]
+
+[[permissions]]
+name = "ai-upload-review.manage"
+description_term = "ai-upload-review.perm.manage"
+default_roles = ["admin"]
+
+[wasm]
+default_timeout_ms = 130000
+
+[database]
+migrations = "migrations"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.enabled]
+type = "boolean"
+title = "上传后自动预审"
+default = true
+
+[settings_schema.properties.model_enabled]
+type = "boolean"
+title = "使用大模型"
+default = true
+
+[settings_schema.properties.profile]
+type = "string"
+title = "模型配置（profile）"
+default = "cheap"
+
+[settings_schema.properties.daily_model_budget]
+type = "integer"
+minimum = 0
+title = "每日模型调用上限"
+default = 500
+
+[settings_schema.properties.require_nfo_types]
+type = "array"
+items = { type = "string" }
+title = "要求 NFO 的资源类型"
+default = []
+
+[terms]
+"ai-upload-review.name" = { zh-CN = "AI 上传预审", en = "AI upload review" }
+"ai-upload-review.perm.read" = { zh-CN = "查看 AI 预审报告", en = "Read AI upload reviews" }
+"ai-upload-review.perm.manage" = { zh-CN = "配置 AI 上传预审", en = "Configure AI upload review" }

@@ -123,7 +123,7 @@ default_roles = ["admin"]
 
 [database]
 migrations = "migrations"
-views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent_fingerprint", "v_uploader_counts", "v_group_public", "v_group_fields"]
+views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent_fingerprint", "v_uploader_counts", "v_group_public", "v_group_fields", "v_torrent_review"]
 
 [terms]
 "torrent.status.approved" = { zh-CN = "已发布", en = "Approved" }

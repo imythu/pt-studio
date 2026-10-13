@@ -34,6 +34,10 @@ pub const MANIFEST: &str = include_str!("../plugin.toml");
 pub const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
     ("0002_groups.sql", include_str!("../migrations/0002_groups.sql")),
+    (
+        "0003_review_view.sql",
+        include_str!("../migrations/0003_review_view.sql"),
+    ),
 ];
 
 /// 静态配置（`site.toml [plugin.torrent]`，03 §4；运行时设置在后台接入前同样取自这里）。

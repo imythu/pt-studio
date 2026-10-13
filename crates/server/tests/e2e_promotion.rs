@@ -104,8 +104,8 @@ async fn promotion_end_to_end() {
     .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
 
-    // 展示状态与本人有效倍率（accounting 规则已下发）
-    let r = call(
+    // 展示状态与本人有效倍率（accounting 规则经事件异步下发，负载高时稍有延迟）
+    let mut r = call(
         &app,
         "GET",
         &format!("/api/p/promotion/v1/torrents/{ta}"),
@@ -113,6 +113,20 @@ async fn promotion_end_to_end() {
         &hv(&user.headers()),
     )
     .await;
+    for _ in 0..100 {
+        if r.body["mine"]["up_permille"].as_i64() == Some(2000) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        r = call(
+            &app,
+            "GET",
+            &format!("/api/p/promotion/v1/torrents/{ta}"),
+            None,
+            &hv(&user.headers()),
+        )
+        .await;
+    }
     assert_eq!(r.body["primary"]["kind"], "double_up_free", "{:?}", r.body);
     assert_eq!(
         (

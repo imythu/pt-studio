@@ -6,8 +6,11 @@ use serde_json::{Value, json};
 /// 规则表版本（结果中记录，规则变化时递增，旧结果可重新检查）
 pub const CHECKER_VERSION: i64 = 1;
 
-/// 单个日志的大小上限
+/// 单个日志的大小上限（预检接口）
 pub const MAX_LOG_BYTES: usize = 512 * 1024;
+
+/// 随种子保存的日志总大小上限：种子字段 `fields` 整体 ≤ 64 KiB（torrent 表约束）
+pub const MAX_STORED_LOG_BYTES: usize = 56 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Issue {

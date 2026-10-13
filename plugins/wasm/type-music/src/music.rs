@@ -458,8 +458,12 @@ pub fn normalize(input: &Value) -> Result<Value, Errors> {
         };
         if logs.len() > MAX_LOGS {
             errs.add("logs", "type-music.field_invalid", "at most 5 logs");
-        } else if logs.iter().any(|l| l.len() > logcheck::MAX_LOG_BYTES) {
-            errs.add("logs", "type-music.log_too_large", "a log is larger than 512 KiB");
+        } else if logs.iter().map(|l| l.len()).sum::<usize>() > logcheck::MAX_STORED_LOG_BYTES {
+            errs.add(
+                "logs",
+                "type-music.log_too_large",
+                "logs must not exceed 56 KiB in total",
+            );
         } else if !logs.is_empty() {
             o.insert("logs".into(), json!(logs));
             o.entry("has_log").or_insert(json!(true));
