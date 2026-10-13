@@ -18,9 +18,27 @@
 | `crates/plugin-sdk-rust` | WASM 插件的 Rust SDK（`pt-plugin-sdk`） |
 | `crates/markup`、`crates/release-parser`、`crates/type-kit` | 共享库：安全的 Markdown / BBCode 渲染、发布名解析、资源类型工具 |
 | `plugins/native`、`plugins/wasm` | 官方插件 |
+| `crates/pt-tracker` | HTTP tracker（独立程序，AGPL-3.0-only，只经 Redis 与站点通信） |
+| `deploy/` | 运行脚本、站点配置示例、Docker 部署文件、数据库初始化 |
 | `templates/` | 插件模板（WASM、Native） |
 | `web/` | 官方 React 前端 |
 | `docs/` | 设计、平台契约与目录、各插件的设计文档、开发说明 |
+
+## 运行站点
+
+本机（需要 PostgreSQL ≥ 16、Redis ≥ 7.4、Node.js ≥ 20、Rust；Meilisearch 可选）：
+
+```sh
+deploy/dev/run-site.sh        # 构建并启动：站点 http://localhost:8080，tracker http://localhost:8081
+```
+
+Docker：
+
+```sh
+docker compose -f deploy/docker/compose.yaml up --build
+```
+
+注册账号后授予管理员：`pt-server --config <site.toml> user grant-role <用户名> admin`（Docker 中用 `docker compose … exec server pt-server --config /data/site.toml user grant-role …`）。
 
 ## 开始
 

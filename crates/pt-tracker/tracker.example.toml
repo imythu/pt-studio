@@ -1,0 +1,14 @@
+# pt-tracker 配置。announce 地址为 http://<bind>/announce/<passkey>，与站点 [plugin.torrent] announce_base_urls 一致。
+node_id = "tracker-1"
+bind = "0.0.0.0:8081"
+# 站点使用的 Redis（tracker-bridge 写 trk:*，accounting 读 acct:*）；三种用途可以分开
+redis_url = "redis://127.0.0.1:6379/0"
+# sync_url = "…"   # trk:*（只读）
+# acct_url = "…"   # acct:*、u:*:live
+# state_url = "…"  # ps:*
+# 反向代理之后时从 X-Forwarded-For 取客户端 IP
+trust_forwarded = false
+# 两次 announce 之间计入做种时长的上限（秒），应大于 interval
+max_peer_timeout = 2700
+# 记账流分区数（与 accounting 一致；acct:_meta 中已有值时以它为准）
+partitions = 64

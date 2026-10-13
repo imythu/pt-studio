@@ -6,7 +6,8 @@
 #   PT_SKIP_BUILD=1 deploy/dev/run-site.sh   # 已构建过，直接启动
 #
 # 依赖：PostgreSQL ≥ 16、Redis ≥ 7.4、Node.js ≥ 20、Rust（含 wasm32-wasip2 目标）；Meilisearch 可选（没有时搜索不可用）。
-# 端口可用环境变量覆盖：PT_PG_PORT（55432）、PT_REDIS_PORT（56379）、PT_MEILI_PORT（57700）、PT_HTTP_PORT（8080）；
+# 端口可用环境变量覆盖：PT_PG_PORT（55432）、PT_REDIS_PORT（56379）、PT_MEILI_PORT（57700）、PT_HTTP_PORT（8080）、
+# PT_TRACKER_PORT（8081，pt-tracker）；
 # 已在运行的 Meilisearch 用 PT_MEILI_KEY 给出 master key。
 # 数据与配置放在 .dev/site/；删除该目录并 DROP DATABASE ptsite 即可从头开始。
 set -euo pipefail
@@ -18,6 +19,7 @@ PG_PORT="${PT_PG_PORT:-55432}"
 REDIS_PORT="${PT_REDIS_PORT:-56379}"
 MEILI_PORT="${PT_MEILI_PORT:-57700}"
 HTTP_PORT="${PT_HTTP_PORT:-8080}"
+TRACKER_PORT="${PT_TRACKER_PORT:-8081}"
 PG_SUPER="${PT_PG_SUPERUSER:-postgres}"
 # 与测试库共用 PostgreSQL 集群时，角色名不能冲突（测试会删除 pt_plugin_* 角色）：本脚本使用独立的前缀与库名
 PREFIX="${PT_ROLE_PREFIX:-ptsite_}"
@@ -101,6 +103,12 @@ if [ "${PT_SKIP_BUILD:-}" != "1" ]; then
   else
     cargo build -p pt-server --manifest-path "$ROOT/Cargo.toml"
   fi
+  say "building pt-tracker ($PROFILE)"
+  if [ "$PROFILE" = "release" ]; then
+    cargo build --release --manifest-path "$ROOT/crates/pt-tracker/Cargo.toml"
+  else
+    cargo build --manifest-path "$ROOT/crates/pt-tracker/Cargo.toml"
+  fi
   say "building WASM plugins"
   rustup target list --installed 2>/dev/null | grep -q wasm32-wasip2 || rustup target add wasm32-wasip2
   (cd "$ROOT/plugins/wasm" && cargo build --release --target wasm32-wasip2)
@@ -108,6 +116,7 @@ if [ "${PT_SKIP_BUILD:-}" != "1" ]; then
   (cd "$ROOT/web" && { [ -d node_modules ] || npm ci; } && npm run build)
 fi
 SERVER="$ROOT/target/$PROFILE/pt-server"
+TRACKER="$ROOT/crates/pt-tracker/target/$PROFILE/pt-tracker"
 [ -x "$SERVER" ] || die "$SERVER not built (run without PT_SKIP_BUILD)"
 
 say "packaging WASM plugins into $DEV/plugins"
@@ -137,6 +146,7 @@ if [ ! -f "$CFG" ]; then
       -e "s#@SECRET_BASE64_32#$(openssl rand -base64 32)#" \
       -e "s#http://127.0.0.1:7700#http://127.0.0.1:$MEILI_PORT#" \
       -e "s#@MEILI_MASTER_KEY#$MEILI_KEY#" \
+      -e "s#http://localhost:8081/announce#http://localhost:$TRACKER_PORT/announce#" \
       "$ROOT/deploy/site.example.toml" > "$CFG"
 fi
 
@@ -144,9 +154,24 @@ say "checking plugins and migrating"
 "$SERVER" --config "$CFG" check
 "$SERVER" --config "$CFG" migrate
 
+# ---------- tracker ----------
+TCFG="$DEV/tracker.toml"
+if [ ! -f "$TCFG" ]; then
+  printf 'node_id = "tracker-1"\nbind = "0.0.0.0:%s"\nredis_url = "redis://127.0.0.1:%s/1"\n' "$TRACKER_PORT" "$REDIS_PORT" > "$TCFG"
+fi
+if [ -x "$TRACKER" ]; then
+  if [ -f "$DEV/tracker.pid" ]; then kill "$(cat "$DEV/tracker.pid")" 2>/dev/null || true; fi
+  say "pt-tracker on :$TRACKER_PORT (log: $DEV/tracker.log)"
+  nohup "$TRACKER" "$TCFG" > "$DEV/tracker.log" 2>&1 &
+  echo $! > "$DEV/tracker.pid"
+else
+  say "pt-tracker not built — BT clients cannot announce"
+fi
+
 cat <<EOF
 
   PT Studio:  http://localhost:$HTTP_PORT
+  Tracker:    http://localhost:$TRACKER_PORT/announce/<passkey>
   1. 打开站点注册一个账号；
   2. 授予管理员：$SERVER --config $CFG user grant-role <用户名> admin
   3. 后台：http://localhost:$HTTP_PORT/admin

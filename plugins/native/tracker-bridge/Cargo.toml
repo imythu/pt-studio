@@ -1,0 +1,20 @@
+[package]
+name = "pt-plugin-tracker-bridge"
+description = "PT Studio tracker bridge: publishes passkeys, torrents, client rules and tracker settings to Redis for pt-tracker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pt-plugin-api.workspace = true
+pt-plugin-identity = { path = "../identity" }
+async-trait.workspace = true
+hex.workspace = true
+redis.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

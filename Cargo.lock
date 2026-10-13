@@ -2241,6 +2241,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-plugin-tracker-bridge"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "pt-plugin-api",
+ "pt-plugin-identity",
+ "redis",
+ "serde_json",
+ "sqlx",
+ "tracing",
+]
+
+[[package]]
 name = "pt-release-parser"
 version = "0.1.0"
 
@@ -2266,6 +2280,7 @@ dependencies = [
  "pt-plugin-rss",
  "pt-plugin-search-meilisearch",
  "pt-plugin-torrent",
+ "pt-plugin-tracker-bridge",
  "redis",
  "serde_json",
  "sha1",

@@ -1,0 +1,7 @@
+**/target
+**/node_modules
+web/dist
+.dev
+.spike
+.git
+core

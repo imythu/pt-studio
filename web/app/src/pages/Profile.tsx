@@ -21,7 +21,8 @@ interface Stats {
   uploaded: number;
   downloaded: number;
   seed_secs: number;
-  ratio: number | null;
+  /** accounting 以十进制字符串返回（如 "1.0000"），没有下载量时为 null */
+  ratio: string | number | null;
 }
 
 export function ProfilePage() {
@@ -52,7 +53,7 @@ export function ProfilePage() {
           <>
             <Stat label={t('ui.profile.uploaded')} value={formatBytes(s.uploaded)} />
             <Stat label={t('ui.profile.downloaded')} value={formatBytes(s.downloaded)} />
-            <Stat label={t('ui.profile.ratio')} value={s.ratio === null ? '∞' : s.ratio.toFixed(2)} />
+            <Stat label={t('ui.profile.ratio')} value={s.ratio === null ? '∞' : Number(s.ratio).toFixed(2)} />
             <Stat label={t('ui.profile.seed_time')} value={formatDuration(s.seed_secs)} />
           </>
         )}

@@ -32,6 +32,8 @@
 | `trk:clients` | tracker_sync | STRING(JSON) | tracker-bridge | pt-tracker | 无 | 客户端白名单 |
 | `trk:cfg` | tracker_sync | HASH | tracker-bridge | pt-tracker | 无 | 运行参数 |
 | `trk:sync` | tracker_sync | STREAM | tracker-bridge | pt-tracker | `MAXLEN ~ 1000000` | 变更流 |
+| `trk:u:<user_id>` | tracker_sync | STRING | tracker-bridge | tracker-bridge | 无 | 用户当前 passkey（反向索引：换 passkey 时删除旧的 `trk:pk:*`） |
+| `trk:ver` | tracker_sync | STRING(计数器) | tracker-bridge | tracker-bridge | 无 | 快照与变更流的 `ver` 来源（INCR，单调递增） |
 | `trk:stats:*` | tracker_sync | — | 预留 | — | — | 预留给 pt-tracker 汇总数据（design/10 §5.7 scrape 汇总） |
 | `ev:<event_type>:<partition>` | main | STREAM | 内核 outbox 中继 | 内核事件消费者 | `MAXLEN ~` 按事件配置（默认 1,000,000） | 领域事件流 |
 | `evr:<replay_id>` | main | STREAM | 内核回放器 | 指定订阅 | 回放结束后 24 h | 回放流 |

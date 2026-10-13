@@ -10,6 +10,12 @@
 - 写插件：优先 WASM（Rust + `pt-plugin-sdk`，目标 `wasm32-wasip2`），从 `templates/wasm-plugin` 开始；用 `pt-server plugin package` 打包、`pt-server plugin check` 检查。
 - 文档以中文为主；代码标识符、错误信息、提交信息为英文。
 
+## 运行与部署
+
+- [运行站点](README.md): `deploy/dev/run-site.sh` 一键本机运行；`deploy/docker/compose.yaml`；首个管理员 `pt-server user grant-role`
+- [站点配置示例](deploy/site.example.toml): 各节含义与必须替换的密钥
+- [pt-tracker](crates/pt-tracker/README.md): HTTP tracker（独立程序，AGPL）与站点的 Redis 契约
+
 ## 插件开发
 
 - [插件开发指南](docs/sdk/README.md): 快速开始、清单要点、SDK 用法、扩展点、事务与幂等、错误码、测试、前端插件、兼容承诺

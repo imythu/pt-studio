@@ -24,6 +24,8 @@ pub fn native_plugins() -> Vec<NativePlugin> {
     v.push(pt_plugin_ai_assistant::plugin());
     #[cfg(feature = "rss")]
     v.push(pt_plugin_rss::plugin());
+    #[cfg(feature = "tracker-bridge")]
+    v.push(pt_plugin_tracker_bridge::plugin());
     v
 }
 

@@ -1,9 +1,10 @@
-// 对一个正在运行的站点做冒烟检查（浏览器）：注册 → 授予管理员 → 登录 → 发布种子 → 列表 / 详情 / 下载 → 个人页 → 后台。
+// 对一个正在运行的站点做冒烟检查（浏览器）：注册 → 授予管理员 → 登录 → 发布种子 → 列表 / 详情 / 下载 →
+// 模拟 BT 客户端向 pt-tracker announce（做种、下载、完成）→ 个人页流量 → 后台。
 //
 //   PT_BASE=http://localhost:8080 PT_SERVER=target/release/pt-server PT_CONFIG=.dev/site/site.toml \
 //     node web/tests/smoke.mjs [截图目录]
 //
-// PT_SERVER / PT_CONFIG 用于执行 `pt-server user grant-role`；不给时跳过后台检查。
+// PT_SERVER / PT_CONFIG 用于执行 `pt-server user grant-role`；不给时跳过后台检查。PT_SKIP_TRACKER=1 跳过 tracker 检查。
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -33,6 +34,58 @@ function makeTorrent(name, size) {
   const file = join(tmpdir(), `${name}.torrent`);
   writeFileSync(file, benc({ announce: 'http://example.invalid/announce', info: { name: `${name}.mkv`, 'piece length': plen, pieces, length: size, private: 1 } }));
   return file;
+}
+
+// ---------- 解析种子：announce 地址与 info_hash ----------
+function bdecode(buf) {
+  let i = 0;
+  let infoRange = null;
+  function val(depth, key) {
+    const c = buf[i];
+    if (c === 0x69) {
+      const e = buf.indexOf(0x65, i);
+      const n = Number(buf.subarray(i + 1, e).toString());
+      i = e + 1;
+      return n;
+    }
+    if (c === 0x6c) {
+      i++;
+      const out = [];
+      while (buf[i] !== 0x65) out.push(val(depth + 1));
+      i++;
+      return out;
+    }
+    if (c === 0x64) {
+      const start = i;
+      i++;
+      const out = {};
+      while (buf[i] !== 0x65) {
+        const k = val(depth + 1).toString();
+        out[k] = val(depth + 1, k);
+      }
+      i++;
+      if (key === 'info' && depth === 1) infoRange = [start, i];
+      return out;
+    }
+    const colon = buf.indexOf(0x3a, i);
+    const len = Number(buf.subarray(i, colon).toString());
+    const s = buf.subarray(colon + 1, colon + 1 + len);
+    i = colon + 1 + len;
+    return s;
+  }
+  const root = val(0);
+  return { root, infoHash: createHash('sha1').update(buf.subarray(infoRange[0], infoRange[1])).digest() };
+}
+
+/** 模拟 BT 客户端的一次 announce（qBittorrent 风格 peer_id 与 UA） */
+async function announce(base, infoHash, peerId, q) {
+  const enc = (b) => [...b].map((x) => '%' + x.toString(16).padStart(2, '0')).join('');
+  const params = Object.entries({ port: 6881, compact: 1, ...q }).map(([k, v]) => `${k}=${v}`).join('&');
+  const r = await fetch(`${base}?info_hash=${enc(infoHash)}&peer_id=${enc(peerId)}&${params}`, { headers: { 'user-agent': 'qBittorrent/4.6.5' } });
+  const body = Buffer.from(await r.arrayBuffer());
+  const s = body.toString('latin1');
+  if (s.includes('failure reason')) throw new Error(`announce failed: ${s}`);
+  return s;
 }
 
 const fallback = '/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome';
@@ -102,6 +155,30 @@ try {
   const path = await dl.path();
   const head = execFileSync('head', ['-c', '200', path]).toString('latin1');
   if (!/announce\d+:http/.test(head) || !/\/[0-9a-f]{32}/.test(head)) throw new Error(`downloaded file has no passkey announce: ${head}`);
+
+  if (process.env.PT_SKIP_TRACKER !== '1') {
+    step('BT client: seed + leech + complete via pt-tracker');
+    const { readFileSync } = await import('node:fs');
+    const t = bdecode(readFileSync(path));
+    const url = t.root.announce.toString();
+    const size = t.root.info.length;
+    const seedId = Buffer.from(`-qB4650-${randomBytes(6).toString('hex')}`);
+    const leechId = Buffer.from(`-qB4650-${randomBytes(6).toString('hex')}`);
+    await announce(url, t.infoHash, seedId, { uploaded: 0, downloaded: 0, left: 0, event: 'started' });
+    const r = await announce(url, t.infoHash, leechId, { uploaded: 0, downloaded: 0, left: size, event: 'started', port: 6882 });
+    if (!/8:completei1e10:incompletei1e/.test(r)) throw new Error(`unexpected swarm counts: ${r}`);
+    await announce(url, t.infoHash, leechId, { uploaded: 0, downloaded: size, left: 0, event: 'completed', port: 6882 });
+    await announce(url, t.infoHash, seedId, { uploaded: size, downloaded: 0, left: 0 });
+    step('traffic reaches accounting');
+    let stats = null;
+    for (let i = 0; i < 60; i++) {
+      stats = await p.evaluate(async () => (await fetch('/api/p/accounting/v1/users/me/stats')).json());
+      if (stats.uploaded > 0 && stats.downloaded > 0) break;
+      await p.waitForTimeout(1000);
+    }
+    if (!(stats.uploaded > 0 && stats.downloaded > 0)) throw new Error(`traffic not accounted: ${JSON.stringify(stats)}`);
+    console.log(`  uploaded ${stats.uploaded}, downloaded ${stats.downloaded}, ratio ${stats.ratio}`);
+  }
 
   step('torrent list');
   await p.goto(`${BASE}/torrents`);

@@ -1,0 +1,89 @@
+id = "tracker-bridge"
+name = "Tracker 同步"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "把 passkey、种子、客户端白名单与 tracker 参数写入 Redis（trk:*），供 pt-tracker 鉴权与准入；启动与定时全量同步，用户与种子变更实时同步"
+
+requires = ["ctx.users@^0.1"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_tracker", "identity.v_user_public"]
+redis_global = [{ role = "tracker_sync", prefix = "trk:", mode = "rw" }]
+
+[capabilities.scopes]
+"ctx.users" = ["read:passkey"]
+
+[[subscriptions]]
+name = "users"
+event = "user.registered"
+
+[[subscriptions]]
+name = "passkeys"
+event = "user.passkey_reset"
+
+[[subscriptions]]
+name = "statuses"
+event = "user.status_changed"
+
+[[subscriptions]]
+name = "deletions"
+event = "user.deleted"
+
+[[subscriptions]]
+name = "torrent_created"
+event = "torrent.created"
+
+[[subscriptions]]
+name = "torrent_status"
+event = "torrent.status_changed"
+
+[[subscriptions]]
+name = "torrent_deleted"
+event = "torrent.deleted"
+
+# 限制（H&R 等）不发布事件，由定时全量同步兜底
+[[cron]]
+name = "resync"
+schedule = "*/10 * * * *"
+timeout_secs = 600
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.interval]
+type = "integer"
+minimum = 300
+maximum = 7200
+title = "announce 间隔（秒）"
+default = 1800
+
+[settings_schema.properties.min_interval]
+type = "integer"
+minimum = 60
+maximum = 3600
+title = "最小 announce 间隔（秒）"
+default = 900
+
+[settings_schema.properties.max_peers]
+type = "integer"
+minimum = 1
+maximum = 200
+title = "每次返回的最多 peer 数"
+default = 50
+
+[settings_schema.properties.allow_unknown_clients]
+type = "boolean"
+title = "允许白名单之外的客户端"
+default = false
+
+[settings_schema.properties.clients]
+type = "array"
+title = "客户端白名单（peer_id 前缀）"
+items = { type = "object", required = ["name", "peer_id_prefix"], properties = { name = { type = "string" }, peer_id_prefix = { type = "string" } } }
+
+[terms]
+"tracker-bridge.name" = { zh-CN = "Tracker 同步", en = "Tracker bridge" }
