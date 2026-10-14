@@ -1,0 +1,21 @@
+[Unit]
+Description=PT Studio tracker (pt-tracker, AGPL-3.0-only)
+After=network-online.target redis-server.service pt-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pt-studio
+Group=pt-studio
+ExecStart=/opt/pt-studio/bin/pt-tracker /etc/pt-studio/tracker.toml
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -8,3 +8,4 @@ target/
 /core
 /templates/*/target
 /templates/*/Cargo.lock
+/dist

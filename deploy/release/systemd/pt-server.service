@@ -1,0 +1,25 @@
+[Unit]
+Description=PT Studio server (kernel + plugins + web)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pt-studio
+Group=pt-studio
+WorkingDirectory=/var/lib/pt-studio
+ExecStartPre=/opt/pt-studio/bin/pt-server --config /etc/pt-studio/site.toml migrate
+ExecStart=/opt/pt-studio/bin/pt-server --config /etc/pt-studio/site.toml serve
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+# 加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pt-studio
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

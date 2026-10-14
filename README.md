@@ -26,6 +26,9 @@
 
 ## 运行站点
 
+Linux x86_64 服务器：使用发布包（`deploy/release/build-release.sh` 生成 `dist/pt-studio-<版本>-linux-x86_64.tar.gz`），按 [deploy/release/DEPLOY.md](deploy/release/DEPLOY.md) 部署（systemd、nginx、备份、升级、故障排查）。
+
+
 本机（需要 PostgreSQL ≥ 16、Redis ≥ 7.4、Node.js ≥ 20、Rust；Meilisearch 可选）：
 
 ```sh
@@ -56,4 +59,4 @@ pt-server plugin check <包目录>          # 检查一个 WASM 插件包
 
 ## 许可证
 
-内核、插件、SDK 与前端：MIT OR Apache-2.0。pt-tracker（独立组件）：AGPL-3.0-only，不被其他代码链接。
+内核、插件、SDK 与前端：MIT OR Apache-2.0（[LICENSE-MIT](LICENSE-MIT)、[LICENSE-APACHE](LICENSE-APACHE)）。pt-tracker（独立组件）：AGPL-3.0-only（[crates/pt-tracker/LICENSE](crates/pt-tracker/LICENSE)），不被其他代码链接。

@@ -13,6 +13,7 @@
 ## 运行与部署
 
 - [运行站点](README.md): `deploy/dev/run-site.sh` 一键本机运行；`deploy/docker/compose.yaml`；首个管理员 `pt-server user grant-role`
+- [部署指南](deploy/release/DEPLOY.md): Linux x86_64 发布包、systemd、nginx、备份、升级、故障排查
 - [站点配置示例](deploy/site.example.toml): 各节含义与必须替换的密钥
 - [pt-tracker](crates/pt-tracker/README.md): HTTP tracker（独立程序，AGPL）与站点的 Redis 契约
 
