@@ -1,14 +1,14 @@
 //! Redis 中的 swarm 与会话状态（无状态 tracker：任何节点都能处理任何种子）。
 //!
 //! 每个种子（`H` = info_hash hex，`{H}` 是 Redis Cluster 哈希标签，保证同一种子的键在同一个 slot）：
-//! - `ps:{H}` HASH：field `<uid>:<peer_id_hex>` → 会话状态 JSON（累计值、left、最近时间、是否完成、IP、端口）
+//! - `ps:{H}` HASH：field `<uid>:<peer_id_hex>` → 会话状态 JSON（累计值、left、最近时间、是否完成、IP、端口、BEP 7 另一族地址）
 //! - `sw:{H}:s` / `sw:{H}:l` ZSET：做种者 / 下载者，member 同上，score 为最近 announce 时间
 //! - `sw:{H}:n` STRING：完成次数（scrape 的 downloaded）
 //!
 //! 每次 announce 一个 Lua 脚本：比较会话状态（CAS，防止两个节点同时处理同一会话造成重复记账）→ 清理超时 peer →
 //! 更新状态与集合 → 返回做种 / 下载人数与随机抽取的 peer。流量事件（`acct:*`、`u:*:live`）在脚本成功后写入。
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,9 @@ pub struct Stored {
     pub state: PeerState,
     pub ip: String,
     pub port: u16,
+    /// BEP 7 `ipv6=` / `ipv4=` 自报的另一族地址（`[v6]:port` / `v4:port`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt: Option<String>,
 }
 
 /// 抽取到的 peer：地址与 peer_id（非紧凑格式需要）
@@ -29,6 +32,7 @@ pub struct Stored {
 pub struct Peer {
     pub ip: IpAddr,
     pub port: u16,
+    pub alt: Option<SocketAddr>,
     pub peer_id: [u8; 20],
 }
 
@@ -166,6 +170,7 @@ fn parse_peer(member: &str, state: &str) -> Option<Peer> {
     Some(Peer {
         ip: s.ip.parse().ok()?,
         port: s.port,
+        alt: s.alt.and_then(|a| a.parse().ok()),
         peer_id,
     })
 }
@@ -399,15 +404,24 @@ mod tests {
             },
             ip: "10.0.0.1".into(),
             port: 6881,
+            alt: Some("[2001:4860::1]:6882".into()),
         };
         let j = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Stored>(&j).unwrap(), s);
         let pid = [b'a'; 20];
         let p = parse_peer(&member(7, &pid), &j).unwrap();
         assert_eq!(
-            (p.ip.to_string(), p.port, p.peer_id),
-            ("10.0.0.1".to_owned(), 6881, pid)
+            (p.ip.to_string(), p.port, p.peer_id, p.alt.map(|a| a.to_string())),
+            (
+                "10.0.0.1".to_owned(),
+                6881,
+                pid,
+                Some("[2001:4860::1]:6882".to_owned())
+            )
         );
+        // 旧格式（没有 alt）照常解析
+        let old = r#"{"up":0,"down":0,"left":0,"ts":1,"completed":false,"ip":"1.2.3.4","port":1}"#;
+        assert_eq!(parse_peer(&member(7, &pid), old).unwrap().alt, None);
         assert!(parse_peer("bad", &j).is_none());
         assert_eq!(keys(&[0xab; 20])[1], format!("sw:{{{}}}:s", "ab".repeat(20)));
     }

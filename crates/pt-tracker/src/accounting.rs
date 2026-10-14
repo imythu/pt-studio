@@ -61,6 +61,8 @@ pub const UPLOAD_REGRESSED: u32 = 1 << 2;
 pub const DOWNLOAD_REGRESSED: u32 = 1 << 3;
 pub const FIRST_COMPLETED: u32 = 1 << 4;
 pub const SEED_TIME_CAPPED: u32 = 1 << 5;
+/// 本段平均速度超过上限：这一段的流量不计（bit6 留给 left_exceeds_size）
+pub const SPEED_EXCEEDED: u32 = 1 << 7;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Delta {
@@ -78,18 +80,21 @@ impl Delta {
     }
 }
 
-/// 返回 (增量, 新状态)；新状态为 `None` 表示删除（event = stopped）
-pub fn compute(prev: Option<&PeerState>, r: &Report, max_interval: u64) -> (Delta, Option<PeerState>) {
+/// 返回 (增量, 新状态)；新状态为 `None` 表示删除（event = stopped）。
+/// `max_rate`：上传 / 下载各自的平均速度上限（字节 / 秒），0 表示不限
+pub fn compute(
+    prev: Option<&PeerState>,
+    r: &Report,
+    max_interval: u64,
+    max_rate: u64,
+) -> (Delta, Option<PeerState>) {
     let mut d = Delta::default();
     match prev {
         None => {
             d.flags |= FIRST_SEEN;
-            if r.event == Event::Started {
-                // 按 BEP 3，started 时的累计值属于本会话，正常为 0；非 0（部分客户端重启后续报）如实计入
-                d.up = r.up;
-                d.down = r.down;
-            } else {
-                // 状态丢失：只建立基线
+            // 按 BEP 3，started 时的累计值属于本会话，正常为 0。非 0 无从核实（伪造一条 started 就能凭空记账），
+            // 与状态丢失一样只建立基线
+            if r.event != Event::Started || r.up != 0 || r.down != 0 {
                 d.flags |= BASELINE_RESET;
             }
         }
@@ -105,6 +110,12 @@ pub fn compute(prev: Option<&PeerState>, r: &Report, max_interval: u64) -> (Delt
                 d.flags |= DOWNLOAD_REGRESSED;
             }
             let elapsed = r.now.saturating_sub(p.ts);
+            let limit = max_rate.saturating_mul(elapsed.max(1));
+            if max_rate > 0 && (d.up > limit || d.down > limit) {
+                d.flags |= SPEED_EXCEEDED;
+                d.up = 0;
+                d.down = 0;
+            }
             let counted = if elapsed > max_interval {
                 d.flags |= SEED_TIME_CAPPED;
                 max_interval
@@ -149,32 +160,32 @@ mod tests {
 
     #[test]
     fn fresh_start_and_progress() {
-        let (d, s) = compute(None, &rep(0, 0, 100, Event::Started, 1000), 2700);
+        let (d, s) = compute(None, &rep(0, 0, 100, Event::Started, 1000), 2700, 0);
         assert_eq!((d.up, d.down, d.flags), (0, 0, FIRST_SEEN));
         let s = s.unwrap();
-        let (d, s2) = compute(Some(&s), &rep(10, 60, 40, Event::None, 1600), 2700);
+        let (d, s2) = compute(Some(&s), &rep(10, 60, 40, Event::None, 1600), 2700, 0);
         assert_eq!((d.up, d.down, d.leech, d.seed), (10, 60, 600, 0));
-        let (d, s3) = compute(s2.as_ref(), &rep(10, 100, 0, Event::Completed, 1700), 2700);
+        let (d, s3) = compute(s2.as_ref(), &rep(10, 100, 0, Event::Completed, 1700), 2700, 0);
         assert_eq!((d.down, d.flags), (40, FIRST_COMPLETED));
         assert!(s3.unwrap().completed);
         // 做种期间：时长记为做种
-        let (d, _) = compute(s3.as_ref(), &rep(500, 100, 0, Event::None, 2700), 2700);
+        let (d, _) = compute(s3.as_ref(), &rep(500, 100, 0, Event::None, 2700), 2700, 0);
         assert_eq!((d.up, d.seed, d.leech), (490, 1000, 0));
     }
 
     #[test]
     fn anomalies() {
         // 状态丢失且不是 started：只建基线
-        let (d, s) = compute(None, &rep(999, 999, 0, Event::None, 10), 2700);
+        let (d, s) = compute(None, &rep(999, 999, 0, Event::None, 10), 2700, 0);
         assert_eq!((d.up, d.down, d.flags), (0, 0, FIRST_SEEN | BASELINE_RESET));
         // 累计值回退
-        let (d, _) = compute(s.as_ref(), &rep(5, 1000, 0, Event::None, 20), 2700);
+        let (d, _) = compute(s.as_ref(), &rep(5, 1000, 0, Event::None, 20), 2700, 0);
         assert_eq!(
             (d.up, d.down, d.flags & UPLOAD_REGRESSED),
             (0, 1, UPLOAD_REGRESSED)
         );
         // 长时间离线：时长截断
-        let (d, _) = compute(s.as_ref(), &rep(999, 999, 0, Event::None, 100_000), 2700);
+        let (d, _) = compute(s.as_ref(), &rep(999, 999, 0, Event::None, 100_000), 2700, 0);
         assert_eq!((d.seed, d.flags), (2700, SEED_TIME_CAPPED));
         // 重复 completed 不再计
         let done = PeerState {
@@ -184,10 +195,38 @@ mod tests {
             ts: 0,
             completed: true,
         };
-        let (d, _) = compute(Some(&done), &rep(0, 0, 0, Event::Completed, 1), 2700);
+        let (d, _) = compute(Some(&done), &rep(0, 0, 0, Event::Completed, 1), 2700, 0);
         assert_eq!(d.flags & FIRST_COMPLETED, 0);
         // stopped：计入最后一段并删除状态
-        let (d, s) = compute(Some(&done), &rep(7, 0, 0, Event::Stopped, 5), 2700);
+        let (d, s) = compute(Some(&done), &rep(7, 0, 0, Event::Stopped, 5), 2700, 0);
         assert_eq!((d.up, s), (7, None));
+    }
+
+    #[test]
+    fn forged_reports() {
+        // 首报 started 却带着累计值：只建基线，不计
+        let (d, s) = compute(None, &rep(50 << 30, 0, 100, Event::Started, 1000), 2700, 0);
+        assert_eq!((d.up, d.flags), (0, FIRST_SEEN | BASELINE_RESET));
+        let s = s.unwrap();
+        // 之后的正常增量照常计
+        let (d, s2) = compute(
+            Some(&s),
+            &rep((50 << 30) + 1000, 0, 100, Event::None, 1900),
+            2700,
+            100,
+        );
+        assert_eq!((d.up, d.flags), (1000, 0));
+        // 超过速度上限：这一段不计，基线前移
+        let (d, s3) = compute(s2.as_ref(), &rep(60 << 30, 0, 100, Event::None, 2800), 2700, 100);
+        assert_eq!((d.up, d.down, d.flags, d.leech), (0, 0, SPEED_EXCEEDED, 900));
+        assert_eq!(s3.unwrap().up, 60 << 30);
+        // 同一秒内的增量按 1 秒算
+        let (d, _) = compute(
+            s2.as_ref(),
+            &rep((50 << 30) + 1100, 0, 100, Event::None, 1900),
+            2700,
+            100,
+        );
+        assert_eq!((d.up, d.flags), (100, 0));
     }
 }

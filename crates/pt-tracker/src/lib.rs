@@ -47,6 +47,9 @@ pub struct Config {
     /// peer 超时（秒）：超过这么久没有 announce 的 peer 被移出 swarm；同时是两次 announce 之间计入时长的上限
     #[serde(default = "d_timeout")]
     pub max_peer_timeout: u64,
+    /// 单个会话上传 / 下载的平均速度上限（字节 / 秒），超过时该段流量不计并打 speed_exceeded 标；0 不限
+    #[serde(default = "d_max_rate")]
+    pub max_rate: u64,
     #[serde(default = "d_partitions")]
     pub partitions: u64,
 }
@@ -59,6 +62,10 @@ fn d_bind() -> String {
 }
 fn d_timeout() -> u64 {
     2700
+}
+fn d_max_rate() -> u64 {
+    // 10 Gbit/s
+    1_250_000_000
 }
 fn d_partitions() -> u64 {
     64
@@ -187,6 +194,17 @@ async fn announce(
     }
     let ts = now();
     let ip = client_ip(&app, &headers, peer);
+    // BEP 7：连接走 IPv4 时客户端用 `ipv6=` 报 IPv6 地址（反之 `ipv4=`）；双栈客户端靠它在只有单栈的 tracker 上互相找到对方
+    let alt = protocol::get_str(
+        &q,
+        if ip.to_canonical().is_ipv4() {
+            "ipv6"
+        } else {
+            "ipv4"
+        },
+    )
+    .and_then(|v| protocol::alt_addr(v, port))
+    .filter(|a| a.is_ipv4() != ip.to_canonical().is_ipv4());
     let params = app.admission.params();
     let numwant = protocol::get_u64(&q, "numwant")
         .map_or(params.max_peers, |n| {
@@ -212,7 +230,7 @@ async fn announce(
             event,
             now: ts,
         };
-        let (delta, next) = compute(prev.as_ref(), &report, app.cfg.max_peer_timeout);
+        let (delta, next) = compute(prev.as_ref(), &report, app.cfg.max_peer_timeout, app.cfg.max_rate);
         let w = Write {
             member: &member,
             expected: &raw,
@@ -220,6 +238,7 @@ async fn announce(
                 state: s,
                 ip: ip.to_string(),
                 port,
+                alt: alt.map(|a| a.to_string()),
             }),
             seeder: left == 0,
             now: ts,
@@ -267,15 +286,20 @@ async fn announce(
             tracing::error!(error = %e, uid = user.uid, "writing traffic event failed");
         }
     }
-    // ⑦ 响应：去掉与自己同地址的 peer（同一台机器的多个会话）
+    // ⑦ 响应：每个 peer 给出连接地址与 BEP 7 地址；去掉与自己同地址的（同一台机器的多个会话）
+    let me = |a: SocketAddr| (a.ip() == ip && a.port() == port) || Some(a) == alt;
     let peers: Vec<PeerAddr> = view
         .peers
         .iter()
-        .filter(|p| !(p.ip == ip && p.port == port))
-        .map(|p| PeerAddr {
-            ip: p.ip,
-            port: p.port,
-            peer_id: p.peer_id,
+        .flat_map(|p| {
+            std::iter::once(SocketAddr::new(p.ip, p.port))
+                .chain(p.alt)
+                .filter(|a| !me(*a))
+                .map(|a| PeerAddr {
+                    ip: a.ip(),
+                    port: a.port(),
+                    peer_id: p.peer_id,
+                })
         })
         .collect();
     let compact = protocol::get_str(&q, "compact") != Some("0");

@@ -161,6 +161,7 @@ tracker（`/etc/pt-studio/tracker.toml`）：
 | `redis_url` | 与站点相同的 Redis；`sync_url` / `acct_url` / `state_url` 可把三种用途分到不同实例 |
 | `trust_forwarded` | 在反向代理之后时设为 `true` |
 | `max_peer_timeout` | peer 超时（默认 2700 秒，应大于 announce 间隔） |
+| `max_rate` | 单个会话的平均速度上限（字节 / 秒，默认 1250000000 即 10 Gbit/s；0 不限），超过时该段流量不计 |
 
 tracker 无状态（swarm 存在 Redis），可以在多台机器上运行多个实例共享同一个 Redis，前面用任意负载均衡。
 

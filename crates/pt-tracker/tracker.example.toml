@@ -10,5 +10,7 @@ redis_url = "redis://127.0.0.1:6379/0"
 trust_forwarded = false
 # 两次 announce 之间计入做种时长的上限（秒），应大于 interval
 max_peer_timeout = 2700
+# 单个会话上传 / 下载的平均速度上限（字节 / 秒），超过时该段流量不计；0 不限。默认 10 Gbit/s
+# max_rate = 1250000000
 # 记账流分区数（与 accounting 一致；acct:_meta 中已有值时以它为准）
 partitions = 64

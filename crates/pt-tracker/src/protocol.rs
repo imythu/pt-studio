@@ -1,7 +1,7 @@
 //! HTTP tracker 协议（BEP 3 / BEP 23 / BEP 7 / BEP 48）：原始查询串解析（info_hash、peer_id 是任意字节的 URL 编码）
 //! 与 bencode 响应。
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 /// 百分号解码为字节（`+` 不当作空格：info_hash 中的 `+` 只会以 %2B 出现）
 pub fn percent_decode(s: &str) -> Option<Vec<u8>> {
@@ -46,6 +46,36 @@ pub fn get_u64(q: &[(String, Vec<u8>)], key: &str) -> Option<u64> {
 
 pub fn hash20(v: &[u8]) -> Option<[u8; 20]> {
     v.try_into().ok()
+}
+
+/// BEP 7 的 `ipv6=` / `ipv4=`：客户端另一族的地址，`addr`、`[v6]:port` 或 `v4:port`，没有端口时用 announce 的 `port`。
+/// 只接受公网单播地址：这是客户端自报的，不能让人把 peer 引向内网或别人的保留地址
+pub fn alt_addr(v: &str, port: u16) -> Option<SocketAddr> {
+    let a = v
+        .parse::<SocketAddr>()
+        .ok()
+        .or_else(|| v.parse::<IpAddr>().ok().map(|ip| SocketAddr::new(ip, port)))?;
+    let public = match a.ip() {
+        IpAddr::V4(ip) => {
+            let [a0, a1, ..] = ip.octets();
+            !(ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+                || ip.is_multicast()
+                || ip.is_documentation()
+                || a0 == 0
+                || a0 >= 240
+                || (a0 == 100 && (64..128).contains(&a1)))
+        }
+        IpAddr::V6(ip) => {
+            let s0 = ip.segments()[0];
+            // 全球单播 2000::/3，去掉文档前缀 2001:db8::/32
+            s0 & 0xe000 == 0x2000 && !(s0 == 0x2001 && ip.segments()[1] == 0x0db8)
+        }
+    };
+    (public && a.port() != 0).then_some(a)
 }
 
 // ---------------- bencode ----------------
@@ -206,6 +236,32 @@ mod tests {
         );
         assert_eq!(percent_decode("%G1"), None);
         assert_eq!(percent_decode("%1"), None);
+    }
+
+    #[test]
+    fn alt_addresses() {
+        let q = parse_query("ipv6=2409%3a8a62%3a311%3acdd0%3a8eb2%3ad91f%3aa7d7%3af552");
+        assert_eq!(
+            alt_addr(get_str(&q, "ipv6").unwrap(), 58181).map(|a| a.to_string()),
+            Some("[2409:8a62:311:cdd0:8eb2:d91f:a7d7:f552]:58181".to_owned())
+        );
+        assert_eq!(alt_addr("[2001:4860::1]:6881", 1).map(|a| a.port()), Some(6881));
+        assert_eq!(alt_addr("8.8.8.8:1234", 1).map(|a| a.port()), Some(1234));
+        for bad in [
+            "::1",
+            "fe80::1",
+            "fd00::1",
+            "2001:db8::1",
+            "::ffff:8.8.8.8",
+            "10.0.0.1",
+            "192.168.1.2",
+            "127.0.0.1",
+            "100.64.0.1",
+            "8.8.8.8:0",
+            "x",
+        ] {
+            assert_eq!(alt_addr(bad, 6881), None, "{bad}");
+        }
     }
 
     #[test]
