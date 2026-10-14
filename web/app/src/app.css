@@ -166,7 +166,7 @@ mark { background: color-mix(in srgb, var(--pt-color-primary) 22%, transparent);
   .auth { grid-template-columns: 1fr; }
   .auth-side { display: none; }
   .auth-form { padding: 32px 24px; }
-  .with-sidebar { flex-direction: column; }
+  .with-sidebar { flex-direction: column; align-items: stretch; }
   .filters, .sidebar { width: 100%; position: static; max-height: none; }
   .group-meta { flex-direction: column; }
   .menu-toggle { display: inline-grid; }
@@ -186,3 +186,10 @@ mark { background: color-mix(in srgb, var(--pt-color-primary) 22%, transparent);
 .admin-nav { display: flex; flex-wrap: wrap; gap: 6px; }
 .admin-nav a { padding: 6px 14px; border-radius: 999px; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); color: var(--pt-color-fg); font-weight: 550; }
 .admin-nav a:hover { border-color: var(--pt-color-primary); color: var(--pt-color-primary); }
+h1 ~ .pt-badge { margin-bottom: var(--pt-space-3); }
+.pt-card .pt-empty { padding: 20px 16px; }
+.pt-card .pt-empty-art { width: 100px; }
+.list-card .pt-empty-art { width: 132px; }
+.sidebar .pt-card-body { display: grid; gap: 10px; }
+.sidebar .pt-card-body .pt-field { margin-bottom: 0; }
+.sidebar .pt-card-body .pt-btn { width: 100%; }
