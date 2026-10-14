@@ -458,3 +458,9 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
   .rec-section header .small { flex-basis: 100%; }
 }
 html, body { overflow-x: clip; }
+@media (max-width: 860px) {
+  .t-head.has-poster { display: block; }
+  .t-head.has-poster .t-poster { float: left; width: 96px; margin: 2px 14px 8px 0; }
+  .t-head.has-poster::after { content: ""; display: block; clear: both; }
+  .peers th:nth-child(3), .peers td:nth-child(3) { display: none; }
+}
