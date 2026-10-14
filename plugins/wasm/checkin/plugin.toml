@@ -67,6 +67,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["enabled", "currency", "reward_base", "reward_step", "reward_cap", "milestones"]
 
 [settings_schema.properties.enabled]
 type = "boolean"

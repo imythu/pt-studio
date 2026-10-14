@@ -34,6 +34,7 @@ timeout_secs = 60
 
 [settings_schema]
 type = "object"
+x-pt-order = ["title_template", "metadata_locale"]
 
 [settings_schema.properties.title_template]
 type = "string"

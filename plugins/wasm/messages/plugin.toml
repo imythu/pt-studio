@@ -140,6 +140,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["max_recipients", "rate_per_hour", "max_length"]
 
 [settings_schema.properties.max_recipients]
 type = "integer"

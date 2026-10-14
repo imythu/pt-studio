@@ -176,6 +176,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["initial_rules", "default_status", "candidate_enabled", "approve_votes", "reject_votes", "vote_min_account_days", "claim_minutes"]
 
 [settings_schema.properties.initial_rules]
 type = "array"

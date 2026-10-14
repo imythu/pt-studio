@@ -70,6 +70,7 @@ migrations = "migrations"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["enabled", "sample_rate", "new_user_days", "model_enabled", "profile", "report_threshold", "review_threshold", "daily_model_budget", "spam_domains", "hook_enabled", "extra_guidelines"]
 
 [settings_schema.properties.enabled]
 type = "boolean"

@@ -145,6 +145,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["currency", "min_bounty", "min_contribution", "fee_permille", "expire_days", "auto_confirm_days", "allow_self_fill"]
 
 [settings_schema.properties.currency]
 type = "string"

@@ -56,3 +56,13 @@ migrations = "migrations"
 "type-generic.name" = { zh-CN = "其他", en = "Other" }
 "type-generic.field.kind" = { zh-CN = "分类", en = "Kind" }
 "type-generic.perm.manage" = { zh-CN = "管理通用类型", en = "Manage generic kinds" }
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.max_fields_per_kind]
+type = "integer"
+minimum = 1
+maximum = 30
+default = 30
+title = "每个自定义类型最多字段数"

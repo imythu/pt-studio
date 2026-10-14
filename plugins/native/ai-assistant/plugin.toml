@@ -127,6 +127,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["site_name", "fallback_contact", "profile", "daily_questions_per_user", "daily_budget", "max_tool_rounds", "retention_days"]
 
 [settings_schema.properties.site_name]
 type = "string"

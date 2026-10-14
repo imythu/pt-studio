@@ -112,8 +112,20 @@ async fn list_plugins(State(sh): State<Arc<Shared>>) -> Response {
         .iter()
         .filter_map(|id| sh.plugins.get(id))
         .map(|rt| {
-            json!({ "id": rt.id, "name": rt.manifest.name, "version": rt.manifest.version.to_string(),
-                          "kind": rt.manifest.kind, "provides": rt.manifest.provides })
+            let m = &rt.manifest;
+            let f = m.frontend.as_ref();
+            // 后台设置入口：插件自定义组件 > schema 表单 > 无（仍可用 JSON 高级编辑）
+            let settings = match f.and_then(|f| f.settings_ui.as_deref()) {
+                Some("custom") => "custom",
+                _ if m.settings_schema.is_some() => "schema",
+                _ => "none",
+            };
+            let admin_routes: Vec<&String> = f
+                .map(|f| f.routes.iter().filter(|r| r.starts_with("/admin/")).collect())
+                .unwrap_or_default();
+            json!({ "id": rt.id, "name": m.name, "name_term": m.name_term, "description": m.description,
+                    "version": m.version.to_string(), "kind": m.kind, "provides": m.provides,
+                    "settings": settings, "admin_routes": admin_routes })
         })
         .collect();
     AxJson(json!({ "items": items })).into_response()

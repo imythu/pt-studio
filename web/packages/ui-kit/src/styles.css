@@ -142,3 +142,34 @@ select.pt-input { appearance: none; -webkit-appearance: none; padding-right: 36p
 .btn-lg { padding: 10px 20px; font-size: 15px; }
 .pt-tab[aria-selected="true"] { color: var(--pt-color-fg); border-bottom-color: var(--pt-color-accent); }
 .pt-card-head .pt-card-title { font-size: 16px; }
+
+/* schema 表单：开关、标签输入、列表 / 映射编辑器、已修改标记 */
+.pt-switch { position: relative; display: inline-flex; width: 38px; height: 22px; cursor: pointer; }
+.pt-switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.pt-switch-track { width: 100%; height: 100%; border-radius: 999px; background: var(--pt-color-border-strong); transition: background .15s; }
+.pt-switch-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .15s; }
+.pt-switch input:checked + .pt-switch-track { background: var(--pt-color-primary-solid); }
+.pt-switch input:checked + .pt-switch-track::after { transform: translateX(16px); }
+.pt-switch input:focus-visible + .pt-switch-track { box-shadow: var(--pt-ring); }
+.pt-input-num { max-width: 200px; }
+.pt-field-label:empty { display: none; }
+.pt-field-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--pt-color-warn); margin-left: 6px; vertical-align: middle; }
+.pt-field-reset { font: inherit; font-size: 12px; font-weight: 500; margin-left: 8px; padding: 0; border: 0; background: none; color: var(--pt-color-primary); cursor: pointer; }
+.pt-field-reset:hover { text-decoration: underline; }
+.pt-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; min-height: 36px; border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); background: var(--pt-color-surface); }
+.pt-tags:focus-within { border-color: var(--pt-color-accent); box-shadow: var(--pt-ring); }
+.pt-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 9px; border-radius: 999px; background: var(--pt-color-primary-soft); color: var(--pt-color-primary); font-size: 12.5px; font-weight: 550; }
+.pt-tag button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px; border-radius: 50%; }
+.pt-tag button:hover { background: color-mix(in srgb, var(--pt-color-primary) 18%, transparent); }
+.pt-tags-input { flex: 1 1 120px; min-width: 80px; border: 0; outline: none; background: transparent; font: inherit; color: var(--pt-color-fg); padding: 3px 0; }
+.pt-list { display: flex; flex-direction: column; gap: 8px; }
+.pt-list-item { border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); padding: 8px 12px 4px; background: var(--pt-color-surface-2); }
+.pt-list-item .pt-fieldset { border: 0; padding: 0; margin: 0; }
+.pt-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.pt-list-actions { display: inline-flex; gap: 2px; }
+.pt-list-actions .pt-btn, .pt-list-head .pt-btn { padding: 3px 8px; }
+.pt-list-empty { font-size: 12.5px; }
+.pt-map-key { max-width: 220px; }
+.pt-map-add { display: flex; gap: 8px; }
+.pt-map-add .pt-input { max-width: 220px; }
+.pt-nullable > .pt-fieldset { margin-left: 12px; padding-left: 12px; border: 0; border-left: 2px solid var(--pt-color-border); }

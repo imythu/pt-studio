@@ -3,7 +3,7 @@
 // 校验器为无 eval 的子集实现（CSP 不允许 `unsafe-eval`，Ajv 需要代码生成）：type、required、enum、minimum / maximum、
 // minLength / maxLength、pattern、items、properties、additionalProperties: false。
 
-import { useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 export interface Schema {
   type?: string | string[];
@@ -106,6 +106,8 @@ export function serverErrors(details: unknown): Errors {
 /** 按 schema 默认值补全 */
 export function withDefaults(schema: Schema, value: unknown): unknown {
   if (value === undefined && schema.default !== undefined) return schema.default;
+  // 可空对象缺省为未启用
+  if (value === undefined && Array.isArray(schema.type) && schema.type.includes('null')) return undefined;
   if (schema.properties && (value === undefined || typeOf(value) === 'object')) {
     const obj = { ...((value as Record<string, unknown>) ?? {}) };
     for (const [k, s] of Object.entries(schema.properties)) {
@@ -115,6 +117,41 @@ export function withDefaults(schema: Schema, value: unknown): unknown {
     return obj;
   }
   return value;
+}
+
+/** 键序无关的深比较 */
+export function same(a: unknown, b: unknown): boolean {
+  return stable(a) === stable(b);
+}
+
+function stable(v: unknown): string {
+  if (v === undefined) return 'undefined';
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+  return `{${Object.keys(v as object)
+    .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`)
+    .join(',')}}`;
+}
+
+/** 按 JSON Pointer 取值 */
+export function at(v: unknown, path: string): unknown {
+  let cur = v;
+  for (const seg of path.split('/').slice(1)) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[seg.replace(/~1/g, '/').replace(/~0/g, '~')];
+  }
+  return cur;
+}
+
+/** 设置表单上下文：已保存值（标记“已修改”）与“恢复默认” */
+const BaselineCtx = createContext<{ baseline: unknown } | null>(null);
+
+/** 文案：t 原样返回键时用回退值 */
+function tr(t: (k: string) => string, key: string, fallback: string): string {
+  const v = t(key);
+  return v === key ? fallback : v;
 }
 
 interface FieldProps {
@@ -188,13 +225,101 @@ export function ordered(schema: Schema): [string, Schema][] {
   return [...entries].sort((a, b) => rank(a[0]) - rank(b[0]));
 }
 
-function FieldWrap({ label, error, hint, children }: { label: string; error?: string; hint?: string; children: ReactNode }) {
+interface Meta {
+  path: string;
+  schema: Schema;
+  value: unknown;
+  onChange(v: unknown): void;
+  t(k: string): string;
+}
+
+function FieldWrap({ label, error, hint, children, meta }: { label: string; error?: string; hint?: string; children: ReactNode; meta?: Meta }) {
+  const ctx = useContext(BaselineCtx);
+  const modified = !!ctx && !!meta && !same(meta.value, at(ctx.baseline, meta.path));
+  const def = meta?.schema.default;
+  const canReset = !!ctx && !!meta && def !== undefined && !same(meta.value, def);
   return (
-    <div className={`pt-field${error ? ' pt-field-invalid' : ''}`}>
-      <span className="pt-field-label">{label}</span>
+    <div className={`pt-field${error ? ' pt-field-invalid' : ''}${modified ? ' pt-field-modified' : ''}`}>
+      <span className="pt-field-label">
+        {label}
+        {modified && meta && <span className="pt-field-dot" title={tr(meta.t, 'ui.form.modified', 'Modified')} />}
+        {canReset && meta && (
+          <button type="button" className="pt-field-reset" title={`${tr(meta.t, 'ui.form.default', 'Default')}: ${JSON.stringify(def)}`} onClick={() => meta.onChange(def)}>
+            {tr(meta.t, 'ui.form.reset_default', 'Reset to default')}
+          </button>
+        )}
+      </span>
       {children}
       {hint && !error && <span className="pt-field-hint">{hint}</span>}
       {error && <span className="pt-field-error">{error}</span>}
+    </div>
+  );
+}
+
+/** 数值范围 / 默认值提示 */
+function numHint(s: Schema, t: (k: string) => string): string | undefined {
+  const parts = [hintOf(s, t)];
+  if (s.minimum !== undefined && s.maximum !== undefined) parts.push(`${s.minimum} – ${s.maximum}`);
+  else if (s.minimum !== undefined) parts.push(`≥ ${s.minimum}`);
+  else if (s.maximum !== undefined) parts.push(`≤ ${s.maximum}`);
+  const out = parts.filter(Boolean).join(' · ');
+  return out || undefined;
+}
+
+/** 数字输入：本地保留文本，便于输入 “0.” “-” 等中间态 */
+function NumberInput({ id, integer, schema, value, onChange }: { id: string; integer: boolean; schema: Schema; value: unknown; onChange(v: unknown): void }) {
+  const [text, setText] = useState(typeof value === 'number' ? String(value) : '');
+  useEffect(() => {
+    const n = text.trim() === '' ? undefined : Number(text);
+    if (n !== value && !(n === undefined && value === undefined)) setText(typeof value === 'number' ? String(value) : '');
+  }, [value]);
+  return (
+    <input
+      id={id}
+      className="pt-input pt-input-num"
+      inputMode={integer ? 'numeric' : 'decimal'}
+      value={text}
+      onChange={(e) => {
+        const v = e.target.value;
+        setText(v);
+        if (v.trim() === '') return onChange(undefined);
+        const n = Number(v);
+        if (Number.isFinite(n) && (!integer || Number.isInteger(n))) onChange(n);
+      }}
+      onBlur={() => {
+        const n = Number(text);
+        if (text.trim() !== '' && !(Number.isFinite(n) && (!integer || Number.isInteger(n)))) setText(typeof value === 'number' ? String(value) : '');
+      }}
+      placeholder={schema.default !== undefined ? String(schema.default) : undefined}
+    />
+  );
+}
+
+/** 字符串列表：回车 / 逗号添加，× 删除 */
+function TagInput({ id, value, onChange, t }: { id: string; value: string[]; onChange(v: unknown): void; t(k: string): string }) {
+  const [text, setText] = useState('');
+  const commit = () => {
+    const add = text.split(/[,\n]/).map((s) => s.trim()).filter((s) => s && !value.includes(s));
+    if (add.length) onChange([...value, ...add]);
+    setText('');
+  };
+  const key = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Backspace' && text === '' && value.length) onChange(value.slice(0, -1));
+  };
+  return (
+    <div className="pt-tags">
+      {value.map((v, i) => (
+        <span key={`${v}-${i}`} className="pt-tag">
+          {v}
+          <button type="button" aria-label="remove" onClick={() => onChange(value.filter((_, j) => j !== i))}>
+            ×
+          </button>
+        </span>
+      ))}
+      <input id={id} className="pt-tags-input" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={key} onBlur={commit} placeholder={tr(t, 'ui.form.tag_hint', 'Type and press Enter')} />
     </div>
   );
 }
@@ -203,6 +328,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   const err = errors[path];
   const ty = primary(schema);
   const id = `sf${path.replace(/\W/g, '_')}`;
+  const m: Meta = { path, schema, value, onChange, t };
   if (schema.oneOf && discriminator(schema)) {
     const d = discriminator(schema) as string;
     const branch = branchOf(schema, value);
@@ -233,10 +359,28 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
       </div>
     );
   }
+  if (ty === 'object' && typeof schema.additionalProperties === 'object') {
+    return <MapEditor schema={schema} item={schema.additionalProperties} value={value} onChange={onChange} path={path} errors={errors} label={label} t={t} />;
+  }
+  // 可空对象（`type = ["object", "null"]`）：开关控制启用，关闭时为 null
+  if (ty === 'object' && schema.properties && Array.isArray(schema.type) && schema.type.includes('null') && path) {
+    const on = value !== null && value !== undefined;
+    return (
+      <div className="pt-nullable">
+        <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
+          <label className="pt-switch">
+            <input id={id} type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked ? (withDefaults({ ...schema, type: 'object' }, {}) ?? {}) : null)} />
+            <span className="pt-switch-track" aria-hidden />
+          </label>
+        </FieldWrap>
+        {on && <SchemaField schema={{ ...schema, type: 'object' }} value={value} onChange={onChange} path={path} errors={errors} label="" t={t} />}
+      </div>
+    );
+  }
   if (ty === 'object' && schema.properties) {
     return (
       <fieldset className="pt-fieldset">
-        {path && <legend>{label}</legend>}
+        {path && label && <legend>{label}</legend>}
         {ordered(schema).filter(([, s]) => !s.readOnly).map(([k, s]) => (
           <SchemaField
             key={k}
@@ -254,14 +398,17 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   }
   if (ty === 'boolean') {
     return (
-      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
-        <input id={id} type="checkbox" checked={value === true} onChange={(e) => onChange(e.target.checked)} />
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
+        <label className="pt-switch">
+          <input id={id} type="checkbox" checked={value === true} onChange={(e) => onChange(e.target.checked)} />
+          <span className="pt-switch-track" aria-hidden />
+        </label>
       </FieldWrap>
     );
   }
   if (schema.enum) {
     return (
-      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
         <select id={id} className="pt-input" value={value === undefined ? '' : JSON.stringify(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : JSON.parse(e.target.value))}>
           <option value="">—</option>
           {schema.enum.map((o, i) => (
@@ -276,7 +423,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   if (ty === 'array' && schema.items?.enum) {
     const cur = Array.isArray(value) ? value : [];
     return (
-      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
         <div className="pt-checks">
           {schema.items.enum.map((o) => (
             <label key={String(o)} className="pt-check">
@@ -293,24 +440,18 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   if (ty === 'array' && (!schema.items || primary(schema.items) === 'string')) {
     const cur = Array.isArray(value) ? (value as string[]) : [];
     return (
-      <FieldWrap label={label} error={err} hint={hintOf(schema, t) ?? 'comma separated'}>
-        <input id={id} className="pt-input" value={cur.join(', ')} onChange={(e) => onChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
+        <TagInput id={id} value={cur} onChange={onChange} t={t} />
       </FieldWrap>
     );
   }
+  if (ty === 'array' && schema.items && primary(schema.items) === 'object') {
+    return <ListEditor schema={schema} item={schema.items} value={value} onChange={onChange} path={path} errors={errors} label={label} t={t} />;
+  }
   if (ty === 'integer' || ty === 'number') {
     return (
-      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
-        <input
-          id={id}
-          className="pt-input"
-          type="number"
-          step={ty === 'integer' ? 1 : 'any'}
-          min={schema.minimum}
-          max={schema.maximum}
-          value={typeof value === 'number' ? value : ''}
-          onChange={(e) => onChange(e.target.value === '' ? undefined : ty === 'integer' ? parseInt(e.target.value, 10) : Number(e.target.value))}
-        />
+      <FieldWrap label={label} error={err} hint={numHint(schema, t)} meta={m}>
+        <NumberInput id={id} integer={ty === 'integer'} schema={schema} value={value} onChange={onChange} />
       </FieldWrap>
     );
   }
@@ -318,7 +459,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
     const multiline = schema['x-pt-widget'] === 'markdown' || schema['x-pt-widget'] === 'mediainfo' || schema['x-pt-widget'] === 'textarea';
     const type = schema['x-pt-secret'] ? 'password' : schema.format === 'date' ? 'date' : schema.format === 'date-time' ? 'datetime-local' : 'text';
     return (
-      <FieldWrap label={label} error={err} hint={hintOf(schema, t)}>
+      <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
         {multiline ? (
           <textarea id={id} className={`pt-input${schema['x-pt-widget'] === 'mediainfo' ? ' pt-mono' : ''}`} rows={6} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />
         ) : (
@@ -329,6 +470,90 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   }
   // 未覆盖的结构：JSON 文本编辑
   return <JsonField label={label} value={value} onChange={onChange} error={err} />;
+}
+
+/** 对象列表：每项一张小卡片，可增删、上下移动 */
+function ListEditor({ schema, item, value, onChange, path, errors, label, t }: Omit<FieldProps, 'schema'> & { schema: Schema; item: Schema }) {
+  const cur = Array.isArray(value) ? value : [];
+  const set = (i: number, v: unknown) => onChange(cur.map((x, j) => (j === i ? v : x)));
+  const move = (i: number, d: number) => {
+    const next = [...cur];
+    const [x] = next.splice(i, 1);
+    next.splice(i + d, 0, x);
+    onChange(next);
+  };
+  const err = errors[path];
+  return (
+    <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={{ path, schema, value, onChange, t }}>
+      <div className="pt-list">
+        {cur.map((x, i) => (
+          <div key={i} className="pt-list-item">
+            <div className="pt-list-head">
+              <span className="pt-muted">#{i + 1}</span>
+              <span className="pt-list-actions">
+                <button type="button" className="pt-btn pt-btn-ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label="up">↑</button>
+                <button type="button" className="pt-btn pt-btn-ghost" disabled={i === cur.length - 1} onClick={() => move(i, 1)} aria-label="down">↓</button>
+                <button type="button" className="pt-btn pt-btn-ghost pt-btn-danger" onClick={() => onChange(cur.filter((_, j) => j !== i))}>
+                  {tr(t, 'ui.form.remove', 'Remove')}
+                </button>
+              </span>
+            </div>
+            <SchemaField schema={item} value={x} onChange={(v) => set(i, v)} path={`${path}/${i}`} errors={errors} label="" t={t} />
+          </div>
+        ))}
+        {cur.length === 0 && <div className="pt-muted pt-list-empty">{tr(t, 'ui.form.empty_list', 'Nothing here yet')}</div>}
+        <div>
+          <button type="button" className="pt-btn" onClick={() => onChange([...cur, withDefaults(item, undefined) ?? (primary(item) === 'object' ? {} : undefined)])}>
+            + {tr(t, 'ui.form.add', 'Add')}
+          </button>
+        </div>
+      </div>
+    </FieldWrap>
+  );
+}
+
+/** 键值映射（`additionalProperties: {schema}`）：如按等级配置的规则；固定属性照常显示在前 */
+function MapEditor({ schema, item, value, onChange, path, errors, label, t }: Omit<FieldProps, 'schema'> & { schema: Schema; item: Schema }) {
+  const obj = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+  const fixed = schema.properties ?? {};
+  const keys = Object.keys(obj).filter((k) => !(k in fixed));
+  const [nk, setNk] = useState('');
+  const add = () => {
+    const k = nk.trim();
+    if (!k || k in obj) return;
+    onChange({ ...obj, [k]: withDefaults(item, undefined) ?? (primary(item) === 'object' ? {} : undefined) });
+    setNk('');
+  };
+  const rename = (from: string, to: string) => {
+    if (!to || to === from || to in obj) return;
+    onChange(Object.fromEntries(Object.entries(obj).map(([k, v]) => [k === from ? to : k, v])));
+  };
+  return (
+    <FieldWrap label={label} error={errors[path]} hint={hintOf(schema, t)} meta={{ path, schema, value, onChange, t }}>
+      <div className="pt-list">
+        {Object.keys(fixed).length > 0 && (
+          <SchemaField schema={{ ...schema, additionalProperties: undefined }} value={obj} onChange={onChange} path={path} errors={errors} label="" t={t} />
+        )}
+        {keys.map((k) => (
+          <div key={k} className="pt-list-item">
+            <div className="pt-list-head">
+              <input className="pt-input pt-map-key pt-mono" defaultValue={k} onBlur={(e) => rename(k, e.target.value.trim())} aria-label="key" />
+              <button type="button" className="pt-btn pt-btn-ghost pt-btn-danger" onClick={() => onChange(Object.fromEntries(Object.entries(obj).filter(([x]) => x !== k)))}>
+                {tr(t, 'ui.form.remove', 'Remove')}
+              </button>
+            </div>
+            <SchemaField schema={item} value={obj[k]} onChange={(v) => onChange({ ...obj, [k]: v })} path={`${path}/${k}`} errors={errors} label="" t={t} />
+          </div>
+        ))}
+        <div className="pt-map-add">
+          <input className="pt-input pt-mono" value={nk} placeholder={tr(t, 'ui.form.new_key', 'New key')} onChange={(e) => setNk(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())} />
+          <button type="button" className="pt-btn" onClick={add} disabled={!nk.trim() || nk.trim() in obj}>
+            + {tr(t, 'ui.form.add', 'Add')}
+          </button>
+        </div>
+      </div>
+    </FieldWrap>
+  );
 }
 
 /** 文本文件解码：UTF-16 LE / BE（BOM）或 UTF-8（EAC 日志常为 UTF-16 LE） */
@@ -369,6 +594,19 @@ function LogFiles({ label, error, hint, value, onChange }: { label: string; erro
 export function JsonField({ label, value, onChange, error }: { label: string; value: unknown; onChange(v: unknown): void; error?: string }) {
   const [text, setText] = useState(() => JSON.stringify(value ?? null, null, 2));
   const [bad, setBad] = useState<string | null>(null);
+  // 外部改动（排序、恢复默认、放弃修改）时同步文本；正在输入的无效 JSON 保留
+  useEffect(() => {
+    let cur: unknown;
+    try {
+      cur = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (!same(cur, value ?? null)) {
+      setText(JSON.stringify(value ?? null, null, 2));
+      setBad(null);
+    }
+  }, [value]);
   return (
     <FieldWrap label={label} error={bad ?? error}>
       <textarea
@@ -389,6 +627,22 @@ export function JsonField({ label, value, onChange, error }: { label: string; va
   );
 }
 
-export function SchemaForm({ schema, value, onChange, errors = {}, t = (k) => k }: { schema: Schema; value: unknown; onChange(v: unknown): void; errors?: Errors; t?: (k: string) => string }) {
-  return <SchemaField schema={schema} value={value} onChange={onChange} path="" errors={errors} label={schema.title ?? ''} t={t} />;
+/** `baseline`：已保存的值；给出时字段显示“已修改”标记与“恢复默认”（后台设置页） */
+export function SchemaForm({
+  schema,
+  value,
+  onChange,
+  errors = {},
+  t = (k) => k,
+  baseline,
+}: {
+  schema: Schema;
+  value: unknown;
+  onChange(v: unknown): void;
+  errors?: Errors;
+  t?: (k: string) => string;
+  baseline?: unknown;
+}) {
+  const form = <SchemaField schema={schema} value={value} onChange={onChange} path="" errors={errors} label={schema.title ?? ''} t={t} />;
+  return baseline === undefined ? form : <BaselineCtx.Provider value={{ baseline }}>{form}</BaselineCtx.Provider>;
 }

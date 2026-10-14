@@ -116,6 +116,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["max_length", "edit_window_minutes", "rate_per_30s", "rate_per_hour", "new_user_days", "new_user_daily_limit", "max_links", "image_hosts", "disabled_targets"]
 
 [settings_schema.properties.max_length]
 type = "integer"

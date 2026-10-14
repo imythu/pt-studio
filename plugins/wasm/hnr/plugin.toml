@@ -133,6 +133,7 @@ settings_ui = "schema"
 [settings_schema]
 type = "object"
 additionalProperties = true
+x-pt-order = ["window_days", "min_seed_hours", "min_torrent_ratio", "max_hnr", "invite_block_at", "expire_days", "redownload_mode"]
 
 [settings_schema.properties.window_days]
 type = "integer"

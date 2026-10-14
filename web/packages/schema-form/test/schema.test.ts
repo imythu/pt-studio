@@ -61,3 +61,28 @@ describe('decodeText (rip logs)', () => {
     expect(decodeText(new TextEncoder().encode('日志').buffer as ArrayBuffer)).toBe('日志');
   });
 });
+
+describe('settings helpers', () => {
+  it('compares deeply ignoring key order and undefined', async () => {
+    const { same, at } = await import('../src/index');
+    expect(same({ a: 1, b: [1, { c: 2 }] }, { b: [1, { c: 2 }], a: 1 })).toBe(true);
+    expect(same({ a: 1, x: undefined }, { a: 1 })).toBe(true);
+    expect(same({ a: 1 }, { a: 2 })).toBe(false);
+    expect(at({ rules: [{ id: 'x' }], 'a/b': 1 }, '/rules/0/id')).toBe('x');
+    expect(at({ 'a/b': 1 }, '/a~1b')).toBe(1);
+    expect(at({ a: 1 }, '/a/b')).toBeUndefined();
+  });
+
+  it('leaves nullable objects unset and validates them only when enabled', () => {
+    const s: Schema = {
+      type: 'object',
+      properties: {
+        grant: { type: ['object', 'null'], required: ['amount'], properties: { amount: { type: 'integer', default: 1 } } },
+        quota: { type: 'object', properties: { amount: { type: 'integer', default: 0 } } },
+      },
+    };
+    expect(withDefaults(s, {})).toEqual({ quota: { amount: 0 } });
+    expect(validate(s, { grant: null })).toEqual({});
+    expect(validate(s, { grant: {} })).toEqual({ '/grant/amount': 'required' });
+  });
+});

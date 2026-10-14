@@ -112,6 +112,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["rate_per_hour", "claim_minutes", "abuse_threshold", "abuse_ban_days"]
 
 [settings_schema.properties.rate_per_hour]
 type = "integer"

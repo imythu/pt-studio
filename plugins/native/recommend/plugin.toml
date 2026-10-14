@@ -30,6 +30,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["enabled", "per_section", "window_days"]
 
 [settings_schema.properties.enabled]
 type = "boolean"

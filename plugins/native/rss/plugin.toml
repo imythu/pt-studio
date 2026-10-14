@@ -108,6 +108,7 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["site_name", "site_url", "items_per_feed", "max_feeds_per_user", "requests_per_minute"]
 
 [settings_schema.properties.site_name]
 type = "string"

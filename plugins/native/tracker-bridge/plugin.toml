@@ -53,6 +53,7 @@ timeout_secs = 600
 
 [settings_schema]
 type = "object"
+x-pt-order = ["interval", "min_interval", "max_peers", "allow_unknown_clients", "clients"]
 
 [settings_schema.properties.interval]
 type = "integer"

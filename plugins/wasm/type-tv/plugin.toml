@@ -38,6 +38,7 @@ timeout_secs = 60
 
 [settings_schema]
 type = "object"
+x-pt-order = ["title_template", "metadata_locale", "scope_check", "season_pack_min_ratio"]
 
 [settings_schema.properties.title_template]
 type = "string"

@@ -74,6 +74,7 @@ migrations = "migrations"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["enabled", "model_enabled", "profile", "daily_model_budget", "require_nfo_types"]
 
 [settings_schema.properties.enabled]
 type = "boolean"

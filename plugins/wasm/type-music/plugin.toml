@@ -47,6 +47,7 @@ migrations = "migrations"
 
 [settings_schema]
 type = "object"
+x-pt-order = ["title_template", "log_check_enabled"]
 
 [settings_schema.properties.title_template]
 type = "string"

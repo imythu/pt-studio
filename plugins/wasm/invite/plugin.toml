@@ -285,6 +285,323 @@ slots = ["auth.register.form_extra", "nav.user_menu"]
 routes = ["/p/invite/*"]
 settings_ui = "schema"
 
+[settings_schema]
+type = "object"
+x-pt-order = [
+  "enabled", "redeem_when_disabled", "redeem_if_inviter_unavailable", "default_expiry_days", "max_expiry_days",
+  "system_expiry_days", "reservation_ttl_secs", "min_account_days", "daily_limit", "dedupe_window_days",
+  "refund_on_revoke", "refund_on_expire", "show_inviter_on_check", "campaign_inviter", "initial_quota",
+  "class_rules", "periodic_schedule", "class_grants", "penalty_rules",
+]
+
+[settings_schema.properties.enabled]
+type = "boolean"
+default = true
+title = "开放发邀"
+
+[settings_schema.properties.redeem_when_disabled]
+type = "boolean"
+default = true
+title = "关闭发邀时已发出的码仍可注册"
+
+[settings_schema.properties.redeem_if_inviter_unavailable]
+type = "boolean"
+default = false
+title = "邀请人被封禁 / 删除后其未用码仍可注册"
+
+[settings_schema.properties.default_expiry_days]
+type = "integer"
+minimum = 1
+maximum = 90
+default = 7
+title = "邀请码默认有效期（天）"
+description = "不能超过最长有效期"
+
+[settings_schema.properties.max_expiry_days]
+type = "integer"
+minimum = 1
+maximum = 90
+default = 14
+title = "邀请码最长有效期（天）"
+
+[settings_schema.properties.system_expiry_days]
+type = "integer"
+minimum = 1
+maximum = 90
+default = 3
+title = "系统发放名额的有效期（天）"
+
+[settings_schema.properties.reservation_ttl_secs]
+type = "integer"
+minimum = 60
+maximum = 3600
+default = 900
+title = "注册时占用邀请码的时长（秒）"
+
+[settings_schema.properties.min_account_days]
+type = "integer"
+minimum = 0
+maximum = 3650
+default = 30
+title = "发邀所需账号天数"
+
+[settings_schema.properties.daily_limit]
+type = "integer"
+minimum = 0
+maximum = 1000
+default = 5
+title = "每人每日发邀上限（0 = 不限）"
+
+[settings_schema.properties.dedupe_window_days]
+type = "integer"
+minimum = 1
+maximum = 365
+default = 30
+title = "同一事件重复处罚的去重窗口（天）"
+
+[settings_schema.properties.refund_on_revoke]
+type = "boolean"
+default = true
+title = "撤销邀请码时退还名额"
+
+[settings_schema.properties.refund_on_expire]
+type = "boolean"
+default = false
+title = "邀请码过期时退还名额"
+
+[settings_schema.properties.show_inviter_on_check]
+type = "boolean"
+default = true
+title = "校验邀请码时显示邀请人"
+
+[settings_schema.properties.campaign_inviter]
+type = "string"
+enum = ["none", "creator"]
+x-pt-enum-titles = ["无邀请人", "创建人"]
+default = "none"
+title = "活动码注册者的邀请人"
+
+[settings_schema.properties.initial_quota]
+type = "object"
+title = "新用户初始名额"
+x-pt-order = ["amount", "expires_days"]
+
+[settings_schema.properties.initial_quota.properties.amount]
+type = "integer"
+minimum = 0
+maximum = 10
+default = 0
+title = "数量"
+
+[settings_schema.properties.initial_quota.properties.expires_days]
+type = ["integer", "null"]
+minimum = 1
+maximum = 3650
+title = "有效期（天，留空 = 永久）"
+
+[settings_schema.properties.class_rules]
+type = "object"
+title = "按等级的发邀规则"
+description = "键为等级 ID，* 为缺省规则"
+default = { "*" = { max_outstanding = 1, require_email_binding = false, can_bypass_min_age = false } }
+
+[settings_schema.properties.class_rules.additionalProperties]
+type = "object"
+x-pt-order = ["max_outstanding", "require_email_binding", "can_bypass_min_age"]
+
+[settings_schema.properties.class_rules.additionalProperties.properties.max_outstanding]
+type = "integer"
+minimum = 0
+maximum = 100
+default = 1
+title = "最多同时持有的未用邀请码"
+
+[settings_schema.properties.class_rules.additionalProperties.properties.require_email_binding]
+type = "boolean"
+default = false
+title = "邀请码须绑定被邀请人邮箱"
+
+[settings_schema.properties.class_rules.additionalProperties.properties.can_bypass_min_age]
+type = "boolean"
+default = false
+title = "不受发邀账号天数限制"
+
+[settings_schema.properties.periodic_schedule]
+type = "string"
+enum = ["monthly", "weekly"]
+x-pt-enum-titles = ["每月 1 日", "每周一"]
+default = "monthly"
+title = "定期发放名额的周期"
+
+[settings_schema.properties.class_grants]
+type = "array"
+default = []
+title = "按等级发放名额"
+description = "每个等级一条；晋升时发放和 / 或定期发放"
+
+[settings_schema.properties.class_grants.items]
+type = "object"
+required = ["class_id"]
+x-pt-order = ["class_id", "on_promotion", "periodic", "repeat_on_repromotion"]
+
+[settings_schema.properties.class_grants.items.properties.class_id]
+type = "integer"
+minimum = 0
+title = "等级 ID"
+
+[settings_schema.properties.class_grants.items.properties.on_promotion]
+type = ["object", "null"]
+title = "晋升时发放"
+required = ["amount"]
+x-pt-order = ["amount", "expires_days"]
+
+[settings_schema.properties.class_grants.items.properties.on_promotion.properties.amount]
+type = "integer"
+minimum = 1
+maximum = 100
+default = 1
+title = "数量"
+
+[settings_schema.properties.class_grants.items.properties.on_promotion.properties.expires_days]
+type = ["integer", "null"]
+minimum = 1
+maximum = 3650
+title = "有效期（天，留空 = 永久）"
+
+[settings_schema.properties.class_grants.items.properties.periodic]
+type = ["object", "null"]
+title = "定期发放"
+required = ["amount"]
+x-pt-order = ["amount", "expires_days", "max_balance"]
+
+[settings_schema.properties.class_grants.items.properties.periodic.properties.amount]
+type = "integer"
+minimum = 1
+maximum = 100
+default = 1
+title = "数量"
+
+[settings_schema.properties.class_grants.items.properties.periodic.properties.expires_days]
+type = ["integer", "null"]
+minimum = 1
+maximum = 3650
+title = "有效期（天，留空 = 永久）"
+
+[settings_schema.properties.class_grants.items.properties.periodic.properties.max_balance]
+type = "integer"
+minimum = 1
+maximum = 1000
+default = 1000
+title = "持有达到该数时不再发放"
+
+[settings_schema.properties.class_grants.items.properties.repeat_on_repromotion]
+type = "boolean"
+default = false
+title = "降级后再次晋升时重复发放"
+
+[settings_schema.properties.penalty_rules]
+type = "array"
+default = []
+title = "连带处罚规则"
+description = "被邀请人被封禁 / 判定作弊时处罚邀请链上的用户"
+
+[settings_schema.properties.penalty_rules.items]
+type = "object"
+required = ["id", "trigger", "levels"]
+x-pt-order = ["id", "enabled", "group", "trigger", "within_days", "max_depth", "reverse_on_lift", "levels"]
+
+[settings_schema.properties.penalty_rules.items.properties.id]
+type = "string"
+pattern = "^[a-z0-9_]{1,40}$"
+title = "规则 ID"
+description = "小写字母、数字、下划线；不可重复"
+
+[settings_schema.properties.penalty_rules.items.properties.enabled]
+type = "boolean"
+default = true
+title = "启用"
+
+[settings_schema.properties.penalty_rules.items.properties.group]
+type = "string"
+maxLength = 40
+title = "分组（同组规则只触发一条）"
+
+[settings_schema.properties.penalty_rules.items.properties.trigger]
+type = "string"
+enum = ["invitee_banned", "invitee_cheating"]
+x-pt-enum-titles = ["被邀请人被封禁", "被邀请人判定作弊"]
+default = "invitee_banned"
+title = "触发条件"
+
+[settings_schema.properties.penalty_rules.items.properties.within_days]
+type = "integer"
+minimum = 1
+maximum = 3650
+default = 30
+title = "注册后多少天内触发才处罚"
+
+[settings_schema.properties.penalty_rules.items.properties.max_depth]
+type = "integer"
+minimum = 1
+maximum = 10
+default = 1
+title = "向上追溯的层数"
+
+[settings_schema.properties.penalty_rules.items.properties.reverse_on_lift]
+type = "boolean"
+default = true
+title = "解封后撤销处罚"
+
+[settings_schema.properties.penalty_rules.items.properties.levels]
+type = "array"
+title = "各层处罚"
+default = []
+
+[settings_schema.properties.penalty_rules.items.properties.levels.items]
+type = "object"
+required = ["depth", "actions"]
+x-pt-order = ["depth", "actions"]
+
+[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.depth]
+type = "integer"
+minimum = 1
+maximum = 10
+default = 1
+title = "层级（1 = 直接邀请人）"
+
+[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions]
+type = "array"
+title = "动作"
+default = []
+
+[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items]
+type = "object"
+required = ["type"]
+
+[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items.properties.type]
+type = "string"
+title = "动作"
+enum = ["deduct_quota", "suspend_invite", "revoke_outstanding", "restrict_inviter", "notify", "flag_review"]
+x-pt-enum-titles = ["扣除邀请名额", "暂停发邀", "撤销未用邀请码", "禁止下载（需 write:status 授权）", "通知", "转人工复核（其他动作延后到确认后）"]
+
+[[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items.oneOf]]
+properties = { type = { const = "deduct_quota" }, amount = { type = "integer", minimum = 1, maximum = 1000, default = 1, title = "数量" } }
+
+[[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items.oneOf]]
+properties = { type = { const = "suspend_invite" }, days = { type = ["integer", "null"], minimum = 1, maximum = 3650, title = "天数（留空 = 直到撤销）" } }
+
+[[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items.oneOf]]
+properties = { type = { const = "revoke_outstanding" } }
+
+[[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items.oneOf]]
+properties = { type = { const = "restrict_inviter" }, days = { type = "integer", minimum = 1, maximum = 365, default = 7, title = "天数" } }
+
+[[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items.oneOf]]
+properties = { type = { const = "notify" } }
+
+[[settings_schema.properties.penalty_rules.items.properties.levels.items.properties.actions.items.oneOf]]
+properties = { type = { const = "flag_review" } }
+
 [terms]
 "invite.name" = { zh-CN = "邀请", en = "Invites" }
 "invite.code" = { zh-CN = "邀请码", en = "Invite code" }
