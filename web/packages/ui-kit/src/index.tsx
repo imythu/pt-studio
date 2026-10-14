@@ -75,16 +75,23 @@ export function Spinner() {
 export function EmptyArt({ className }: { className?: string }) {
   return (
     <svg className={cx('pt-empty-art', className)} viewBox="0 0 160 120" fill="none" aria-hidden="true">
-      <ellipse cx="80" cy="106" rx="52" ry="7" fill="currentColor" opacity=".08" />
-      <path d="M36 52 80 34l44 18v38L80 108 36 90z" fill="var(--pt-color-surface-2)" stroke="var(--pt-color-border)" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M36 52 80 70l44-18M80 70v38" stroke="var(--pt-color-border)" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M58 43l44 18" stroke="var(--pt-color-border)" strokeWidth="2" />
-      <circle cx="118" cy="30" r="14" fill="var(--pt-color-primary-soft)" stroke="var(--pt-color-primary)" strokeWidth="2.5" />
-      <path d="m128 40 9 9" stroke="var(--pt-color-primary)" strokeWidth="3.5" strokeLinecap="round" />
-      <path d="M113 30h10" stroke="var(--pt-color-primary)" strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx="30" cy="30" r="3" fill="var(--pt-color-accent)" opacity=".6" />
-      <circle cx="46" cy="18" r="2" fill="var(--pt-color-primary)" opacity=".5" />
-      <path d="M22 70l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="var(--pt-color-primary)" opacity=".35" />
+      <ellipse cx="80" cy="108" rx="54" ry="7" fill="currentColor" opacity=".08" />
+      <path d="M52 52 58 26l16 14ZM108 52l-6-26-16 14Z" fill="#1d2130" />
+      <path d="M57 46l2-11 7 6ZM103 46l-2-11-7 6Z" fill="#f7a8b8" opacity=".85" />
+      <ellipse cx="80" cy="58" rx="28" ry="22" fill="#1d2130" />
+      <ellipse cx="69" cy="57" rx="5.6" ry="6.6" fill="#ffd66e" />
+      <ellipse cx="91" cy="57" rx="5.6" ry="6.6" fill="#ffd66e" />
+      <ellipse cx="69.2" cy="57.5" rx="2.2" ry="4.8" fill="#1d2130" />
+      <ellipse cx="90.8" cy="57.5" rx="2.2" ry="4.8" fill="#1d2130" />
+      <circle cx="67.4" cy="54.6" r="1.7" fill="#fff" />
+      <circle cx="89.4" cy="54.6" r="1.7" fill="#fff" />
+      <path d="M78 66h4l-2 2.4Z" fill="#f7a8b8" />
+      <path d="M36 70h88l-6 34H42Z" fill="#e9c99a" stroke="#c9a46e" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M36 70h88" stroke="#c9a46e" strokeWidth="3" strokeLinecap="round" />
+      <path d="M62 84h36" stroke="#c9a46e" strokeWidth="2" strokeLinecap="round" opacity=".6" />
+      <path d="M126 36l2.4 5.6 5.6 2.4-5.6 2.4L126 52l-2.4-5.6-5.6-2.4 5.6-2.4Z" fill="var(--pt-color-accent)" opacity=".85" />
+      <circle cx="30" cy="40" r="3" fill="var(--pt-color-primary)" opacity=".45" />
+      <path d="M140 80c4-3 9 0 7 4-4 2-9-1-7-4Z" fill="#ffb7c5" opacity=".8" />
     </svg>
   );
 }

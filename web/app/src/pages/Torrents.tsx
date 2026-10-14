@@ -7,7 +7,7 @@ import { Slot, useSlotColumns } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
 import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Schema } from '@pt-studio/schema-form';
 import { Badge, Button, Card, Empty, Field, Input, SkeletonRows, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
-import { HeroArt, Icon } from '../art';
+import { CatFace, HeroArt, Icon } from '../art';
 import { ApiError } from '@pt-studio/sdk';
 import { fieldSchemas, useTypes, type TypeInfo } from '../types';
 import { useManifest } from '../manifest';
@@ -984,6 +984,9 @@ function HomeFeed() {
   return (
     <div>
       <section className="greeting">
+        <span className="mascot">
+          <CatFace size={52} />
+        </span>
         <div>
           <h1>{t('ui.home.welcome', { name: me?.username ?? '' })}</h1>
           <p>{t('ui.home.welcome_sub')}</p>

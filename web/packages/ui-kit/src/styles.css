@@ -1,6 +1,6 @@
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--pt-color-bg); color: var(--pt-color-fg); font: 13.5px/1.55 var(--pt-font); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body { margin: 0; background: var(--pt-color-bg); color: var(--pt-color-fg); font: 14px/1.6 var(--pt-font); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 a { color: var(--pt-color-primary); text-decoration: none; transition: color .15s; }
 a:hover { color: var(--pt-color-primary-hover); }
 h1 { font-size: 21px; line-height: 1.3; margin: 0 0 var(--pt-space-3); font-weight: 650; }
@@ -17,7 +17,7 @@ hr { border: 0; border-top: 1px solid var(--pt-color-border); margin: var(--pt-s
 /* 按钮 */
 .pt-btn { font: inherit; font-weight: 550; display: inline-flex; align-items: center; justify-content: center; gap: 6px; line-height: 1.2;
   border: 1px solid var(--pt-color-border); background: var(--pt-color-surface); color: var(--pt-color-fg);
-  padding: 6px 12px; border-radius: var(--pt-radius); cursor: pointer; box-shadow: var(--pt-shadow-sm);
+  padding: 7px 14px; border-radius: 999px; cursor: pointer; box-shadow: var(--pt-shadow-sm);
   transition: background .15s, border-color .15s, box-shadow .15s, transform .08s; }
 .pt-btn:hover { border-color: color-mix(in srgb, var(--pt-color-primary) 55%, var(--pt-color-border)); color: var(--pt-color-fg); }
 .pt-btn:active { transform: translateY(1px); }
@@ -38,7 +38,7 @@ a.pt-btn:hover { text-decoration: none; }
 .pt-card-body > :last-child { margin-bottom: 0; }
 
 /* 徽章 */
-.pt-badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 550; line-height: 18px; padding: 0 7px; border-radius: 5px;
+.pt-badge { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 600; line-height: 19px; padding: 0 8px; border-radius: 999px;
   background: var(--pt-color-surface-2); color: var(--pt-color-muted); margin-right: 4px; white-space: nowrap; }
 .pt-badge-primary { color: var(--pt-color-primary); background: var(--pt-color-primary-soft); }
 .pt-badge-success, .pt-badge-free { color: var(--pt-promo-free); background: var(--pt-color-success-soft); }
@@ -95,7 +95,8 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 550; bord
 .pt-skeleton-block { display: block; width: 100%; height: 56px; border-radius: var(--pt-radius); margin-bottom: 10px; }
 @keyframes pt-shimmer { to { background-position: -200% 0; } }
 .pt-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: var(--pt-space-6) var(--pt-space-4); margin: 0; }
-.pt-empty-art { width: 132px; height: auto; opacity: .95; }
+.pt-empty-art { width: 132px; height: auto; opacity: .95; animation: pt-bob 3.6s ease-in-out infinite; }
+@keyframes pt-bob { 50% { transform: translateY(-3px); } }
 .pt-plugin-error { color: var(--pt-color-danger); font-size: 12px; }
 
 /* 提示 */

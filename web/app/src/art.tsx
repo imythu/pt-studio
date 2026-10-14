@@ -1,131 +1,146 @@
 // 品牌标志与插画（内联 SVG，颜色取主题令牌，亮 / 暗主题自动适配）。
 
-export function Logo({ size = 32 }: { size?: number }) {
+/** 黑猫脸：站标、欢迎横幅等处共用（颜色自带，不随主题变化） */
+export function CatFace({ size = 32, bg = true }: { size?: number; bg?: boolean }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
       <defs>
-        <linearGradient id="pt-logo-g" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#2f6df6" />
-          <stop offset="1" stopColor="#5b8bff" />
+        <linearGradient id="cat-bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#8fdcc3" />
+          <stop offset="1" stopColor="#7aa7f5" />
         </linearGradient>
       </defs>
-      <rect width="64" height="64" rx="16" fill="url(#pt-logo-g)" />
-      <g fill="none" stroke="#fff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M23 46V19M14 28l9-9 9 9" />
-        <path d="M41 18v27M32 36l9 9 9-9" opacity=".92" />
-      </g>
+      {bg && <rect width="64" height="64" rx="16" fill="url(#cat-bg)" />}
+      <path d="M13 31 15 9l16 12Z M51 31 49 9 33 21Z" fill="#1d2130" strokeLinejoin="round" />
+      <path d="M17 26 18 15l8 6Z M47 26 46 15l-8 6Z" fill="#f7a8b8" opacity=".85" />
+      <ellipse cx="32" cy="37" rx="21" ry="18" fill="#1d2130" />
+      <ellipse cx="23.5" cy="36" rx="6.2" ry="7.2" fill="#ffd66e" />
+      <ellipse cx="40.5" cy="36" rx="6.2" ry="7.2" fill="#ffd66e" />
+      <ellipse cx="23.8" cy="36.4" rx="2.6" ry="5.4" fill="#1d2130" />
+      <ellipse cx="40.2" cy="36.4" rx="2.6" ry="5.4" fill="#1d2130" />
+      <circle cx="21.8" cy="33" r="1.9" fill="#fff" />
+      <circle cx="38.2" cy="33" r="1.9" fill="#fff" />
+      <path d="M30 43h4l-2 2.4Z" fill="#f7a8b8" />
+      <path d="M32 45.4v1.6m-3.4.6c1.2 1.4 2.6 1.4 3.4 0 .8 1.4 2.2 1.4 3.4 0" fill="none" stroke="#f7a8b8" strokeWidth="1.1" strokeLinecap="round" />
+      <ellipse cx="15.5" cy="43" rx="3.2" ry="2" fill="#f7a8b8" opacity=".35" />
+      <ellipse cx="48.5" cy="43" rx="3.2" ry="2" fill="#f7a8b8" opacity=".35" />
     </svg>
   );
 }
 
-/** 首页 / 登录页主插画：分享网络、资源卡片与传输进度 */
+export function Logo({ size = 32 }: { size?: number }) {
+  return <CatFace size={size} />;
+}
+
+/** 首页 / 登录页主插画：黄昏花海里的魔法使与黑猫（原创，自带夜空背景，亮暗主题通用） */
 export function HeroArt({ className }: { className?: string }) {
+  const flowers: [number, number, string][] = [
+    [40, 392, '#fff'], [78, 410, '#ffd0dc'], [118, 398, '#fff6b5'], [262, 404, '#fff'], [296, 418, '#ffd0dc'], [214, 420, '#fff6b5'],
+    [418, 400, '#fff'], [452, 416, '#ffd0dc'], [488, 396, '#fff6b5'], [372, 422, '#fff'], [150, 424, '#ffd0dc'], [20, 424, '#fff6b5'],
+  ];
   return (
-    <svg className={className} viewBox="-10 -20 540 480" fill="none" overflow="visible" role="img" aria-hidden="true">
+    <svg className={className} viewBox="0 0 520 440" fill="none" role="img" aria-hidden="true">
       <defs>
-        <linearGradient id="ha-g1" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#2f6df6" />
-          <stop offset="1" stopColor="#5b8bff" />
+        <linearGradient id="ha-sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#222d5a" />
+          <stop offset=".55" stopColor="#5a6dc2" />
+          <stop offset="1" stopColor="#f7d3bd" />
         </linearGradient>
-        <linearGradient id="ha-g2" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0" stopColor="#7aa7ff" />
-          <stop offset="1" stopColor="#2f6df6" />
-        </linearGradient>
-        <radialGradient id="ha-glow" cx=".5" cy=".5" r=".5">
-          <stop offset="0" stopColor="#2f6df6" stopOpacity=".38" />
-          <stop offset="1" stopColor="#2f6df6" stopOpacity="0" />
+        <radialGradient id="ha-moon" cx=".5" cy=".5" r=".5">
+          <stop offset="0" stopColor="#fff4cf" stopOpacity=".55" />
+          <stop offset="1" stopColor="#fff4cf" stopOpacity="0" />
         </radialGradient>
-        <filter id="ha-shadow" filterUnits="userSpaceOnUse" x="-60" y="-60" width="700" height="640">
-          <feDropShadow dx="0" dy="14" stdDeviation="14" floodColor="#2f6df6" floodOpacity=".22" />
-        </filter>
+        <radialGradient id="ha-orb" cx=".5" cy=".5" r=".5">
+          <stop offset="0" stopColor="#d8f3ff" />
+          <stop offset="1" stopColor="#d8f3ff" stopOpacity="0" />
+        </radialGradient>
+        <clipPath id="ha-clip">
+          <rect width="520" height="440" rx="36" />
+        </clipPath>
       </defs>
+      <g clipPath="url(#ha-clip)">
+        <rect width="520" height="440" fill="url(#ha-sky)" />
+        <circle cx="392" cy="112" r="92" fill="url(#ha-moon)" />
+        <circle cx="392" cy="112" r="42" fill="#fff4cf" />
+        <circle cx="380" cy="102" r="7" fill="#f3e3b0" opacity=".7" />
+        <circle cx="404" cy="126" r="5" fill="#f3e3b0" opacity=".7" />
+        {([[60, 60], [130, 120], [220, 48], [300, 96], [468, 58], [486, 168], [40, 190], [250, 160]] as [number, number][]).map(([x, y], i) => (
+          <path key={i} d={`M${x} ${y - 6}l1.8 4.2 4.2 1.8-4.2 1.8L${x} ${y + 6}l-1.8-4.2-4.2-1.8 4.2-1.8Z`} fill="#fff" opacity={0.5 + (i % 3) * 0.2} />
+        ))}
+        <path d="M0 292C80 250 170 262 250 280S430 268 520 288V440H0Z" fill="#6f7fcf" opacity=".85" />
+        <path d="M0 338C110 304 210 326 300 332S452 318 520 338V440H0Z" fill="#5fb89d" />
+        <path d="M0 372C120 352 240 368 340 372S470 364 520 374V440H0Z" fill="#4aa58a" />
+        {flowers.map(([x, y, c], i) => (
+          <g key={i}>
+            {[0, 72, 144, 216, 288].map((r) => (
+              <ellipse key={r} cx={x} cy={y - 4.5} rx="2.6" ry="4" fill={c} transform={`rotate(${r} ${x} ${y})`} />
+            ))}
+            <circle cx={x} cy={y} r="2" fill="#f0b94a" />
+          </g>
+        ))}
 
-      <circle cx="270" cy="220" r="210" fill="url(#ha-glow)" />
-      <circle cx="270" cy="220" r="168" stroke="var(--pt-color-border)" strokeWidth="1.5" strokeDasharray="3 9" />
-      <circle cx="270" cy="220" r="116" stroke="var(--pt-color-border)" strokeWidth="1.5" strokeDasharray="3 9" />
+        {/* 魔法使 */}
+        <g>
+          <path d="M240 392 250 214" stroke="#8a5a3c" strokeWidth="6" strokeLinecap="round" />
+          <circle cx="248" cy="196" r="34" fill="url(#ha-orb)" />
+          <circle cx="248" cy="196" r="12" fill="#e6f7ff" stroke="#f0b94a" strokeWidth="3" />
+          <path d="M230 196c2-20 34-20 36 0" stroke="#f0b94a" strokeWidth="4" strokeLinecap="round" />
+          <path d="M126 150c-22 44-14 120-2 168" stroke="#f1f3fb" strokeWidth="16" strokeLinecap="round" />
+          <path d="M214 150c22 44 14 120 2 168" stroke="#f1f3fb" strokeWidth="16" strokeLinecap="round" />
+          <path d="M150 262Q170 246 190 262L228 388Q170 404 112 388Z" fill="#f8f9fd" stroke="#d6dbee" strokeWidth="2" />
+          <path d="M160 276h20l8 108h-36Z" fill="#2a2f4a" />
+          <path d="M112 388Q170 404 228 388" stroke="#f0b94a" strokeWidth="5" strokeLinecap="round" />
+          <path d="M168 262l2 20 2-20" stroke="#f0b94a" strokeWidth="3" strokeLinecap="round" />
+          <path d="M192 268Q226 282 244 300" stroke="#f8f9fd" strokeWidth="14" strokeLinecap="round" />
+          <circle cx="245" cy="302" r="7" fill="#ffe9dc" />
+          <path d="M140 222 118 208l22 24ZM200 222l22-14-22 24Z" fill="#ffe9dc" />
+          <circle cx="170" cy="216" r="31" fill="#ffe9dc" />
+          <path d="M136 210Q140 170 170 168Q200 170 204 210Q186 196 170 204Q154 196 136 210Z" fill="#f4f6fc" stroke="#d6dbee" strokeWidth="1.5" />
+          <path d="M140 200Q150 172 170 178Q190 172 200 200Q186 188 170 194Q154 188 140 200Z" fill="#f4f6fc" />
+          <ellipse cx="158" cy="222" rx="4.4" ry="6.4" fill="#79d0a2" />
+          <ellipse cx="182" cy="222" rx="4.4" ry="6.4" fill="#79d0a2" />
+          <circle cx="156.6" cy="219.6" r="1.6" fill="#fff" />
+          <circle cx="180.6" cy="219.6" r="1.6" fill="#fff" />
+          <path d="M166 237q4 3 8 0" stroke="#d98e8e" strokeWidth="2" strokeLinecap="round" />
+          <ellipse cx="148" cy="232" rx="5" ry="3" fill="#ffb7c5" opacity=".5" />
+          <ellipse cx="192" cy="232" rx="5" ry="3" fill="#ffb7c5" opacity=".5" />
+        </g>
 
-      {/* 连线 */}
-      <g stroke="url(#ha-g1)" strokeWidth="2" strokeLinecap="round" strokeDasharray="5 7" opacity=".7">
-        <path d="M270 220 112 110" />
-        <path d="M270 220 428 96" />
-        <path d="M270 220 450 292" />
-        <path d="M270 220 118 330" />
-        <path d="M270 220 270 52" />
+        {/* 黑猫 */}
+        <g>
+          <path d="M376 400Q426 398 414 352" stroke="#171a28" strokeWidth="10" strokeLinecap="round" />
+          <ellipse cx="344" cy="388" rx="36" ry="28" fill="#171a28" />
+          <path d="M316 336 320 308l18 14ZM372 336l-4-28-18 14Z" fill="#171a28" />
+          <path d="M322 328l1-10 7 5ZM366 328l-1-10-7 5Z" fill="#f7a8b8" opacity=".8" />
+          <circle cx="344" cy="350" r="28" fill="#171a28" />
+          <ellipse cx="333" cy="350" rx="6.6" ry="7.8" fill="#ffd66e" />
+          <ellipse cx="355" cy="350" rx="6.6" ry="7.8" fill="#ffd66e" />
+          <ellipse cx="333.3" cy="350.6" rx="2.8" ry="5.8" fill="#171a28" />
+          <ellipse cx="354.7" cy="350.6" rx="2.8" ry="5.8" fill="#171a28" />
+          <circle cx="331" cy="347" r="2" fill="#fff" />
+          <circle cx="353" cy="347" r="2" fill="#fff" />
+          <path d="M341.5 360h5l-2.5 3Z" fill="#f7a8b8" />
+        </g>
+
+        {/* 光点与花瓣 */}
+        {([[286, 150], [214, 120], [270, 236], [300, 200]] as [number, number][]).map(([x, y], i) => (
+          <circle key={i} cx={x} cy={y} r={i % 2 ? 2.2 : 3} fill="#e6f7ff" opacity=".85" />
+        ))}
+        <path d="M440 240c6-4 12 0 10 6-6 2-12-1-10-6ZM90 300c6-4 12 0 10 6-6 2-12-1-10-6ZM470 300c5-3 10 0 8 5-5 2-10-1-8-5Z" fill="#ffd0dc" opacity=".9" />
       </g>
-
-      {/* 节点 */}
-      <g>
-        <circle cx="112" cy="110" r="22" fill="var(--pt-color-surface)" stroke="#2f6df6" strokeWidth="2.5" />
-        <path d="M112 102v16m-6-10 6-6 6 6" stroke="#2f6df6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="428" cy="96" r="18" fill="var(--pt-color-surface)" stroke="#5b8bff" strokeWidth="2.5" />
-        <path d="M428 88v16m-6-6 6 6 6-6" stroke="#5b8bff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="450" cy="292" r="24" fill="var(--pt-color-surface)" stroke="#7aa7ff" strokeWidth="2.5" />
-        <path d="M450 284v16m-6-10 6-6 6 6" stroke="#7aa7ff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="118" cy="330" r="19" fill="var(--pt-color-surface)" stroke="#2f6df6" strokeWidth="2.5" />
-        <path d="M118 322v16m-6-6 6 6 6-6" stroke="#2f6df6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="270" cy="52" r="15" fill="url(#ha-g1)" />
-        <circle cx="270" cy="52" r="5" fill="#fff" />
-      </g>
-
-      {/* 主卡片 */}
-      <g filter="url(#ha-shadow)">
-        <rect x="170" y="140" width="200" height="160" rx="20" fill="var(--pt-color-surface)" stroke="var(--pt-color-border)" />
-      </g>
-      <rect x="188" y="158" width="44" height="44" rx="12" fill="url(#ha-g1)" />
-      <path d="M204 188v-14m-6 6 6-6 6 6" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="244" y="162" width="104" height="9" rx="4.5" fill="var(--pt-color-fg)" opacity=".85" />
-      <rect x="244" y="181" width="68" height="7" rx="3.5" fill="var(--pt-color-muted)" opacity=".5" />
-      <rect x="188" y="222" width="164" height="10" rx="5" fill="var(--pt-color-surface-2)" />
-      <rect x="188" y="222" width="112" height="10" rx="5" fill="url(#ha-g1)" />
-      <rect x="188" y="248" width="52" height="22" rx="11" fill="var(--pt-color-primary-soft)" />
-      <rect x="248" y="248" width="40" height="22" rx="11" fill="var(--pt-color-success-soft)" />
-      <rect x="296" y="248" width="56" height="22" rx="11" fill="var(--pt-color-surface-2)" />
-
-      {/* 浮动小卡片 */}
-      <g filter="url(#ha-shadow)">
-        <rect x="324" y="318" width="132" height="64" rx="16" fill="var(--pt-color-surface)" stroke="var(--pt-color-border)" />
-      </g>
-      <circle cx="352" cy="350" r="14" fill="url(#ha-g2)" />
-      <path d="m346 350 5 5 9-10" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="376" y="338" width="64" height="8" rx="4" fill="var(--pt-color-fg)" opacity=".8" />
-      <rect x="376" y="354" width="42" height="7" rx="3.5" fill="var(--pt-color-muted)" opacity=".5" />
-
-      <g filter="url(#ha-shadow)">
-        <rect x="64" y="204" width="120" height="58" rx="16" fill="var(--pt-color-surface)" stroke="var(--pt-color-border)" />
-      </g>
-      <path d="M92 240v-16m-7 7 7-7 7 7" stroke="#5b8bff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="112" y="223" width="56" height="8" rx="4" fill="var(--pt-color-fg)" opacity=".8" />
-      <rect x="112" y="238" width="36" height="7" rx="3.5" fill="var(--pt-color-muted)" opacity=".5" />
-
-      {/* 装饰 */}
-      <path d="M388 176l3 8 8 3-8 3-3 8-3-8-8-3 8-3z" fill="#5b8bff" opacity=".6" />
-      <path d="M96 52l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#7aa7ff" opacity=".7" />
-      <circle cx="486" cy="188" r="4" fill="#2f6df6" opacity=".5" />
-      <circle cx="58" cy="400" r="5" fill="#5b8bff" opacity=".4" />
-      <circle cx="210" cy="402" r="3" fill="#7aa7ff" opacity=".6" />
     </svg>
   );
 }
 
-/** 页面 404 / 无权限插画 */
+/** 页面 404 插画：猫猫占了“0”的位置 */
 export function LostArt({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 240 160" fill="none" aria-hidden="true">
-      <ellipse cx="120" cy="146" rx="78" ry="8" fill="currentColor" opacity=".07" />
-      <rect x="42" y="30" width="156" height="100" rx="16" fill="var(--pt-color-surface)" stroke="var(--pt-color-border)" strokeWidth="2" />
-      <rect x="42" y="30" width="156" height="26" rx="16" fill="var(--pt-color-surface-2)" />
-      <circle cx="60" cy="43" r="4" fill="#ff6b6b" />
-      <circle cx="74" cy="43" r="4" fill="#fbbf24" />
-      <circle cx="88" cy="43" r="4" fill="#34d399" />
-      <text x="120" y="108" textAnchor="middle" fontSize="40" fontWeight="800" fill="url(#lost-g)">404</text>
-      <defs>
-        <linearGradient id="lost-g" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#2f6df6" />
-          <stop offset="1" stopColor="#5b8bff" />
-        </linearGradient>
-      </defs>
-      <circle cx="196" cy="34" r="10" fill="var(--pt-color-primary-soft)" stroke="var(--pt-color-primary)" strokeWidth="2" />
-      <path d="m203 41 8 8" stroke="var(--pt-color-primary)" strokeWidth="3" strokeLinecap="round" />
+    <svg className={className} viewBox="0 0 280 130" fill="none" aria-hidden="true">
+      <text x="14" y="112" fontSize="112" fontWeight="800" fill="var(--pt-color-primary-soft)" stroke="var(--pt-color-primary)" strokeWidth="3" strokeLinejoin="round" fontFamily="var(--pt-font)">4</text>
+      <text x="170" y="112" fontSize="112" fontWeight="800" fill="var(--pt-color-primary-soft)" stroke="var(--pt-color-primary)" strokeWidth="3" strokeLinejoin="round" fontFamily="var(--pt-font)">4</text>
+      <g transform="translate(96 22) scale(1.4)">
+        <CatFace size={64} bg={false} />
+      </g>
     </svg>
   );
 }
