@@ -478,6 +478,7 @@ fn session_principal(ctx: &RequestCtx) -> PResult<Principal> {
         scopes: vec!["*".into()],
         reauth_at: None,
         status: String::new(),
+        class_id: None,
     })
 }
 

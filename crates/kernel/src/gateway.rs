@@ -489,10 +489,19 @@ async fn prepare(
             .as_ref()
             .filter(|p| p.credential_kind != "session")
             .map(|p| p.credential_id.as_str());
+        // 高等级用户按 [http.rate_limit] class_multiplier 放宽；倍率为 0 的等级不限流
+        let mult = sh
+            .cfg
+            .http
+            .rate_limit
+            .multiplier(principal.as_ref().and_then(|p| p.class_id));
         let site = crate::limits::parse(&sh.cfg.http.rate_limit.default).unwrap_or_default();
-        crate::limits::check(redis, "_site", &site, ip, user, token).await?;
-        if let Some(spec_rl) = &route.rate_limit {
-            let rules = crate::limits::parse(spec_rl).map_err(PluginError::internal)?;
+        if let Some(m) = mult {
+            crate::limits::check(redis, "_site", &crate::limits::scale(&site, m), ip, user, token).await?;
+        }
+        if let (Some(spec_rl), Some(m)) = (&route.rate_limit, mult) {
+            let rules =
+                crate::limits::scale(&crate::limits::parse(spec_rl).map_err(PluginError::internal)?, m);
             verdict = crate::limits::check(
                 redis,
                 &format!("{}.{}", st.plugin, route.id),

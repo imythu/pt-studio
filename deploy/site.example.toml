@@ -15,6 +15,11 @@ mode = "dev"                           # dev：允许未签名插件包、出站
 bind = "0.0.0.0:31251"
 web_dir = "web/dist"                   # 前端构建目录（cd web && npm run build）
 
+# 限流：站点默认规则与各接口规则叠加。class_multiplier 按用户等级放宽（取不超过用户等级的最大门槛），0 表示不限流
+# [http.rate_limit]
+# default = "ip:600/m"
+# class_multiplier = { "30" = 2, "50" = 3, "70" = 5 }
+
 [database]
 # 网关角色（运行期）与管理角色（迁移）；先以超级用户执行 deploy/postgres/bootstrap.sql
 url = "postgres://pt_gateway:change-me-gateway@127.0.0.1:5432/pt"

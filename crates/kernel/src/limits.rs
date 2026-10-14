@@ -68,6 +68,30 @@ pub fn parse(spec: &str) -> Result<Vec<Rule>, String> {
         .collect()
 }
 
+/// 按倍率放宽（global 规则不变）；倍率为 1 时原样返回
+pub fn scale(rules: &[Rule], m: f64) -> Vec<Rule> {
+    if (m - 1.0).abs() < f64::EPSILON {
+        return rules.to_vec();
+    }
+    rules
+        .iter()
+        .map(|r| {
+            if r.subject == Subject::Global {
+                return r.clone();
+            }
+            let count = ((f64::from(r.count) * m).ceil() as u32).max(r.count);
+            let (_, period) = r.text.split_once('/').unwrap_or(("", "m"));
+            let subj = r.text.split(':').next().unwrap_or("user");
+            Rule {
+                subject: r.subject,
+                count,
+                period_ms: r.period_ms,
+                text: format!("{subj}:{count}/{period}"),
+            }
+        })
+        .collect()
+}
+
 /// GCRA：返回 {允许(1/0), 剩余, retry_after_ms, reset_ms}
 const GCRA: &str = r"
 local t = redis.call('TIME')
@@ -273,6 +297,18 @@ pub async fn abandon(redis: &ConnectionManager, key: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scale_by_class() {
+        let r = parse("ip:30/m,user:20/h,global:5/s").unwrap();
+        let s = scale(&r, 2.5);
+        assert_eq!(s[0].count, 75);
+        assert_eq!(s[0].text, "ip:75/m");
+        assert_eq!(s[1].count, 50);
+        assert_eq!(s[1].text, "user:50/h");
+        assert_eq!(s[2].count, 5, "global rules are not scaled");
+        assert_eq!(scale(&r, 1.0), r);
+    }
 
     #[test]
     fn parses_rules() {

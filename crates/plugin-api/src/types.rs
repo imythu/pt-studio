@@ -105,6 +105,9 @@ pub struct Principal {
     /// 当前用户状态（active / leech_disabled / ...），供网关与插件快速判断
     #[serde(default)]
     pub status: String,
+    /// 用户等级（class），网关按 `[http.rate_limit] class_multiplier` 放宽限流；未知时为 None
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class_id: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

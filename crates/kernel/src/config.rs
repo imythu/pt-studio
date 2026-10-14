@@ -132,12 +132,35 @@ pub struct HttpSection {
 pub struct RateLimitSection {
     #[serde(default = "default_rate")]
     pub default: String,
+    /// 按用户等级放宽：`{ "30" = 2, "50" = 5, "100" = 0 }` 表示等级 ≥ 30 的额度 ×2、≥ 50 ×5、≥ 100 不限流。
+    /// 取不超过用户等级的最大门槛；未登录或没有匹配项时为 ×1。只作用于站点默认规则与路由规则中的 ip / user / token 规则
+    #[serde(default)]
+    pub class_multiplier: std::collections::BTreeMap<String, f64>,
 }
 
 impl Default for RateLimitSection {
     fn default() -> Self {
         Self {
             default: default_rate(),
+            class_multiplier: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl RateLimitSection {
+    /// 用户等级对应的倍率：`None` 表示不限流
+    pub fn multiplier(&self, class_id: Option<i32>) -> Option<f64> {
+        let Some(c) = class_id else { return Some(1.0) };
+        let best = self
+            .class_multiplier
+            .iter()
+            .filter_map(|(k, v)| k.trim().parse::<i32>().ok().map(|t| (t, *v)))
+            .filter(|(t, _)| *t <= c)
+            .max_by_key(|(t, _)| *t);
+        match best {
+            Some((_, m)) if m <= 0.0 => None,
+            Some((_, m)) => Some(m.max(1.0)),
+            None => Some(1.0),
         }
     }
 }
@@ -364,5 +387,23 @@ mod tests {
         assert_eq!(expand_env("x=${A} y=${B:-2}", get)?, "x=1 y=2");
         assert!(expand_env("${C}", get).is_err());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::RateLimitSection;
+
+    #[test]
+    fn class_multiplier() {
+        let mut r = RateLimitSection::default();
+        r.class_multiplier.insert("30".into(), 2.0);
+        r.class_multiplier.insert("50".into(), 5.0);
+        r.class_multiplier.insert("100".into(), 0.0);
+        assert_eq!(r.multiplier(None), Some(1.0));
+        assert_eq!(r.multiplier(Some(20)), Some(1.0));
+        assert_eq!(r.multiplier(Some(30)), Some(2.0));
+        assert_eq!(r.multiplier(Some(70)), Some(5.0));
+        assert_eq!(r.multiplier(Some(100)), None);
     }
 }

@@ -214,7 +214,7 @@ pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Princip
             let mut conn = ctx.sql.conn().await?;
             let row = sqlx::query(
                 "SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, s.revoked_at, s.reauth_at,
-                        s.last_seen_at, s.remember, s.auth_version, u.status, u.auth_version
+                        s.last_seen_at, s.remember, s.auth_version, u.status, u.auth_version, u.class_id
                    FROM sessions s JOIN users u ON u.id = s.user_id
                   WHERE s.token_hash = $1",
             )
@@ -233,6 +233,7 @@ pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Princip
             let seen_version: i32 = r.get(8);
             let status: String = r.get(9);
             let auth_version: i32 = r.get(10);
+            let class_id: i32 = r.get(11);
             let now = Utc::now();
             if revoked.is_some() || now > idle || now > absolute || seen_version != auth_version {
                 return Ok(None);
@@ -259,6 +260,7 @@ pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Princip
                 scopes: vec!["*".into()],
                 reauth_at: reauth.map(|t| t.timestamp_millis()),
                 status,
+                class_id: Some(class_id),
             }))
         }
         // 个人 / MCP token（03 §1.5）

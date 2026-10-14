@@ -215,7 +215,7 @@ pub async fn authenticate(ctx: &Ctx, secret: &str, audience: Option<&str>) -> PR
     }
     let mut conn = ctx.sql.conn().await?;
     let row = sqlx::query(
-        "SELECT t.id, t.user_id, t.kind, t.scopes, t.expires_at, t.revoked_at, t.last_used_at, u.status, t.audience_plugin
+        "SELECT t.id, t.user_id, t.kind, t.scopes, t.expires_at, t.revoked_at, t.last_used_at, u.status, t.audience_plugin, u.class_id
            FROM tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = $1",
     )
     .bind(crypto::sha256(secret.as_bytes()))
@@ -256,6 +256,7 @@ pub async fn authenticate(ctx: &Ctx, secret: &str, audience: Option<&str>) -> PR
         scopes: r.get(3),
         reauth_at: None,
         status,
+        class_id: Some(r.get::<i32, _>(9)),
     }))
 }
 

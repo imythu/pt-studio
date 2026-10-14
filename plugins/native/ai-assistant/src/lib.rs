@@ -53,6 +53,7 @@ fn principal_of(ctx: &Ctx) -> PResult<Principal> {
         scopes: vec!["read".into()],
         reauth_at: None,
         status: String::new(),
+        class_id: None,
     })
 }
 
