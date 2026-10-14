@@ -2,7 +2,7 @@
 // 运行时共用同一份实例。输出目录 web/dist：
 //   index.html（import map 带 __CSP_NONCE__ 占位，由内核替换）、static/vendor/*、static/app.<hash>.{js,css}、plugins/<id>/index.js
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,6 +117,10 @@ if (existsSync(pluginsDir)) {
   }
 }
 
+// 4b. 站点图标等根目录静态文件：web/assets/* → dist/*（favicon.ico 等浏览器会直接请求根路径）
+const assetsDir = join(web, 'assets');
+if (existsSync(assetsDir)) for (const f of readdirSync(assetsDir)) copyFileSync(join(assetsDir, f), join(out, f));
+
 // 5. index.html（import map 内联脚本用 nonce；内核返回时替换 __CSP_NONCE__）
 const html = `<!doctype html>
 <html lang="zh-CN">
@@ -124,6 +128,12 @@ const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PT Studio</title>
+<meta name="theme-color" content="#5b5bf0">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 <script type="importmap" nonce="__CSP_NONCE__">${JSON.stringify({ imports: importMap })}</script>
 <link rel="stylesheet" href="/static/${cssFile}">
 <script type="module" src="/static/${appFile}"></script>

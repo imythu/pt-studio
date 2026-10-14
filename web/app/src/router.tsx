@@ -1,3 +1,4 @@
+import { LostArt } from './art';
 import type { ComponentType } from 'react';
 import { createBrowserRouter, Link } from 'react-router';
 import { useT } from '@pt-studio/terms';
@@ -20,9 +21,13 @@ function page(id: PageId, C: ComponentType) {
 function NotFound() {
   const t = useT();
   return (
-    <p>
-      {t('ui.common.not_found')} · <Link to="/">{t('ui.nav.home')}</Link>
-    </p>
+    <div className="lost">
+      <LostArt />
+      <h1>{t('ui.common.not_found')}</h1>
+      <Link className="pt-btn pt-btn-primary" to="/">
+        {t('ui.nav.home')}
+      </Link>
+    </div>
   );
 }
 

@@ -6,7 +6,8 @@ import { api, apiFetch, parse } from '@pt-studio/sdk';
 import { Slot, useSlotColumns } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
 import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Schema } from '@pt-studio/schema-form';
-import { Badge, Button, Card, Empty, Field, Input, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, Empty, Field, Input, SkeletonRows, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
+import { HeroArt, Icon } from '../art';
 import { ApiError } from '@pt-studio/sdk';
 import { fieldSchemas, useTypes, type TypeInfo } from '../types';
 import { useManifest } from '../manifest';
@@ -214,7 +215,11 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
     { key: 'size', header: t('ui.torrent.size'), render: (r) => formatBytes(r.size), className: 'num' },
     { key: 'created', header: t('ui.torrent.created'), render: (r) => (r.created_at ? new Date(r.created_at * 1000).toLocaleString() : '-'), className: 'nowrap' },
   ];
-  return <Table rows={rows} columns={cols} rowKey={(r) => r.id} empty={t('ui.torrent.no_results')} />;
+  return (
+    <div className="torrent-table">
+      <Table rows={rows} columns={cols} rowKey={(r) => r.id} empty={t('ui.torrent.no_results')} />
+    </div>
+  );
 }
 
 export function TorrentList() {
@@ -230,36 +235,61 @@ export function TorrentList() {
     setParams(p);
   };
   const sort = params.get('sort') ?? ((params.get('q') ?? '') ? 'relevance' : 'newest');
+  const active = [...params.entries()].filter(([k]) => k.startsWith('f.')).flatMap(([k, v]) => v.split(',').filter(Boolean).map((val) => ({ field: k.slice(2), val })));
+  const unfilter = (field: string, val: string) => {
+    const p = new URLSearchParams(params);
+    const rest = (p.get(`f.${field}`) ?? '').split(',').filter((x) => x && x !== val);
+    if (rest.length) p.set(`f.${field}`, rest.join(','));
+    else p.delete(`f.${field}`);
+    setParams(p);
+  };
   return (
-    <div className="with-sidebar">
-      {res.data && <FilterPanel facets={res.data.facets} params={params} setParams={setParams} />}
-      <div className="main">
-        <form onSubmit={submit} className="searchbar">
+    <div>
+      <form onSubmit={submit} className="page-search">
+        <div className="search-box">
+          <Icon name="search" size={18} />
           <Input name="q" type="search" value={q} placeholder={t('ui.torrent.search')} onChange={(e) => setQ(e.target.value)} />
-          <select
-            className="pt-input"
-            value={sort}
-            onChange={(e) => {
-              const p = new URLSearchParams(params);
-              p.set('sort', e.target.value);
-              setParams(p);
-            }}
-          >
-            {Object.keys(SORTS).map((s) => (
-              <option key={s} value={s}>
-                {t(`ui.torrent.sort.${s}`)}
-              </option>
-            ))}
-          </select>
-        </form>
-        {res.isLoading && <Spinner />}
-        <ErrorText error={res.error} />
-        {res.data && (
-          <>
-            <p className="pt-muted small">≈ {res.data.estimated_total}</p>
-            <TorrentTable rows={res.data.hits.map((h) => h.document)} highlights={new Map(res.data.hits.map((h) => [h.id, h.highlights]))} />
-          </>
-        )}
+        </div>
+        <div className="segmented" role="group" aria-label={t('ui.torrent.sort')}>
+          {Object.keys(SORTS).map((k) => (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={sort === k}
+              onClick={() => {
+                const p = new URLSearchParams(params);
+                p.set('sort', k);
+                setParams(p);
+              }}
+            >
+              {t(`ui.torrent.sort.${k}`)}
+            </button>
+          ))}
+        </div>
+      </form>
+      {active.length > 0 && (
+        <div className="chips">
+          {active.map((a) => (
+            <button key={`${a.field}:${a.val}`} type="button" className="chip" onClick={() => unfilter(a.field, a.val)}>
+              {a.val} <Icon name="close" size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="with-sidebar">
+        {res.data && <FilterPanel facets={res.data.facets} params={params} setParams={setParams} />}
+        <div className="main">
+          {res.isLoading && <SkeletonRows n={8} />}
+          <ErrorText error={res.error} />
+          {res.data && (
+            <>
+              <p className="result-count">{t('ui.torrent.count', { n: res.data.estimated_total })}</p>
+              <Card className="list-card">
+                <TorrentTable rows={res.data.hits.map((h) => h.document)} highlights={new Map(res.data.hits.map((h) => [h.id, h.highlights]))} />
+              </Card>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -638,21 +668,51 @@ export function Home() {
   const t = useT();
   const s = useSession();
   const m = useManifest();
-  if (!s.loading && !s.me) {
+  if (s.loading) return <SkeletonRows n={4} />;
+  if (!s.me) {
     // 私有站点：未登录时只显示欢迎与登录 / 注册入口
     return (
-      <div className="pt-welcome">
-        <Card title={t('ui.home.guest_title', { site: m.site.name })}>
-          <p>{t('ui.home.guest_body')}</p>
-          <div className="pt-row">
-            <Link className="pt-btn pt-btn-primary" to="/login">
-              {t('ui.nav.login')}
-            </Link>
-            <Link className="pt-btn" to="/register">
-              {t('ui.nav.register')}
-            </Link>
+      <div>
+        <section className="hero">
+          <div>
+            <h1>
+              {t('ui.home.hero_a')} <span className="gradient-text">{t('ui.home.hero_b')}</span>
+            </h1>
+            <p className="lead">{t('ui.home.guest_body')}</p>
+            <div className="pt-row">
+              <Link className="pt-btn pt-btn-primary" to="/login">
+                {t('ui.nav.login')}
+              </Link>
+              <Link className="pt-btn" to="/register">
+                {t('ui.nav.register')}
+              </Link>
+            </div>
           </div>
-        </Card>
+          <HeroArt className="hero-art" />
+        </section>
+        <section className="features">
+          <div className="feature">
+            <div className="ico">
+              <Icon name="film" size={22} />
+            </div>
+            <h3>{t('ui.home.f1_title')}</h3>
+            <p>{t('ui.home.f1_body')}</p>
+          </div>
+          <div className="feature">
+            <div className="ico">
+              <Icon name="zap" size={22} />
+            </div>
+            <h3>{t('ui.home.f2_title')}</h3>
+            <p>{t('ui.home.f2_body')}</p>
+          </div>
+          <div className="feature">
+            <div className="ico">
+              <Icon name="users" size={22} />
+            </div>
+            <h3>{t('ui.home.f3_title')}</h3>
+            <p>{t('ui.home.f3_body', { site: m.site.name })}</p>
+          </div>
+        </section>
       </div>
     );
   }
@@ -670,13 +730,28 @@ function HomeFeed() {
     staleTime: 30_000,
     retry: false,
   });
+  const me = useSession().me;
   return (
     <div>
+      <section className="greeting">
+        <div>
+          <h1>{t('ui.home.welcome', { name: me?.username ?? '' })}</h1>
+          <p>{t('ui.home.welcome_sub')}</p>
+        </div>
+        <div className="actions">
+          <Link className="pt-btn pt-btn-primary" to="/upload">
+            <Icon name="upload" size={16} /> {t('ui.nav.upload')}
+          </Link>
+          <Link className="pt-btn" to="/torrents">
+            <Icon name="search" size={16} /> {t('ui.nav.torrents')}
+          </Link>
+        </div>
+      </section>
       <Slot name="home.announcements" ctx={{}} />
       <div className="with-sidebar reverse">
         <div className="main">
-          <Card title={t('ui.home.latest')} actions={<Link to="/torrents">→</Link>}>
-            {res.isLoading ? <Spinner /> : res.error ? <ErrorText error={res.error} /> : <TorrentTable rows={res.data?.hits.map((h) => h.document) ?? []} />}
+          <Card className="list-card" title={t('ui.home.latest')} actions={<Link to="/torrents">{t('ui.home.view_all')} →</Link>}>
+            {res.isLoading ? <SkeletonRows n={6} /> : res.error ? <ErrorText error={res.error} /> : <TorrentTable rows={res.data?.hits.map((h) => h.document) ?? []} />}
           </Card>
         </div>
         <aside className="sidebar">

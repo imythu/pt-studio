@@ -71,8 +71,42 @@ export function Spinner() {
   return <span className="pt-spinner" aria-label="loading" />;
 }
 
+/** 空状态插画（主题色随令牌变化） */
+export function EmptyArt({ className }: { className?: string }) {
+  return (
+    <svg className={cx('pt-empty-art', className)} viewBox="0 0 160 120" fill="none" aria-hidden="true">
+      <ellipse cx="80" cy="106" rx="52" ry="7" fill="currentColor" opacity=".08" />
+      <path d="M36 52 80 34l44 18v38L80 108 36 90z" fill="var(--pt-color-surface-2)" stroke="var(--pt-color-border)" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M36 52 80 70l44-18M80 70v38" stroke="var(--pt-color-border)" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M58 43l44 18" stroke="var(--pt-color-border)" strokeWidth="2" />
+      <circle cx="118" cy="30" r="14" fill="var(--pt-color-primary-soft)" stroke="var(--pt-color-primary)" strokeWidth="2.5" />
+      <path d="m128 40 9 9" stroke="var(--pt-color-primary)" strokeWidth="3.5" strokeLinecap="round" />
+      <path d="M113 30h10" stroke="var(--pt-color-primary)" strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="30" cy="30" r="3" fill="var(--pt-color-accent)" opacity=".6" />
+      <circle cx="46" cy="18" r="2" fill="var(--pt-color-primary)" opacity=".5" />
+      <path d="M22 70l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="var(--pt-color-primary)" opacity=".35" />
+    </svg>
+  );
+}
+
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="pt-empty">{children}</p>;
+  return (
+    <div className="pt-empty">
+      <EmptyArt />
+      <p>{children}</p>
+    </div>
+  );
+}
+
+/** 列表加载占位 */
+export function SkeletonRows({ n = 5 }: { n?: number }) {
+  return (
+    <div aria-busy="true" aria-label="loading">
+      {Array.from({ length: n }, (_, i) => (
+        <span key={i} className="pt-skeleton pt-skeleton-block" />
+      ))}
+    </div>
+  );
 }
 
 export interface Column<T> {

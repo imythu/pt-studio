@@ -68,6 +68,7 @@ try {
   // 2. 登录；用户菜单插槽（invite）
   step('login and user menu slot');
   await login(p, 'web_bob');
+  await p.getByRole('button', { name: '菜单' }).click();
   await p.getByRole('link', { name: /邀请（\d+）/ }).waitFor();
 
   // 3. 个人页：levels 插槽显示等级

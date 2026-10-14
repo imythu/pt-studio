@@ -1,10 +1,12 @@
 // 登录 / 注册（identity）。插件经 `auth.*` 插槽向请求写入字段（FormBinding）。
 import { useMemo, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { api } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
-import { Button, Card, Field, Input } from '@pt-studio/ui-kit';
+import { Button, Field, Input } from '@pt-studio/ui-kit';
+import { HeroArt, Logo } from '../art';
+import { useManifest } from '../manifest';
 import { ErrorText } from '../errors';
 import { useSession } from '../session';
 
@@ -36,6 +38,30 @@ function splitExtra(extra: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
+function AuthShell({ title, sub, children, foot }: { title: string; sub: string; children: React.ReactNode; foot: React.ReactNode }) {
+  const t = useT();
+  const m = useManifest();
+  return (
+    <div className="auth">
+      <aside className="auth-side">
+        <HeroArt />
+        <h2>{t('ui.home.tagline', { site: m.site.name })}</h2>
+        <p>{t('ui.home.guest_body')}</p>
+      </aside>
+      <div className="auth-form">
+        <div className="brand-sm">
+          <Logo size={34} />
+          <strong>{m.site.name}</strong>
+        </div>
+        <h1>{title}</h1>
+        <p className="sub">{sub}</p>
+        {children}
+        <p className="switch">{foot}</p>
+      </div>
+    </div>
+  );
+}
+
 export function Login() {
   const t = useT();
   const s = useSession();
@@ -45,6 +71,7 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const registered = (useLocation().state as { registered?: boolean } | null)?.registered;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -60,7 +87,16 @@ export function Login() {
     }
   };
   return (
-    <Card title={t('ui.login.title')} className="narrow">
+    <AuthShell
+      title={t('ui.login.title')}
+      sub={t('ui.login.sub')}
+      foot={
+        <>
+          {t('ui.login.no_account')} <Link to="/register">{t('ui.nav.register')}</Link>
+        </>
+      }
+    >
+      {registered && <p className="notice">{t('ui.register.done')}</p>}
       <form onSubmit={submit}>
         <Field label={t('ui.login.username')}>
           <Input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
@@ -72,10 +108,9 @@ export function Login() {
         <ErrorText error={error} />
         <Button type="submit" variant="primary" disabled={busy}>
           {t('ui.login.submit')}
-        </Button>{' '}
-        <Link to="/register">{t('ui.nav.register')}</Link>
+        </Button>
       </form>
-    </Card>
+    </AuthShell>
   );
 }
 
@@ -105,7 +140,15 @@ export function Register() {
     </Field>
   );
   return (
-    <Card title={t('ui.register.title')} className="narrow">
+    <AuthShell
+      title={t('ui.register.title')}
+      sub={t('ui.register.sub')}
+      foot={
+        <>
+          {t('ui.register.have_account')} <Link to="/login">{t('ui.nav.login')}</Link>
+        </>
+      }
+    >
       <form onSubmit={submit}>
         {field('username', t('ui.login.username'), 'text', 'username')}
         {field('email', t('ui.register.email'), 'email', 'email')}
@@ -116,6 +159,6 @@ export function Register() {
           {t('ui.register.submit')}
         </Button>
       </form>
-    </Card>
+    </AuthShell>
   );
 }
