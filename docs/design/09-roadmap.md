@@ -42,3 +42,80 @@
 - [x] **数据库**：PostgreSQL（D18）。
 - [x] **集成类插件**：已展开设计（rss、crossseed-api、notify、webhook）。
 - [ ] **评审 R1 用户决定项**：见 [../reviews/2026-10-05-design-review.md](../reviews/2026-10-05-design-review.md) §5（U-1～U-4，编码阶段先按推荐方案实现）。
+
+## 4. 未完成与待做（2026-10-14 汇总）
+
+已完成的功能见 [../dev/README.md](../dev/README.md) §4；以下是尚未做的部分，按领域列出。标“优先”的是正式开站前建议完成的。
+
+### 4.1 有设计、尚未实现的插件
+
+| 插件 | 作用 |
+|---|---|
+| anticheat（优先） | 反作弊：异常速度、刷上传、多账号关联的信号与案件，冻结流量 / 锁钱包、人工复核与申诉 |
+| registration-policy（优先） | 注册策略：开放 / 邀请 / 考试 / 名额、注册时段 |
+| ratio-policy | 分享率考核：按等级的最低分享率、警告期、限制下载 |
+| newbie-exam | 新手考核：限期完成上传量 / 做种量等任务 |
+| seedbox | 盒子识别：按 IP 段 / ASN 识别盒子，用于 H&R 豁免与反作弊 |
+| shop | 魔力值商城：购买上传量、邀请、改名卡、促销卡等 |
+| lottery | 抽奖 / 彩票 |
+| medals | 勋章与头衔 |
+| forum | 论坛（含种子讨论帖、公告） |
+| subtitles | 字幕上传与匹配 |
+| mediainfo | MediaInfo / NFO 解析服务（供上传校验与 AI 预审） |
+| terms | 术语服务：后台修改站点术语（目前术语只来自插件清单） |
+| webhook | 站外 webhook 推送 |
+| crossseed-api | 辅种接口（兼容 IYUU） |
+| llm-openai-compat | OpenAI 兼容的大模型接入（本地模型等） |
+| metadata-bangumi / douban / igdb / imdb / musicbrainz | 其他元数据源 |
+
+### 4.2 平台与内核
+
+- **插件包签名（优先，生产部署前必须完成）**：minisign 签 `checksums.txt`，站点配置信任公钥，加载时校验签名与文件哈希；`pt-server plugin keygen` / `package --sign`。完成后生产环境可用 `kernel.mode = "prod"`。
+- 钩子输入按 schema 运行时校验；插件包内分发前端（目前前端需放进站点的 web 目录）。
+- OpenAPI 聚合与 TS SDK 生成、CORS、client-errors 上报、术语版本头。
+- SQL 语句检查（pg_query）、插件配额（KV / Redis / blob）、S3 对象存储后端、分区维护任务化。
+- WASM：组件编译缓存、实例池、`metadata-provider` 等导出的静态绑定。
+- 事件：回放、按类型的保留期清理、手动运行任务的 HTTP / CLI 入口。
+- 出站 HTTP：速率限制、熔断、站点级代理、流式响应。
+- SDK：其他语言（JS / Python）、从 schema 生成类型化事件 / 钩子结构；模板仓库独立发布。
+
+### 4.3 tracker
+
+- Prometheus 指标与告警；节点心跳、后台 peer 查询；客户端白名单的后台编辑界面。
+- qBittorrent、Deluge、µTorrent 等客户端的兼容测试（目前只测了 Transmission 4.1）。
+- tracker 与 Redis 分开部署的压测（目标平均 1.7 万次 / 秒）；Redis ACL 模板（`deploy/redis/acl.conf`）。
+- 限制类变化（H&R 限制下载等）的实时同步（目前靠 tracker-bridge 每 10 分钟全量兜底）。
+
+### 4.4 身份与安全
+
+- （优先）找回密码、邮箱验证（依赖邮件渠道，已具备）、2FA（TOTP）、WebAuthn。
+- 改名、UTS #39 混淆字符检查、身份数据的 Redis 缓存与登录限流细化。
+- 后台修改用户资料的接口对未知字段静默忽略（如 `status`，封禁需用“限制”接口），应改为报错。
+
+### 4.5 各插件的后续功能
+
+- **种子 / 资源类型**：去重与替代（trump）规则、元数据字段锁定、词表与质量权重后台、缺集列表、艺人页、MusicBrainz 封面、抓轨日志签名验证。
+- **搜索**：语义 / 混合搜索、多实例、做种数部分更新、同义词管理、一致性巡检。
+- **记账 / 账本 / 魔力值**：日对账、月结余快照、归档、重算、交叉校验；魔力值规则的编辑与回放。
+- **等级 / 邀请 / H&R / 促销**：规则编辑接口、模拟评估、批量操作、促销申请审核、预警与连坐通知。
+- **社区**：图片上传、表情、@提醒通知、论坛举报目标；审核的规则编辑器、批量审核、通配符敏感词。
+- **通知 / 站内信**：Telegram / Discord 渠道、合并通知、服务端模板渲染、mailgun / SES、群发公告。
+- **签到 / 求种 / RSS**：补签卡、站点时区；求种认领、上传时选择应求；RSS 经 `ctx.search` 的订阅条件、H&R 属性、ETag。
+- **AI**：上传预审的 MediaInfo 比对与疑似重复、站内助手的检索增强与流式输出、MCP 工具目录缓存与限流。
+
+### 4.6 前端
+
+- Markdown 编辑器与预览、外部 ID 自动拉取、长列表虚拟滚动、语言包按需加载。
+- 各插件的后台管理页面（目前多数插件只有 JSON / schema 设置表单）。
+- 移动端适配与整体视觉设计。
+
+### 4.7 部署与运维
+
+- Docker 镜像与 compose、systemd 服务文件在真实环境中实测。
+- 监控（日志采集、指标、告警）、备份恢复演练、多节点部署指南。
+- 同域名按路径分流 tracker 的 nginx 写法（目前文档写的是两个子域名）。
+
+### 4.8 待验证项与待决问题
+
+见 §2、§3（tracker / 记账 / Meilisearch 压测、SQL 隔离逃逸测试、MCP 客户端兼容性、LLM 评测集等）。
+

@@ -3,7 +3,7 @@
 
 [site]
 name = "PT Studio"
-base_url = "http://localhost:8080"     # 对外地址（链接、Cookie、CSRF 来源检查都以它为准）
+base_url = "http://localhost:31251"     # 对外地址（链接、Cookie、CSRF 来源检查都以它为准）
 timezone = "Asia/Shanghai"
 default_locale = "zh-CN"
 locales = ["zh-CN", "en"]
@@ -12,7 +12,7 @@ locales = ["zh-CN", "en"]
 mode = "dev"                           # dev：允许未签名插件包、出站 HTTP 可用 http；生产用 "prod"
 
 [http]
-bind = "0.0.0.0:8080"
+bind = "0.0.0.0:31251"
 web_dir = "web/dist"                   # 前端构建目录（cd web && npm run build）
 
 [database]
@@ -46,7 +46,7 @@ secret_key = "@SECRET_HEX_32"          # 32 字节十六进制（64 个字符）
 secret = "@SECRET_BASE64_32"           # 32 字节 base64：邀请码派生
 
 [plugin.torrent]
-announce_base_urls = ["http://localhost:8081/announce"]   # tracker 地址（种子中写入 <地址>/<passkey>）
+announce_base_urls = ["http://localhost:31252/announce"]   # tracker 地址（种子中写入 <地址>/<passkey>）
 types = ["movie", "tv", "anime", "music", "generic"]
 
 [plugin.search-meilisearch]

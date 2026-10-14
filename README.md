@@ -26,19 +26,19 @@
 
 ## 运行站点
 
-Linux x86_64 服务器：使用发布包（`deploy/release/build-release.sh` 生成 `dist/pt-studio-<版本>-linux-x86_64.tar.gz`），按 [deploy/release/DEPLOY.md](deploy/release/DEPLOY.md) 部署（systemd、nginx、备份、升级、故障排查）。
+Linux x86_64 服务器：从 [Releases](https://github.com/imythu/pt-studio/releases) 下载 `pt-studio-<版本>-linux-x86_64.tar.gz`（GitHub Actions 构建），按 [deploy/release/DEPLOY.md](deploy/release/DEPLOY.md) 部署（systemd、nginx、备份、升级、故障排查）。
 
 
-本机（需要 PostgreSQL ≥ 16、Redis ≥ 7.4、Node.js ≥ 20、Rust；Meilisearch 可选）：
+本机开发（需要 PostgreSQL ≥ 16、Redis ≥ 7.4、Node.js ≥ 20、Rust；Meilisearch 可选）：
 
 ```sh
-deploy/dev/run-site.sh        # 构建并启动：站点 http://localhost:8080，tracker http://localhost:8081
+deploy/dev/run-site.sh        # 构建并启动：站点 http://localhost:31251，tracker http://localhost:31252
 ```
 
-Docker：
+Docker（镜像 `ghcr.io/imythu/pt-studio`，GitHub Actions 构建）：
 
 ```sh
-docker compose -f deploy/docker/compose.yaml up --build
+docker compose -f deploy/docker/compose.yaml up -d
 ```
 
 注册账号后授予管理员：`pt-server --config <site.toml> user grant-role <用户名> admin`（Docker 中用 `docker compose … exec server pt-server --config /data/site.toml user grant-role …`）。

@@ -160,7 +160,7 @@ impl Default for HttpSection {
 }
 
 fn default_bind() -> String {
-    "0.0.0.0:8080".into()
+    "0.0.0.0:31251".into()
 }
 fn default_body_kb() -> u32 {
     1024

@@ -1,7 +1,7 @@
 // 真实 BT 客户端端到端：对正在运行的站点 + pt-tracker，用两个 transmission-cli 实例（做种 / 下载）完成一次真实传输，
 // 检查文件完整、tracker 记账到 accounting。
 //
-//   PT_BASE=http://localhost:8080 node web/tests/bt-real.mjs
+//   PT_BASE=http://localhost:31251 node web/tests/bt-real.mjs
 //
 // 需要 transmission-cli 与 transmission-create（Debian：apt install transmission-cli）。
 import { createHash, randomBytes } from 'node:crypto';
@@ -10,7 +10,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const BASE = process.env.PT_BASE ?? 'http://localhost:8080';
+const BASE = process.env.PT_BASE ?? 'http://localhost:31251';
 const SIZE = Number(process.env.PT_BT_SIZE ?? 32 << 20);
 const PASS = 'correct horse battery';
 // Transmission 4 忽略回环地址上的 peer：本机测试时把 announce 地址换成本机的局域网 IP（announce 不在 info 中，hash 不变）

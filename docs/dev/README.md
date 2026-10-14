@@ -226,3 +226,4 @@ cargo test --workspace                      # 单元测试 + 端到端测试
 | 2026-10-14 | P7：插件 API 冻结为 `pt:plugin@1.0.0`、Rust SDK（全部 WASM 插件改用）、第三方钩子点与错误码、`pt-server plugin check/package`、WASM / Native 模板、开发指南、README、`llms.txt` |
 | 2026-10-14 | P8：一键运行站点、Docker 部署文件、首个管理员命令、浏览器冒烟检查；tracker-bridge 与 pt-tracker（announce → 记账 → 个人页流量全链路打通）；界面与搜索缓存修复 |
 | 2026-10-14 | pt-tracker 的 swarm 改存 Redis（无状态、多节点，D20 取代 D9 / D14）、Redis 集成测试、压测工具、Transmission 真实传输测试；Linux x86_64 发布包（`deploy/release/build-release.sh`）与部署指南（`deploy/release/DEPLOY.md`），解压安装后冒烟检查与真实传输均通过 |
+| 2026-10-14 | 默认端口改为 31251（站点）/ 31252（tracker）；pt-server 与 pt-tracker 处理 SIGTERM（systemd / docker 重启时释放集群租约，重启后同步延迟从约 10 秒降到 < 100 ms）；GitHub Actions 构建发布包（`release.yml`，ubuntu-22.04）与 Docker 镜像（`docker.yml`，ghcr.io）；roadmap §4 汇总未完成与待做 |

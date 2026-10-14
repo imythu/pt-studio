@@ -1,5 +1,7 @@
-# docker compose -f deploy/docker/compose.yaml up --build
-# 打开 http://localhost:8080 注册后授予管理员：
+# docker compose -f deploy/docker/compose.yaml up -d
+# 镜像由 GitHub Actions 构建并发布到 ghcr.io/imythu/pt-studio（latest 为最新的版本标签，main 为主分支最新提交）；
+# 要从源码构建，取消下面 server 中 build 一节的注释并加 --build。
+# 打开 http://localhost:31251 注册后授予管理员：
 #   docker compose -f deploy/docker/compose.yaml exec server pt-server --config /data/site.toml user grant-role <用户名> admin
 # 正式部署前修改下面的密码与 key，并把 PT_BASE_URL / PT_TRACKER_URL 改为对外地址。
 name: pt-studio
@@ -38,17 +40,17 @@ services:
       - meili:/meili_data
 
   server:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile
-    image: pt-studio
+    image: ghcr.io/imythu/pt-studio:latest
+    # build:
+    #   context: ../..
+    #   dockerfile: deploy/docker/Dockerfile
     command: ["server"]
     environment:
       <<: *env
-      PT_BASE_URL: http://localhost:8080
-      PT_TRACKER_URL: http://localhost:8081
+      PT_BASE_URL: http://localhost:31251
+      PT_TRACKER_URL: http://localhost:31252
     ports:
-      - "8080:8080"
+      - "31251:31251"
     volumes:
       - data:/data
     depends_on:
@@ -60,10 +62,10 @@ services:
         condition: service_started
 
   tracker:
-    image: pt-studio
+    image: ghcr.io/imythu/pt-studio:latest
     command: ["tracker"]
     ports:
-      - "8081:8081"
+      - "31252:31252"
     depends_on:
       - server
 

@@ -13,7 +13,7 @@ case "$mode" in
       mkdir -p /data/blob
       DB="${PT_DB_NAME:-pt}"
       HOST="${PT_DB_HOST:-postgres:5432}"
-      sed -e "s#http://localhost:8080#${PT_BASE_URL:-http://localhost:8080}#" \
+      sed -e "s#http://localhost:31251#${PT_BASE_URL:-http://localhost:31251}#" \
           -e "s#web_dir = \"web/dist\"#web_dir = \"/opt/pt/web\"#" \
           -e "s#pt_gateway:change-me-gateway@127.0.0.1:5432/pt#pt_gateway:${PT_DB_GATEWAY_PASSWORD:-change-me-gateway}@$HOST/$DB#" \
           -e "s#pt_admin:change-me-admin@127.0.0.1:5432/pt#pt_admin:${PT_DB_ADMIN_PASSWORD:-change-me-admin}@$HOST/$DB#" \
@@ -24,7 +24,7 @@ case "$mode" in
           -e "s#@SECRET_BASE64_32#$(openssl rand -base64 32)#" \
           -e "s#http://127.0.0.1:7700#${PT_MEILI_URL:-http://meilisearch:7700}#" \
           -e "s#@MEILI_MASTER_KEY#${PT_MEILI_KEY:-}#" \
-          -e "s#http://localhost:8081/announce#${PT_TRACKER_URL:-http://localhost:8081}/announce#" \
+          -e "s#http://localhost:31252/announce#${PT_TRACKER_URL:-http://localhost:31252}/announce#" \
           /opt/pt/site.example.toml > "$CFG"
       echo "generated $CFG (keep it: it holds the site secrets)"
     fi
@@ -32,7 +32,7 @@ case "$mode" in
     exec pt-server --config "$CFG" serve
     ;;
   tracker)
-    printf 'node_id = "%s"\nbind = "0.0.0.0:8081"\nredis_url = "%s"\ntrust_forwarded = %s\n' \
+    printf 'node_id = "%s"\nbind = "0.0.0.0:31252"\nredis_url = "%s"\ntrust_forwarded = %s\n' \
       "${PT_TRACKER_NODE:-tracker-1}" "$REDIS" "${PT_TRUST_FORWARDED:-false}" > /tmp/tracker.toml
     exec pt-tracker /tmp/tracker.toml
     ;;

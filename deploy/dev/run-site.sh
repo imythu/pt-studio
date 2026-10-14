@@ -6,8 +6,8 @@
 #   PT_SKIP_BUILD=1 deploy/dev/run-site.sh   # 已构建过，直接启动
 #
 # 依赖：PostgreSQL ≥ 16、Redis ≥ 7.4、Node.js ≥ 20、Rust（含 wasm32-wasip2 目标）；Meilisearch 可选（没有时搜索不可用）。
-# 端口可用环境变量覆盖：PT_PG_PORT（55432）、PT_REDIS_PORT（56379）、PT_MEILI_PORT（57700）、PT_HTTP_PORT（8080）、
-# PT_TRACKER_PORT（8081，pt-tracker）；
+# 端口可用环境变量覆盖：PT_PG_PORT（55432）、PT_REDIS_PORT（56379）、PT_MEILI_PORT（57700）、PT_HTTP_PORT（31251）、
+# PT_TRACKER_PORT（31252，pt-tracker）；
 # 已在运行的 Meilisearch 用 PT_MEILI_KEY 给出 master key。
 # 数据与配置放在 .dev/site/；删除该目录并 DROP DATABASE ptsite 即可从头开始。
 set -euo pipefail
@@ -18,8 +18,8 @@ PROFILE="${PT_PROFILE:-release}"
 PG_PORT="${PT_PG_PORT:-55432}"
 REDIS_PORT="${PT_REDIS_PORT:-56379}"
 MEILI_PORT="${PT_MEILI_PORT:-57700}"
-HTTP_PORT="${PT_HTTP_PORT:-8080}"
-TRACKER_PORT="${PT_TRACKER_PORT:-8081}"
+HTTP_PORT="${PT_HTTP_PORT:-31251}"
+TRACKER_PORT="${PT_TRACKER_PORT:-31252}"
 PG_SUPER="${PT_PG_SUPERUSER:-postgres}"
 # 与测试库共用 PostgreSQL 集群时，角色名不能冲突（测试会删除 pt_plugin_* 角色）：本脚本使用独立的前缀与库名
 PREFIX="${PT_ROLE_PREFIX:-ptsite_}"
@@ -133,8 +133,8 @@ done
 CFG="$DEV/site.toml"
 if [ ! -f "$CFG" ]; then
   say "writing $CFG"
-  sed -e "s#http://localhost:8080#http://localhost:$HTTP_PORT#" \
-      -e "s#0.0.0.0:8080#0.0.0.0:$HTTP_PORT#" \
+  sed -e "s#http://localhost:31251#http://localhost:$HTTP_PORT#" \
+      -e "s#0.0.0.0:31251#0.0.0.0:$HTTP_PORT#" \
       -e "s#web_dir = \"web/dist\"#web_dir = \"$ROOT/web/dist\"#" \
       -e "s#pt_gateway:change-me-gateway@127.0.0.1:5432/pt#${PREFIX}gateway:change-me-gateway@127.0.0.1:$PG_PORT/$DB#" \
       -e "s#pt_admin:change-me-admin@127.0.0.1:5432/pt#${PREFIX}admin:change-me-admin@127.0.0.1:$PG_PORT/$DB#" \
@@ -146,7 +146,7 @@ if [ ! -f "$CFG" ]; then
       -e "s#@SECRET_BASE64_32#$(openssl rand -base64 32)#" \
       -e "s#http://127.0.0.1:7700#http://127.0.0.1:$MEILI_PORT#" \
       -e "s#@MEILI_MASTER_KEY#$MEILI_KEY#" \
-      -e "s#http://localhost:8081/announce#http://localhost:$TRACKER_PORT/announce#" \
+      -e "s#http://localhost:31252/announce#http://localhost:$TRACKER_PORT/announce#" \
       "$ROOT/deploy/site.example.toml" > "$CFG"
 fi
 

@@ -55,7 +55,7 @@ fn d_node() -> String {
     "tracker-1".into()
 }
 fn d_bind() -> String {
-    "0.0.0.0:8081".into()
+    "0.0.0.0:31252".into()
 }
 fn d_timeout() -> u64 {
     2700

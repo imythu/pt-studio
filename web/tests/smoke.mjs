@@ -1,7 +1,7 @@
 // 对一个正在运行的站点做冒烟检查（浏览器）：注册 → 授予管理员 → 登录 → 发布种子 → 列表 / 详情 / 下载 →
 // 模拟 BT 客户端向 pt-tracker announce（做种、下载、完成）→ 个人页流量 → 后台。
 //
-//   PT_BASE=http://localhost:8080 PT_SERVER=target/release/pt-server PT_CONFIG=.dev/site/site.toml \
+//   PT_BASE=http://localhost:31251 PT_SERVER=target/release/pt-server PT_CONFIG=.dev/site/site.toml \
 //     node web/tests/smoke.mjs [截图目录]
 //
 // PT_SERVER / PT_CONFIG 用于执行 `pt-server user grant-role`；不给时跳过后台检查。PT_SKIP_TRACKER=1 跳过 tracker 检查。
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 
-const BASE = process.env.PT_BASE ?? 'http://localhost:8080';
+const BASE = process.env.PT_BASE ?? 'http://localhost:31251';
 const SHOTS = process.argv[2];
 const PASS = 'correct horse battery';
 const USER = process.env.PT_SMOKE_USER ?? `admin${Date.now() % 100000}`;

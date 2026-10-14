@@ -171,14 +171,28 @@ async fn main() -> ExitCode {
             };
             tracing::info!(%bind, "listening");
             let server = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-                .with_graceful_shutdown(async {
-                    let _ = tokio::signal::ctrl_c().await;
-                });
+                .with_graceful_shutdown(shutdown_signal());
             if let Err(e) = server.await {
                 tracing::error!(error = %e, "server error");
             }
             kernel.shutdown().await;
             ExitCode::SUCCESS
         }
+    }
+}
+
+/// 等待 Ctrl-C 或 SIGTERM（systemd、docker stop 发送 SIGTERM），之后优雅退出、释放集群租约
+async fn shutdown_signal() {
+    let term = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        () = term => {}
     }
 }

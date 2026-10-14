@@ -2,6 +2,11 @@
 
 本文说明如何用发布包 `pt-studio-<版本>-linux-x86_64.tar.gz` 在一台 Linux 服务器上部署 PT Studio：站点（pt-server，含全部插件与前端）+ tracker（pt-tracker）。
 
+获取方式：
+
+- **发布包**：GitHub Releases（https://github.com/imythu/pt-studio/releases ），由 GitHub Actions（`.github/workflows/release.yml`）在推送 `v*` 标签时构建；也可以在 x86_64 的 Linux 上运行 `deploy/release/build-release.sh` 自行构建。
+- **Docker 镜像**：`ghcr.io/imythu/pt-studio:<版本>` / `latest`（`.github/workflows/docker.yml` 构建），用法见 `deploy/docker/compose.yaml`：`docker compose -f deploy/docker/compose.yaml up -d`。
+
 ## 1. 包内容
 
 ```
@@ -35,7 +40,7 @@ pt-studio-<版本>-linux-x86_64/
 | PostgreSQL | ≥ 16（推荐 17） | 需要 PG16 的 `GRANT … WITH INHERIT FALSE, SET TRUE`；Debian 12 / Ubuntu 22.04 自带的版本太旧，请用 [PGDG 软件源](https://www.postgresql.org/download/linux/) |
 | Redis | ≥ 7.4（推荐 8） | 需要 `HEXPIRE`、Streams；Debian 12 自带 7.0 太旧，请用 [Redis 官方软件源](https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/install-redis-on-linux/) |
 | Meilisearch | ≥ 1.13 | 种子列表与搜索依赖它；[下载二进制](https://www.meilisearch.com/docs/learn/self_hosted/install_meilisearch_locally) 即可，只监听本机 |
-| 端口 | 8080（站点）、8081（tracker） | 对外通常经反向代理（§5） |
+| 端口 | 31251（站点）、31252（tracker） | 对外通常经反向代理（§5） |
 | 资源（起步） | 2 核、4 GB 内存、20 GB 磁盘 | 种子文件存在本地目录（`/var/lib/pt-studio/blob`） |
 
 还需要 `openssl`（生成密钥）与 `psql`（初始化数据库）。
@@ -98,7 +103,7 @@ PT_DB_ADMIN_PASSWORD="$PT_DB_ADMIN_PASSWORD" PT_DB_GATEWAY_PASSWORD="$PT_DB_GATE
 PT_MEILI_KEY="$MEILI_KEY" /opt/pt-studio/scripts/init-config.sh
 ```
 
-- `PT_BASE_URL`：浏览器访问站点的地址（链接、Cookie、CSRF 校验都以它为准）。先在本机试用可以用 `http://<服务器 IP>:8080`。
+- `PT_BASE_URL`：浏览器访问站点的地址（链接、Cookie、CSRF 校验都以它为准）。先在本机试用可以用 `http://<服务器 IP>:31251`。
 - `PT_TRACKER_URL`：BT 客户端访问 tracker 的地址，写进下载的种子（`<地址>/announce/<passkey>`）。
 - 其他可选变量见脚本开头的注释（数据库地址、Redis 地址、监听地址、目录）。
 
@@ -111,7 +116,7 @@ cp /opt/pt-studio/systemd/*.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now pt-server pt-tracker
 systemctl status pt-server pt-tracker
-curl -s http://127.0.0.1:8081/health      # {"status":"ok",…,"passkeys":…}
+curl -s http://127.0.0.1:31252/health      # {"status":"ok",…,"passkeys":…}
 ```
 
 `pt-server.service` 启动前自动执行迁移（`ExecStartPre … migrate`）。首次启动会创建全部插件的 schema，需要几秒。
@@ -139,7 +144,7 @@ sudo -u pt-studio /opt/pt-studio/bin/pt-server --config /etc/pt-studio/site.toml
 | 配置 | 位置 | 说明 |
 |---|---|---|
 | 站点名称、语言、时区 | `[site]` | |
-| 监听地址 | `[http] bind` | 默认 `0.0.0.0:8080`；反向代理在本机时可改为 `127.0.0.1:8080` |
+| 监听地址 | `[http] bind` | 默认 `0.0.0.0:31251`；反向代理在本机时可改为 `127.0.0.1:31251` |
 | 反向代理 | `[http] trusted_proxies = ["127.0.0.1"]` | 从 `X-Forwarded-For` 取客户端 IP（限流、审计、安全日志都依赖它） |
 | 资源类型 | `[plugin.torrent] types` | 默认电影、剧集、动漫、音乐、通用 |
 | tracker 地址 | `[plugin.torrent] announce_base_urls` | 改动后新下载的种子生效；已下载的种子不变 |
@@ -152,7 +157,7 @@ tracker（`/etc/pt-studio/tracker.toml`）：
 
 | 配置 | 说明 |
 |---|---|
-| `bind` | 默认 `0.0.0.0:8081` |
+| `bind` | 默认 `0.0.0.0:31252` |
 | `redis_url` | 与站点相同的 Redis；`sync_url` / `acct_url` / `state_url` 可把三种用途分到不同实例 |
 | `trust_forwarded` | 在反向代理之后时设为 `true` |
 | `max_peer_timeout` | peer 超时（默认 2700 秒，应大于 announce 间隔） |
@@ -171,7 +176,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/pt.example.com/privkey.pem;
     client_max_body_size 20m;                  # 种子与图片上传
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:31251;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -184,7 +189,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/tracker.example.com/privkey.pem;
     access_log off;                            # announce 量大，且 URL 中含 passkey
     location / {
-        proxy_pass http://127.0.0.1:8081;
+        proxy_pass http://127.0.0.1:31252;
         proxy_set_header X-Forwarded-For $remote_addr;
     }
 }
@@ -192,7 +197,7 @@ server {
 
 对应设置：`site.toml` 中 `[site] base_url = "https://pt.example.com"`、`[http] trusted_proxies = ["127.0.0.1"]`、`announce_base_urls = ["https://tracker.example.com/announce"]`；`tracker.toml` 中 `trust_forwarded = true`。站点与 tracker 监听地址可改为 `127.0.0.1:…`，只让 nginx 对外。
 
-防火墙只需要开放 80 / 443；PostgreSQL、Redis、Meilisearch 只监听本机或内网，**不要暴露到公网**。
+防火墙只需要开放 80 / 443（不用反向代理、直接访问时开放 31251 与 31252）；PostgreSQL、Redis、Meilisearch 只监听本机或内网，**不要暴露到公网**。
 
 ## 6. 日常运维
 
@@ -203,7 +208,7 @@ server {
 | 只执行迁移 | `… pt-server --config /etc/pt-studio/site.toml migrate` |
 | 授予 / 管理角色 | `… pt-server --config … user grant-role <用户名> <admin\|moderator\|…>`；其他用户管理在后台进行 |
 | 检查单个插件包 | `/opt/pt-studio/bin/pt-server plugin check /opt/pt-studio/plugins/<id>` |
-| tracker 健康 | `curl http://127.0.0.1:8081/health` |
+| tracker 健康 | `curl http://127.0.0.1:31252/health` |
 | 重启 | `systemctl restart pt-server pt-tracker`（tracker 重启不丢 swarm：peer 与会话状态在 Redis 中） |
 
 ### 备份
@@ -235,7 +240,7 @@ systemctl start pt-server pt-tracker    # 启动前自动迁移
 | 数据库连接 / 权限错误 | 确认执行过 `init-db.sh`，`site.toml` 中两个连接串的密码正确；PostgreSQL 版本 ≥ 16 |
 | Redis 报 `unknown command 'HEXPIRE'` | Redis 版本低于 7.4，升级 Redis |
 | 种子列表为空、搜索报错 | Meilisearch 未运行或 `api_key` 不对；`curl http://127.0.0.1:7700/health` |
-| 客户端提示 `unregistered passkey` | 刚注册 / 刚重置 passkey 时 tracker 还没同步（通常 1 秒内，服务刚启动时可能约 10 秒）；仍然失败时看 `journalctl -u pt-server` 中 tracker-bridge 的日志 |
+| 客户端提示 `unregistered passkey` | 刚注册 / 刚重置 passkey 时 tracker 还没同步（通常 1 秒内）；仍然失败时看 `journalctl -u pt-server` 中 tracker-bridge 的日志 |
 | 客户端提示 `client not allowed` | 客户端不在白名单中：后台 tracker-bridge 设置中添加 peer_id 前缀，或允许未知客户端 |
 | 客户端提示 `torrent not registered` / `torrent not available` | 种子未发布或被禁用（待审核的种子不能做种） |
 | 上传量 / 下载量不更新 | 确认 tracker 与站点使用同一个 Redis；`journalctl -u pt-server` 中查看 accounting 的日志 |

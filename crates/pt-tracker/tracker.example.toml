@@ -1,6 +1,6 @@
 # pt-tracker 配置。announce 地址为 http://<bind>/announce/<passkey>，与站点 [plugin.torrent] announce_base_urls 一致。
 node_id = "tracker-1"
-bind = "0.0.0.0:8081"
+bind = "0.0.0.0:31252"
 # 站点使用的 Redis（tracker-bridge 写 trk:*，accounting 读 acct:*）；三种用途可以分开
 redis_url = "redis://127.0.0.1:6379/0"
 # sync_url = "…"   # trk:*（只读）

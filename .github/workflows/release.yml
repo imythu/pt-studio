@@ -1,0 +1,58 @@
+# 发布包：推送 v* 标签（或手动运行）时构建 Linux x86_64 发布包并创建 GitHub Release。
+# 产物：pt-studio-<版本>-linux-x86_64.tar.gz 与 .sha256（构建脚本 deploy/release/build-release.sh，部署见 deploy/release/DEPLOY.md）
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    # 用较旧的 Ubuntu 构建，二进制要求的 glibc 版本更低（兼容 Debian 12+ / Ubuntu 22.04+ / RHEL 9+）
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-wasip2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            plugins/wasm -> target
+            crates/pt-tracker -> target
+
+      - name: Build release package
+        run: deploy/release/build-release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pt-studio-linux-x86_64
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Linux x86_64 发布包（glibc ≥ $(sed -n 's/^glibc >= //p' dist/*/VERSION)）。部署：解压后见包内 DEPLOY.md。
+          Docker 镜像：ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.sha256 \
+            --title "PT Studio $GITHUB_REF_NAME" --notes "$notes" --verify-tag
