@@ -1,4 +1,5 @@
 import { LostArt } from './art';
+import { HelpPage } from './help';
 import type { ComponentType } from 'react';
 import { createBrowserRouter, Link } from 'react-router';
 import { useT } from '@pt-studio/terms';
@@ -10,7 +11,7 @@ import { PluginRoute } from './pages/PluginRoute';
 import { ProfilePage } from './pages/Profile';
 import { GroupPage, Home, TorrentList, TorrentPage, Upload } from './pages/Torrents';
 import { overrides, type PageId } from './overrides';
-import { Layout, RequireLogin } from './shell/Layout';
+import { Layout, MePage, RequireLogin } from './shell/Layout';
 import { useSession } from './session';
 
 function page(id: PageId, C: ComponentType) {
@@ -50,6 +51,8 @@ export const router = createBrowserRouter([
       { path: 'groups/:id', element: <RequireLogin>{page('group', GroupPage)}</RequireLogin> },
       { path: 'upload', element: <RequireLogin>{page('upload', Upload)}</RequireLogin> },
       { path: 'users/:id', element: <RequireLogin>{page('profile', ProfilePage)}</RequireLogin> },
+      { path: 'help', element: <HelpPage /> },
+      { path: 'me', element: <RequireLogin><MePage /></RequireLogin> },
       { path: 'settings', element: <RequireLogin>{page('settings', SettingsPage)}</RequireLogin> },
       { path: 'p/:plugin/*', element: <PluginRoute /> },
       {

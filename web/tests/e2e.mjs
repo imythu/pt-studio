@@ -101,6 +101,7 @@ try {
   await p.getByLabel('类型').selectOption('movie');
   await p.locator('input[type=file]').setInputFiles(TORRENT_FILE);
   await p.locator('input[name=title]').fill('Web.Movie.2024.2160p.WEB-DL.H265.DDP5.1-WEB');
+  await p.getByText(/更多资源信息/).click();
   await p.getByText('IMDb', { exact: true }).locator('..').locator('input').fill('https://www.imdb.com/title/tt1234567/');
   await p.getByRole('button', { name: '发布' }).click();
   await p.waitForURL(/\/torrents\/\d+$/);

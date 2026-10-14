@@ -107,20 +107,16 @@ function UserMenu() {
   if (!s.me) return null;
   return (
     <div className="user-menu" ref={ref}>
-      <button type="button" className="icon-btn" aria-haspopup="menu" aria-expanded={open} aria-label={t('ui.nav.menu')} onClick={() => setOpen(!open)}>
-        <Icon name="chevron" size={16} />
+      <button type="button" className="user-chip" aria-haspopup="menu" aria-expanded={open} aria-label={t('ui.nav.menu')} onClick={() => setOpen(!open)}>
+        <span className="avatar" aria-hidden="true">
+          {s.me.username.slice(0, 1).toUpperCase()}
+        </span>
+        <span className="user-chip-name">{s.me.username}</span>
+        <Icon name="chevron" size={14} />
       </button>
       {open && (
         <div className="menu" role="menu">
-          <Link role="menuitem" to={`/users/${s.me.id}`} onClick={close}>
-            <Icon name="user" size={16} /> {t('ui.nav.profile')}
-          </Link>
-          <Link role="menuitem" to="/settings" onClick={close}>
-            <Icon name="settings" size={16} /> {t('ui.nav.settings')}
-          </Link>
-          <div className="menu-slot" onClick={close}>
-            <Slot name="nav.user_menu" ctx={{ user: s.me }} />
-          </div>
+          <MeLinks onPick={close} />
           <hr />
           <button
             type="button"
@@ -140,70 +136,139 @@ function UserMenu() {
   );
 }
 
+/** “我的”入口：个人主页、设置、插件提供的菜单项（菜单与移动端“我的”页共用） */
+export function MeLinks({ onPick }: { onPick?: () => void }) {
+  const t = useT();
+  const s = useSession();
+  if (!s.me) return null;
+  return (
+    <>
+      <Link role="menuitem" to={`/users/${s.me.id}`} onClick={onPick}>
+        <Icon name="user" size={16} /> {t('ui.nav.profile')}
+      </Link>
+      <Link role="menuitem" to="/settings" onClick={onPick}>
+        <Icon name="settings" size={16} /> {t('ui.nav.settings')}
+      </Link>
+      <div className="menu-slot" onClick={onPick}>
+        <Slot name="nav.user_menu" ctx={{ user: s.me }} />
+      </div>
+    </>
+  );
+}
+
+/** 移动端底部标签栏 */
+function TabBar() {
+  const t = useT();
+  const s = useSession();
+  const notify = useInstalled('notify');
+  const unread = useQuery({
+    queryKey: ['unread', 'notify'],
+    queryFn: () => api<{ count: number }>('/api/p/notify/v1/unread'),
+    enabled: notify && !!s.me,
+    refetchInterval: 60_000,
+    retry: false,
+  }).data?.count;
+  if (!s.me) return null;
+  return (
+    <nav className="tabbar" aria-label={t('ui.nav.menu')}>
+      <NavLink to="/" end>
+        <Icon name="home" size={22} />
+        <span>{t('ui.nav.home')}</span>
+      </NavLink>
+      <NavLink to="/torrents">
+        <Icon name="compass" size={22} />
+        <span>{t('ui.nav.torrents')}</span>
+      </NavLink>
+      <NavLink to="/upload" className="tab-main">
+        <span className="tab-main-ico">
+          <Icon name="plus" size={24} />
+        </span>
+        <span>{t('ui.nav.upload_short')}</span>
+      </NavLink>
+      {notify ? (
+        <NavLink to="/p/notify/">
+          <span className="tab-ico">
+            <Icon name="bell" size={22} />
+            {!!unread && <span className="dot">{unread > 99 ? '99+' : unread}</span>}
+          </span>
+          <span>{t('ui.nav.notifications')}</span>
+        </NavLink>
+      ) : null}
+      <NavLink to="/me">
+        <Icon name="user" size={22} />
+        <span>{t('ui.nav.me')}</span>
+      </NavLink>
+    </nav>
+  );
+}
+
 export function Layout() {
   const t = useT();
   const s = useSession();
   const m = useManifest();
   const loc = useLocation();
-  const [menu, setMenu] = useState(false);
   const [theme, setTheme] = useState(currentTheme);
-  useEffect(() => setMenu(false), [loc.pathname]);
   const bare = !s.me && (loc.pathname === '/login' || loc.pathname === '/register' || loc.pathname === '/');
+  const themeBtn = (
+    <button type="button" className="icon-btn" onClick={() => setTheme(toggleTheme())} aria-label={t('ui.theme.toggle')} title={t('ui.theme.toggle')}>
+      <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+    </button>
+  );
   return (
-    <div className="app">
+    <div className={`app${s.me ? ' has-tabbar' : ''}`}>
       <header className="topbar">
         <div className="topbar-in">
           <Link to="/" className="brand">
-            <Logo size={30} />
+            <Logo size={32} />
             <span>{m.site.name}</span>
           </Link>
-          <button type="button" className="icon-btn menu-toggle" aria-label={t('ui.nav.menu')} aria-expanded={menu} onClick={() => setMenu(!menu)}>
-            <Icon name={menu ? 'close' : 'menu'} />
-          </button>
-          <div className={`topbar-body${menu ? ' open' : ''}`}>
-            {s.me && (
-              <nav className="mainnav">
-                <NavLink to="/torrents">{t('ui.nav.torrents')}</NavLink>
-                <Slot name="nav.main" ctx={{ user: s.me }} />
-                {s.isStaff && <NavLink to="/admin">{t('ui.nav.admin')}</NavLink>}
-              </nav>
-            )}
-            {s.me && <NavSearch />}
-            <div className="usernav">
-              {s.me ? (
+          {s.me && (
+            <nav className="mainnav">
+              <NavLink to="/" end>
+                {t('ui.nav.home')}
+              </NavLink>
+              <NavLink to="/torrents">{t('ui.nav.torrents')}</NavLink>
+              <Slot name="nav.main" ctx={{ user: s.me }} />
+              {s.isStaff && <NavLink to="/admin">{t('ui.nav.admin')}</NavLink>}
+            </nav>
+          )}
+          {s.me && <NavSearch />}
+          <div className="usernav">
+            {s.me ? (
+              <>
+                <NavLink to="/upload" className="nav-upload">
+                  <Icon name="upload" size={16} /> {t('ui.nav.upload')}
+                </NavLink>
+                <QuickLinks />
+                <UserMenu />
+              </>
+            ) : (
+              !bare && (
                 <>
-                  <NavLink to="/upload" className="nav-upload">
-                    <Icon name="upload" size={16} /> {t('ui.nav.upload')}
+                  <NavLink to="/login" className="nav-login">
+                    {t('ui.nav.login')}
                   </NavLink>
-                  <QuickLinks />
-                  <Link to={`/users/${s.me.id}`} className="username">
-                    <span className="avatar" aria-hidden="true">
-                      {s.me.username.slice(0, 1).toUpperCase()}
-                    </span>
-                    {s.me.username}
-                  </Link>
-                  <UserMenu />
+                  <NavLink to="/register" className="nav-cta">
+                    {t('ui.nav.register')}
+                  </NavLink>
                 </>
-              ) : (
-                !bare && (
-                  <>
-                    <NavLink to="/login">{t('ui.nav.login')}</NavLink>
-                    <NavLink to="/register" className="nav-cta">
-                      {t('ui.nav.register')}
-                    </NavLink>
-                  </>
-                )
-              )}
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setTheme(toggleTheme())}
-                aria-label={t('ui.theme.toggle')}
-                title={t('ui.theme.toggle')}
-              >
-                <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
-              </button>
-            </div>
+              )
+            )}
+            {themeBtn}
+          </div>
+          <div className="mobile-actions">
+            {s.me ? (
+              <Link to="/torrents" className="icon-btn" aria-label={t('ui.torrent.search')}>
+                <Icon name="search" />
+              </Link>
+            ) : (
+              !bare && (
+                <Link to="/login" className="nav-cta">
+                  {t('ui.nav.login')}
+                </Link>
+              )
+            )}
+            {themeBtn}
           </div>
         </div>
       </header>
@@ -211,10 +276,52 @@ export function Layout() {
         <Outlet />
       </main>
       <footer className="footer">
-        <span>
-          {m.site.name} · Powered by PT Studio
-        </span>
+        <span>{m.site.name} · Powered by PT Studio</span>
       </footer>
+      <TabBar />
+    </div>
+  );
+}
+
+/** 移动端“我的”页 */
+export function MePage() {
+  const t = useT();
+  const s = useSession();
+  const nav = useNavigate();
+  if (!s.me) return null;
+  return (
+    <div className="me-page">
+      <Link to={`/users/${s.me.id}`} className="me-card">
+        <span className="avatar avatar-lg" aria-hidden="true">
+          {s.me.username.slice(0, 1).toUpperCase()}
+        </span>
+        <span>
+          <b>{s.me.username}</b>
+          <span className="pt-muted small">{t('ui.me.view_profile')}</span>
+        </span>
+        <Icon name="arrow" size={18} />
+      </Link>
+      <div className="me-list">
+        <MeLinks />
+        {s.isStaff && (
+          <Link to="/admin">
+            <Icon name="shield" size={16} /> {t('ui.nav.admin')}
+          </Link>
+        )}
+        <Link to="/p/messages/">
+          <Icon name="mail" size={16} /> {t('ui.nav.messages')}
+        </Link>
+      </div>
+      <button
+        type="button"
+        className="pt-btn pt-btn-danger me-logout"
+        onClick={async () => {
+          await s.logout();
+          nav('/login');
+        }}
+      >
+        <Icon name="logout" size={16} /> {t('ui.nav.logout')}
+      </button>
     </div>
   );
 }

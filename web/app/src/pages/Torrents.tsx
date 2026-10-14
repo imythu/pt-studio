@@ -7,7 +7,8 @@ import { Slot, useSlotColumns } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
 import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Schema } from '@pt-studio/schema-form';
 import { Badge, Button, Card, Empty, Field, Input, SkeletonRows, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
-import { CatFace, HeroArt, Icon } from '../art';
+import { HeroArt, Icon, Logo } from '../art';
+import { Hint, DownloadGuide, GettingStarted, useFirstTime } from '../help';
 import { ApiError } from '@pt-studio/sdk';
 import { fieldSchemas, useTypes, type TypeInfo } from '../types';
 import { useManifest } from '../manifest';
@@ -287,12 +288,48 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
     { key: 'size', header: t('ui.torrent.size'), render: (r) => formatBytes(r.size), className: 'num' },
     { key: 'created', header: t('ui.torrent.created'), render: (r) => (r.created_at ? timeAgo(r.created_at * 1000) : '-'), className: 'nowrap' },
   ];
+  if (rows.length === 0) return <Empty>{t('ui.torrent.no_results')}</Empty>;
   return (
     <div className="torrent-table">
-      <Table rows={rows} columns={cols} rowKey={(r) => r.id} empty={t('ui.torrent.no_results')} />
+      <div className="t-desktop">
+        <Table rows={rows} columns={cols} rowKey={(r) => r.id} empty={t('ui.torrent.no_results')} />
+      </div>
+      <ul className="t-cards">
+        {rows.map((r) => {
+          const tags = [r.rel_resolution, r.rel_source, r.rel_video_codec].filter((x): x is string => typeof x === 'string' && x !== '');
+          const poster = typeof r.poster === 'string' && r.poster.startsWith('/media/') ? r.poster : null;
+          return (
+            <li key={r.id}>
+              <Link to={`/torrents/${r.id}`} className="t-card">
+                {poster && <img className="t-thumb" src={poster} alt="" loading="lazy" />}
+                <div className="t-card-main">
+                  <div className="t-card-top">
+                    <TypeBadge typeId={r.type_id} />
+                    {tags.slice(0, 2).map((x) => (
+                      <span key={x} className="pt-badge">
+                        {x}
+                      </span>
+                    ))}
+                  </div>
+                  <b className="t-card-title">{zhName(r) ?? r.title}</b>
+                  {zhName(r) && <span className="t-card-sub">{r.title}</span>}
+                  <span className="t-card-meta">
+                    <SwarmCell s={swarm?.[String(r.id)]} /> · {formatBytes(r.size)} · {r.created_at ? timeAgo(r.created_at * 1000) : ''}
+                  </span>
+                </div>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
+
+const typeRank = (id: string) => {
+  const i = ['movie', 'tv', 'anime', 'music', 'generic'].indexOf(id);
+  return i < 0 ? 4 : i;
+};
 
 export function TorrentList() {
   const t = useT();
@@ -307,6 +344,15 @@ export function TorrentList() {
     setParams(p);
   };
   const sort = params.get('sort') ?? ((params.get('q') ?? '') ? 'relevance' : 'newest');
+  const [showFilters, setShowFilters] = useState(false);
+  const types = useTypes();
+  const curType = params.get('f.type_id') ?? '';
+  const setType = (id: string) => {
+    const p = new URLSearchParams(params);
+    if (id) p.set('f.type_id', id);
+    else p.delete('f.type_id');
+    setParams(p);
+  };
   const active = [...params.entries()].filter(([k]) => k.startsWith('f.')).flatMap(([k, v]) => v.split(',').filter(Boolean).map((val) => ({ field: k.slice(2), val })));
   const unfilter = (field: string, val: string) => {
     const p = new URLSearchParams(params);
@@ -339,17 +385,30 @@ export function TorrentList() {
           ))}
         </div>
       </form>
-      {active.length > 0 && (
+      <div className="type-chips" role="tablist">
+        <button type="button" role="tab" aria-selected={!curType} onClick={() => setType('')}>
+          {t('ui.torrent.all_types')}
+        </button>
+        {[...(types.data ?? [])].sort((a, b) => typeRank(a.type_id) - typeRank(b.type_id)).map((x) => (
+          <button key={x.type_id} type="button" role="tab" aria-selected={curType === x.type_id} onClick={() => setType(x.type_id)}>
+            {t(`term:${x.name_term}`)}
+          </button>
+        ))}
+        <button type="button" className={`filter-toggle${showFilters ? ' on' : ''}`} onClick={() => setShowFilters(!showFilters)}>
+          <Icon name="filter" size={16} /> {t('ui.torrent.filters')}
+        </button>
+      </div>
+      {active.filter((a) => a.field !== 'type_id').length > 0 && (
         <div className="chips">
-          {active.map((a) => (
+          {active.filter((a) => a.field !== 'type_id').map((a) => (
             <button key={`${a.field}:${a.val}`} type="button" className="chip" onClick={() => unfilter(a.field, a.val)}>
               {a.val} <Icon name="close" size={14} />
             </button>
           ))}
         </div>
       )}
-      <div className="with-sidebar">
-        {res.data && <FilterPanel facets={res.data.facets} params={params} setParams={setParams} />}
+      <div className={`with-sidebar list-layout${showFilters ? ' filters-open' : ''}`}>
+        {res.data && <FilterPanel facets={res.data.facets.filter((f) => f.field !== 'type_id')} params={params} setParams={setParams} />}
         <div className="main">
           {res.isLoading && <SkeletonRows n={8} />}
           <ErrorText error={res.error} />
@@ -516,15 +575,21 @@ function SwarmPanel({ id }: { id: number }) {
       <div className="swarm-tiles">
         <div className="tile seed">
           <b>{d?.seeders ?? '–'}</b>
-          <span>{t('ui.torrent.seeders')}</span>
+          <span>
+            {t('ui.torrent.seeders')} <Hint text={t('ui.help.seeders')} />
+          </span>
         </div>
         <div className="tile leech">
           <b>{d?.leechers ?? '–'}</b>
-          <span>{t('ui.torrent.leechers')}</span>
+          <span>
+            {t('ui.torrent.leechers')} <Hint text={t('ui.help.leechers')} />
+          </span>
         </div>
         <div className="tile done">
           <b>{d?.completed ?? '–'}</b>
-          <span>{t('ui.torrent.completed')}</span>
+          <span>
+            {t('ui.torrent.completed')} <Hint text={t('ui.help.completed')} />
+          </span>
         </div>
       </div>
       {d?.mine && (
@@ -570,6 +635,7 @@ export function TorrentPage() {
   const t = useT();
   const { id } = useParams();
   const [zoom, setZoom] = useState<string | null>(null);
+  const guide = useFirstTime('pt-dl-guide');
   const tq = useQuery({ queryKey: ['torrent', id], queryFn: () => api<TorrentDetail>(`/api/p/torrent/v1/torrents/${id}`), staleTime: 60_000 });
   const files = useQuery({
     queryKey: ['torrent-files', id],
@@ -596,6 +662,14 @@ export function TorrentPage() {
   return (
     <div className="torrent">
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
+      <DownloadGuide ctl={guide} />
+      {d.can_download && (
+        <div className="sticky-dl">
+          <a className="pt-btn pt-btn-primary" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download onClick={() => guide.trigger()}>
+            <Icon name="download" size={18} /> {t('ui.torrent.download')} · {formatBytes(d.size)}
+          </a>
+        </div>
+      )}
       <section className={`t-head${poster ? ' has-poster' : ''}`}>
         {poster && (
           <button type="button" className="t-poster" onClick={() => setZoom(poster)} aria-label={t('ui.torrent.zoom')}>
@@ -624,15 +698,22 @@ export function TorrentPage() {
           {overview && <p className="t-overview">{overview}</p>}
           <div className="t-actions">
             {d.can_download ? (
-              <a className="pt-btn pt-btn-primary" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download>
-                <Icon name="download" size={16} /> {t('ui.torrent.download')}
+              <a className="pt-btn pt-btn-primary btn-lg" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download onClick={() => guide.trigger()}>
+                <Icon name="download" size={18} /> {t('ui.torrent.download')}
               </a>
             ) : (
               <span className="pt-muted small">{t('ui.torrent.cannot_download')}</span>
             )}
             <Slot name="torrent.detail.actions" ctx={ctx} />
           </div>
-          {d.can_download && <p className="pt-muted small t-hint">{t('ui.torrent.download_hint')}</p>}
+          {d.can_download && (
+            <p className="pt-muted small t-hint">
+              {t('ui.torrent.download_hint')}{' '}
+              <button type="button" className="link-btn" onClick={() => guide.show()}>
+                {t('ui.help.how_to_download')}
+              </button>
+            </p>
+          )}
         </div>
       </section>
       <div className="with-sidebar reverse">
@@ -843,8 +924,7 @@ export function Upload() {
   const [busy, setBusy] = useState(false);
   const list = types.data ?? [];
   // 通用类型（other）放最后，默认选第一个具体类型
-  const rank = (id: string) => { const i = ['movie', 'tv', 'anime', 'music', 'generic'].indexOf(id); return i < 0 ? 4 : i; };
-  const ordered = [...list].sort((x, y) => rank(x.type_id) - rank(y.type_id));
+  const ordered = [...list].sort((x, y) => typeRank(x.type_id) - typeRank(y.type_id));
   const info = ordered.find((x) => x.type_id === typeId) ?? ordered[0];
   const hasTmdb = useInstalled('metadata-tmdb');
   const pick = (id: string) => {
@@ -877,32 +957,58 @@ export function Upload() {
       setBusy(false);
     }
   };
+  const onFile = (f: File | null) => {
+    setFile(f);
+    if (!f) return;
+    const base = f.name.replace(/\.torrent$/i, '');
+    if (!meta.title) setMeta((m) => ({ ...m, title: m.title || base }));
+    // 没手动选过类型时按文件名猜：有季 / 集号的是剧集，否则电影
+    if (!typeId) {
+      const guess = /(?:^|[.\s_])S\d{1,2}(?:E\d+)?(?:[.\s_]|$)|Complete|第.+[季集]/i.test(base) ? 'tv' : 'movie';
+      if (list.some((x) => x.type_id === guess)) pick(guess);
+    }
+  };
+  const step = (n: number, title: string) => (
+    <h3 className="step-h">
+      <span className="step-n">{n}</span>
+      {title}
+    </h3>
+  );
   return (
-    <Card title={t('ui.upload.title')} className="upload">
-      <form onSubmit={submit} className="upload-grid">
-        <div className="span2">
-        <Field label={t('ui.upload.file')}>
-          <input name="torrent" type="file" accept=".torrent,application/x-bittorrent" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required />
-        </Field>
-        </div>
-        <Field label={t('ui.torrent.type')}>
-          <select className="pt-input" name="type_id" value={info?.type_id ?? ''} onChange={(e) => pick(e.target.value)}>
-            {ordered.map((x) => (
-              <option key={x.type_id} value={x.type_id}>
-                {t(`term:${x.name_term}`)}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={t('ui.torrent.title')} hint={info?.plugin ? t('ui.upload.title_hint') : undefined}>
-          <Input name="title" value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} required={!info?.plugin} maxLength={300} />
-        </Field>
-        <div className="span2">
-        <Field label={t('ui.upload.subtitle')}>
-          <Input value={meta.subtitle} onChange={(e) => setMeta({ ...meta, subtitle: e.target.value })} maxLength={300} />
-        </Field>
-        {info && ['movie', 'tv', 'anime'].includes(info.type_id) && hasTmdb && (
-          <div className="span2">
+    <div className="upload">
+      <h1 className="page-title">{t('ui.upload.title')}</h1>
+      <form onSubmit={submit}>
+        <section className="step">
+          {step(1, t('ui.upload.step_file'))}
+          <label className={`dropzone${file ? ' has-file' : ''}`}>
+            <input name="torrent" type="file" accept=".torrent,application/x-bittorrent" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required />
+            <Icon name={file ? 'book' : 'upload'} size={26} />
+            <b>{file ? file.name : t('ui.upload.file')}</b>
+            <span className="pt-muted small">{t('ui.upload.file_hint')}</span>
+          </label>
+        </section>
+
+        <section className="step">
+          {step(2, t('ui.upload.step_info'))}
+          <div className="pt-field">
+            <span className="pt-field-label">{t('ui.torrent.type')}</span>
+            <div className="type-chips type-pick" role="radiogroup">
+              {ordered.map((x) => (
+                <button key={x.type_id} type="button" role="radio" aria-checked={info?.type_id === x.type_id} onClick={() => pick(x.type_id)}>
+                  {t(`term:${x.name_term}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="upload-grid">
+            <Field label={t('ui.torrent.title')} hint={info?.plugin ? t('ui.upload.title_hint') : undefined}>
+              <Input name="title" value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} required={!info?.plugin} maxLength={300} />
+            </Field>
+            <Field label={t('ui.upload.subtitle')}>
+              <Input value={meta.subtitle} onChange={(e) => setMeta({ ...meta, subtitle: e.target.value })} maxLength={300} />
+            </Field>
+          </div>
+          {info && ['movie', 'tv', 'anime'].includes(info.type_id) && hasTmdb && (
             <MetadataMatch
               typeId={info.type_id}
               name={meta.title || file?.name || ''}
@@ -911,32 +1017,44 @@ export function Upload() {
                 if (p && !meta.subtitle) setMeta((m) => ({ ...m, subtitle: m.subtitle || p.subtitle }));
               }}
             />
+          )}
+          {info && (
+            <details className="more-fields" open={Object.keys(errors).length > 0 || info.type_id === 'generic' || undefined}>
+              <summary>{t('ui.upload.more_fields')}</summary>
+              <Slot
+                name="torrent.upload.type_form"
+                ctx={{ type_id: info.type_id, schema: info.field_schema, value: fields, onChange: setFields }}
+                fallback={<TypeForm info={info} value={fields} onChange={setFields} errors={errors} />}
+                empty={<TypeForm info={info} value={fields} onChange={setFields} errors={errors} />}
+              />
+            </details>
+          )}
+        </section>
+
+        <section className="step">
+          {step(3, t('ui.upload.step_media'))}
+          <div className="upload-grid">
+            <ImagePicker label={t('ui.upload.poster')} hint={t('ui.upload.image_hint')} files={poster} onChange={setPoster} />
+            <ImagePicker label={t('ui.upload.screenshots')} hint={t('ui.upload.image_hint')} files={shots} onChange={setShots} max={6} />
           </div>
-        )}
-        {info && (
-          <Slot
-            name="torrent.upload.type_form"
-            ctx={{ type_id: info.type_id, schema: info.field_schema, value: fields, onChange: setFields }}
-            fallback={<TypeForm info={info} value={fields} onChange={setFields} errors={errors} />}
-            empty={<TypeForm info={info} value={fields} onChange={setFields} errors={errors} />}
-          />
-        )}
-        <ImagePicker label={t('ui.upload.poster')} hint={t('ui.upload.image_hint')} files={poster} onChange={setPoster} />
-        <ImagePicker label={t('ui.upload.screenshots')} hint={t('ui.upload.image_hint')} files={shots} onChange={setShots} max={6} />
-        <Field label={t('ui.torrent.description')}>
-          <textarea className="pt-input" rows={6} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
-        </Field>
-        <label className="pt-check">
-          <input type="checkbox" checked={meta.anonymous} onChange={(e) => setMeta({ ...meta, anonymous: e.target.checked })} /> {t('ui.upload.anonymous')}
-        </label>
-        <Slot name="torrent.upload.extra" ctx={{ draft: { ...meta, type_id: info?.type_id, fields } }} />
-        <ErrorText error={error} />
-        <Button type="submit" variant="primary" disabled={busy || !file || !info}>
-          {t('ui.upload.submit')}
-        </Button>
-        </div>
+        </section>
+
+        <section className="step">
+          {step(4, t('ui.upload.step_more'))}
+          <Field label={t('ui.torrent.description')}>
+            <textarea className="pt-input" rows={6} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
+          </Field>
+          <label className="pt-check">
+            <input type="checkbox" checked={meta.anonymous} onChange={(e) => setMeta({ ...meta, anonymous: e.target.checked })} /> {t('ui.upload.anonymous')}
+          </label>
+          <Slot name="torrent.upload.extra" ctx={{ draft: { ...meta, type_id: info?.type_id, fields } }} />
+          <ErrorText error={error} />
+          <Button type="submit" variant="primary" className="btn-lg submit-btn" disabled={busy || !file || !info}>
+            {busy ? <Spinner /> : <Icon name="upload" size={18} />} {t('ui.upload.submit')}
+          </Button>
+        </section>
       </form>
-    </Card>
+    </div>
   );
 }
 
@@ -1053,7 +1171,7 @@ function HomeFeed() {
     <div>
       <section className="greeting">
         <span className="mascot">
-          <CatFace size={52} />
+          <Logo size={48} />
         </span>
         <div>
           <h1>{t('ui.home.welcome', { name: me?.username ?? '' })}</h1>
@@ -1061,6 +1179,7 @@ function HomeFeed() {
         </div>
       </section>
       <Slot name="home.announcements" ctx={{}} />
+      <GettingStarted />
       <div className="with-sidebar reverse">
         <div className="main">
           <Slot name="home.sections" ctx={{ user: me }} />
