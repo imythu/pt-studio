@@ -38,7 +38,7 @@ services:
       - ./data/redis:/data
 
   meilisearch:
-    image: getmeili/meilisearch:v1.13
+    image: getmeili/meilisearch:v1.54
     restart: unless-stopped
     environment:
       MEILI_MASTER_KEY: ${PT_MEILI_KEY:-change-me-meili-master-key-0123456789}

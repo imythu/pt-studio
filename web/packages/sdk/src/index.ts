@@ -21,7 +21,7 @@ export function csrfToken(): string | null {
   if (typeof document === 'undefined') return null;
   for (const part of document.cookie.split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (CSRF_COOKIES.includes(k)) return decodeURIComponent(v.join('='));
+    if (k !== undefined && CSRF_COOKIES.includes(k)) return decodeURIComponent(v.join('='));
   }
   return null;
 }

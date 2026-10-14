@@ -203,6 +203,24 @@ interface ResolvedEntry {
   entry: SlotEntry;
 }
 
+/** 给 Promise 标上 status/value，`use` 遇到已完成的 Promise 时同步返回，不再挂起（避免登录后反复挂起触发 React #482） */
+function track<T>(p: Promise<T>): Promise<T> {
+  const t = p as Promise<T> & { status?: string; value?: T; reason?: unknown };
+  if (t.status) return p;
+  t.status = 'pending';
+  p.then(
+    (v) => {
+      t.status = 'fulfilled';
+      t.value = v;
+    },
+    (e) => {
+      t.status = 'rejected';
+      t.reason = e;
+    },
+  );
+  return p;
+}
+
 const entryCache = new WeakMap<Registry, Map<string, Promise<ResolvedEntry[]>>>();
 
 function entriesPromise(reg: Registry, name: SlotName): Promise<ResolvedEntry[]> {
@@ -225,9 +243,9 @@ function entriesPromise(reg: Registry, name: SlotName): Promise<ResolvedEntry[]>
         .filter((x): x is ResolvedEntry => x !== null)
         .sort((a, b) => (a.entry.order ?? 100) - (b.entry.order ?? 100) || a.plugin.localeCompare(b.plugin)),
     );
-    byName.set(name, p);
+    byName.set(name, track(p));
   }
-  return p;
+  return byName.get(name) as Promise<ResolvedEntry[]>;
 }
 
 /** 已加载的插槽条目（Suspense） */
@@ -313,7 +331,7 @@ function routeMatches(pattern: string, path: string): boolean {
 function PluginPageInner({ pluginId, path }: { pluginId: string; path: string }) {
   const reg = useRegistry();
   const pl = reg.host.manifest.plugins.find((p) => p.id === pluginId);
-  const f = use(useMemo(() => (pl ? reg.load(pl) : Promise.resolve(null)), [pl, reg]));
+  const f = use(useMemo(() => track(pl ? reg.load(pl) : Promise.resolve(null)), [pl, reg]));
   const route = f?.routes?.find((r) => routeMatches(r.path, path));
   if (!route) return <p className="pt-muted">404</p>;
   const C = route.component;
@@ -337,7 +355,7 @@ export function PluginPage({ pluginId, path, fallback }: { pluginId: string; pat
 export function usePluginSettings(pluginId: string): ComponentType<{ api: PluginApi }> | null {
   const reg = useRegistry();
   const pl = reg.host.manifest.plugins.find((p) => p.id === pluginId);
-  const f = use(useMemo(() => (pl ? reg.load(pl) : Promise.resolve(null)), [pl, reg]));
+  const f = use(useMemo(() => track(pl ? reg.load(pl) : Promise.resolve(null)), [pl, reg]));
   return f?.settings ?? null;
 }
 
