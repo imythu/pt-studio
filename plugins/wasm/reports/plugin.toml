@@ -33,6 +33,7 @@ auth = "user"
 id = "create"
 method = "POST"
 path = "/v1/reports"
+idempotent = true
 auth = "user"
 permission = "reports.create"
 rate_limit = "user:30/m"

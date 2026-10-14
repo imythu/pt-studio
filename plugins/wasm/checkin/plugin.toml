@@ -25,6 +25,7 @@ input_schema = "schemas/hooks/checkin.before_check_in.json"
 id = "check_in"
 method = "POST"
 path = "/v1/check-ins"
+idempotent = true
 auth = "user"
 permission = "checkin.use"
 rate_limit = "user:10/m"

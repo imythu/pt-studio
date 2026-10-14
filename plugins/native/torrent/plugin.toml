@@ -46,6 +46,7 @@ rate_limit = "user:300/m"
 id = "upload"
 method = "POST"
 path = "/v1/torrents"
+idempotent = true
 auth = "user"
 permission = "torrent.upload"
 rate_limit = "user:20/h"

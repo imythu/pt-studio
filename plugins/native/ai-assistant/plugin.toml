@@ -27,6 +27,7 @@ timeout_secs = 300
 id = "ask"
 method = "POST"
 path = "/v1/ask"
+idempotent = true
 auth = "user"
 permission = "ai-assistant.use"
 rate_limit = "user:10/m"

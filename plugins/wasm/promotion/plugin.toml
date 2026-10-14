@@ -100,6 +100,7 @@ rate_limit = "user:60/m"
 id = "apply_card"
 method = "POST"
 path = "/v1/me/cards/apply"
+idempotent = true
 auth = "user"
 rate_limit = "user:20/m"
 

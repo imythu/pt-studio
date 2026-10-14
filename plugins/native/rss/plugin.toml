@@ -52,6 +52,7 @@ permission = "rss.use"
 id = "feeds_create"
 method = "POST"
 path = "/v1/me/feeds"
+idempotent = true
 auth = "user"
 permission = "rss.use"
 max_body_kb = 16
