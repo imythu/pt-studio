@@ -6,6 +6,7 @@ export const SLOT_KINDS = {
   'nav.admin': 'list',
   'home.announcements': 'list',
   'home.widgets': 'list',
+  'home.sections': 'list',
   'user.profile.header': 'list',
   'user.profile.stats': 'list',
   'user.profile.badges': 'list',

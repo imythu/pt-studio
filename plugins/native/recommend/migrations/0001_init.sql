@@ -1,0 +1,1 @@
+-- recommend：当前版本不需要自己的表（读取 torrent / accounting 的只读视图）

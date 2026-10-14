@@ -36,6 +36,7 @@ export default {
 | `nav.admin` | list | `{ user }` | 各插件后台入口 |
 | `home.announcements` | list | `{ user? }` | forum、promotion（全站活动横幅） |
 | `home.widgets` | list | `{ user? }` | checkin、lottery、requests、ai-assistant |
+| `home.sections` | list | `{ user? }` | recommend（首页主栏：为你推荐、热门、需要做种） |
 | `user.profile.header` | list | `{ profile: UserSummary }` | medals、levels |
 | `user.profile.stats` | list | `{ profile }` | accounting、bonus、levels、hnr、ratio-policy、invite |
 | `user.profile.badges` | list | `{ profile }` | medals |

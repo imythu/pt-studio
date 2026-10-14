@@ -292,7 +292,7 @@ fn lookup(external_id: &str, locale: &str) -> R<Option<(String, Value, bool)>> {
     }
 }
 
-fn search(query: &str, type_id: &str, limit: u32) -> R<Vec<Value>> {
+fn search(query: &str, type_id: &str, limit: u32, language: &str, year: Option<u32>) -> R<Vec<Value>> {
     let c = cfg();
     let q = query.trim();
     if q.is_empty() || q.chars().count() > 100 {
@@ -302,7 +302,11 @@ fn search(query: &str, type_id: &str, limit: u32) -> R<Vec<Value>> {
         ));
     }
     let kind = if type_id == "movie" { "movie" } else { "tv" };
-    let Some(r) = api_json(&c, &format!("/3/search/{kind}"), &[("query", q.into())])? else {
+    let mut params: Vec<(&str, String)> = vec![("query", q.into()), ("language", language.into())];
+    if let Some(y) = year {
+        params.push((if kind == "movie" { "year" } else { "first_air_date_year" }, y.to_string()));
+    }
+    let Some(r) = api_json(&c, &format!("/3/search/{kind}"), &params)? else {
         return Ok(vec![]);
     };
     Ok(r["results"]
@@ -338,7 +342,9 @@ impl service_provider::Guest for Tmdb {
             "search" => json!(search(
                 a["query"].as_str().unwrap_or(""),
                 a["type_id"].as_str().unwrap_or("movie"),
-                u32::try_from(a["limit"].as_u64().unwrap_or(10)).unwrap_or(10)
+                u32::try_from(a["limit"].as_u64().unwrap_or(10)).unwrap_or(10),
+                a["language"].as_str().unwrap_or("zh-CN"),
+                a["year"].as_u64().and_then(|y| u32::try_from(y).ok())
             )?),
             _ => return Err(err("kernel.not_found", "unknown method")),
         };
@@ -376,7 +382,13 @@ impl http_handler::Guest for Tmdb {
             }
             "search" => Ok(resp(
                 200,
-                &json!({ "items": search(q(&req, "q").unwrap_or(""), q(&req, "type").unwrap_or("movie"), 10)? }),
+                &json!({ "items": search(
+                    q(&req, "q").unwrap_or(""),
+                    q(&req, "type").unwrap_or("movie"),
+                    10,
+                    q(&req, "language").filter(|l| l.len() <= 10).unwrap_or("zh-CN"),
+                    q(&req, "year").and_then(|y| y.parse().ok()),
+                )? }),
             )),
             _ => Err(err("kernel.not_found", "no such route")),
         }

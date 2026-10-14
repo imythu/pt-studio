@@ -195,6 +195,17 @@ export function FieldsView({ typeId, fields }: { typeId: string; fields: Record<
   );
 }
 
+const hasCjk = (x: unknown): x is string => typeof x === 'string' && /[\u3400-\u9fff]/.test(x);
+
+/** 本地化（中文）名：副标题优先，其次元数据补全的中文名 */
+export function zhName(r: TorrentDoc): string | null {
+  if (r.subtitle) return r.subtitle;
+  for (const k of ['tv_title_zh', 'anime_title_zh', 'movie_title_zh', 'movie_title']) {
+    if (hasCjk(r[k])) return r[k] as string;
+  }
+  return null;
+}
+
 /** 相对时间（一周内），更早显示日期 */
 function timeAgo(ms: number): string {
   const secs = Math.round((ms - Date.now()) / 1000);
@@ -256,7 +267,7 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
             <Link className="t-title" to={`/torrents/${r.id}`}>
               {highlights?.get(r.id)?.title ? <Highlight text={highlights.get(r.id)?.title ?? ''} /> : r.title}
             </Link>
-            {r.subtitle && <div className="pt-muted small">{r.subtitle}</div>}
+            {zhName(r) && <div className="t-zh">{zhName(r)}</div>}
             <div className="t-tags">
               {tags.map((x, i) => (
                 <span key={x} className={`pt-badge${i === 0 ? ' tag-res' : ''}`}>
@@ -580,6 +591,7 @@ export function TorrentPage() {
   const poster = media(d.fields?.poster) ?? media(group.data?.fields?.poster);
   const shots = Array.isArray(d.fields?.screenshots) ? (d.fields.screenshots as unknown[]).map(media).filter((x): x is string => !!x) : [];
   const overview = typeof group.data?.fields?.overview === 'string' ? group.data.fields.overview : null;
+  const zhGroup = typeof group.data?.fields?.title_zh === 'string' ? group.data.fields.title_zh : '';
   const rating = typeof group.data?.fields?.rating === 'number' ? group.data.fields.rating : null;
   return (
     <div className="torrent">
@@ -598,7 +610,7 @@ export function TorrentPage() {
             <Slot name="torrent.detail.header" ctx={ctx} />
           </div>
           <h1>{d.title}</h1>
-          {d.subtitle && <p className="sub">{d.subtitle}</p>}
+          {(d.subtitle || zhGroup) && <p className="sub">{d.subtitle || zhGroup}</p>}
           <div className="t-meta">
             <span>
               <b>{formatBytes(d.size)}</b> · {d.file_count} {t('ui.torrent.files')}
@@ -672,6 +684,16 @@ export function TorrentPage() {
   );
 }
 
+/** 发布名 → 片名 / 年份 / 季号（`The.Last.of.Us.S02E05.1080p…` → The Last of Us、S2） */
+export function parseRelease(raw: string): { title: string; year?: number; season?: number } {
+  const name = raw.replace(/\.torrent$/i, '').replace(/^\[[^\]]*\]\s*/, '');
+  const cut = name.search(/[.\s_](?:19|20)\d{2}(?:[.\s_]|$)|[.\s_]S\d{1,2}(?:E\d+)?(?:[.\s_]|$)|[.\s_](?:Complete|2160p|1080p|1080i|720p|480p)/i);
+  const title = (cut > 0 ? name.slice(0, cut) : name).replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const y = /[.\s_]((?:19|20)\d{2})(?:[.\s_]|$)/.exec(name);
+  const sn = /[.\s_]S(\d{1,2})(?:E\d+)?(?:[.\s_]|$)/i.exec(name);
+  return { title, year: y ? Number(y[1]) : undefined, season: sn ? Number(sn[1]) : undefined };
+}
+
 interface MetaHit {
   external_id: string;
   title: string | null;
@@ -679,42 +701,83 @@ interface MetaHit {
   year: number | null;
 }
 
-/** 上传表单：从 TMDB 搜索并预填（metadata-tmdb 已安装且类型为电影时） */
-function MetadataSearch({ onPick }: { onPick(h: MetaHit): void }) {
+export interface MetaPick {
+  hit: MetaHit;
+  fields: Record<string, unknown>;
+  subtitle: string;
+}
+
+/** 上传表单：按发布名自动搜 TMDB（中文名优先），可换选；选中后写入 TMDB ID（上传后自动补全海报、简介、中文名） */
+function MetadataMatch({ typeId, name, onPick }: { typeId: string; name: string; onPick(p: MetaPick | null): void }) {
   const t = useT();
+  const parsed = useMemo(() => parseRelease(name), [name]);
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<MetaHit[]>([]);
+  const [chosen, setChosen] = useState<MetaHit | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const run = async () => {
-    setError(null);
-    try {
-      setHits((await api<{ items: MetaHit[] }>(`/api/p/metadata-tmdb/v1/search?q=${encodeURIComponent(q)}&type=movie`)).items);
-    } catch (e) {
-      setError(e);
-    }
+  const kind = typeId === 'movie' ? 'movie' : 'tv';
+  const query = q || parsed.title;
+
+  const pick = (h: MetaHit) => {
+    setChosen(h);
+    const id = Number(h.external_id.split(':')[1]);
+    const fields: Record<string, unknown> = kind === 'movie' ? { tmdb_id: id } : { tmdb_tv_id: id };
+    if (kind === 'tv' && parsed.season) fields.season = parsed.season;
+    onPick({ hit: h, fields, subtitle: h.title && h.title !== h.original ? h.title : (h.original ?? '') });
   };
+
+  useEffect(() => {
+    setChosen(null);
+    onPick(null);
+    if (query.length < 2) {
+      setHits([]);
+      return;
+    }
+    const h = setTimeout(async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const year = parsed.year && kind === 'movie' ? `&year=${parsed.year}` : '';
+        const r = await api<{ items: MetaHit[] }>(`/api/p/metadata-tmdb/v1/search?q=${encodeURIComponent(query)}&type=${kind}${year}`);
+        setHits(r.items);
+        const best = r.items.find((x) => parsed.year && x.year === parsed.year) ?? (r.items.length === 1 ? r.items[0] : undefined);
+        if (best) pick(best);
+      } catch (e) {
+        setError(e);
+      } finally {
+        setBusy(false);
+      }
+    }, 600);
+    return () => clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, kind]);
+
   return (
-    <div className="meta-search">
+    <div className="meta-match">
+      <div className="mm-head">
+        <b>{t('ui.upload.match_title')}</b>
+        {busy && <Spinner />}
+        {chosen && (
+          <span className="pt-badge pt-badge-success">
+            {t('ui.upload.matched')}
+          </span>
+        )}
+      </div>
       <div className="searchbar">
-        <Input name="meta_q" placeholder={t('ui.upload.meta_search')} value={q} onChange={(e) => setQ(e.target.value)} />
-        <Button onClick={() => void run()} disabled={!q.trim()}>
-          TMDB
-        </Button>
+        <Input name="meta_q" placeholder={parsed.title || t('ui.upload.meta_search')} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <ErrorText error={error} />
-      {hits.map((h) => (
-        <button
-          type="button"
-          key={h.external_id}
-          className="pt-btn pt-btn-ghost meta-hit"
-          onClick={() => {
-            onPick(h);
-            setHits([]);
-          }}
-        >
-          {h.title} {h.original && h.original !== h.title && <span className="pt-muted">/ {h.original}</span>} {h.year && `(${h.year})`}
-        </button>
-      ))}
+      <div className="mm-hits">
+        {hits.slice(0, 5).map((h) => (
+          <button type="button" key={h.external_id} className={`mm-hit${chosen?.external_id === h.external_id ? ' on' : ''}`} onClick={() => pick(h)}>
+            <b>{h.title}</b>
+            {h.original && h.original !== h.title && <span className="pt-muted"> / {h.original}</span>}
+            {h.year && <span className="pt-muted"> ({h.year})</span>}
+          </button>
+        ))}
+        {!busy && hits.length === 0 && query.length >= 2 && <p className="pt-muted small">{t('ui.upload.no_match')}</p>}
+      </div>
     </div>
   );
 }
@@ -772,6 +835,7 @@ export function Upload() {
   const [meta, setMeta] = useState({ title: '', subtitle: '', description: '', anonymous: false });
   const [fields, setFields] = useState<Record<string, unknown>>({});
   const [file, setFile] = useState<File | null>(null);
+  const [match, setMatch] = useState<MetaPick | null>(null);
   const [poster, setPoster] = useState<File[]>([]);
   const [shots, setShots] = useState<File[]>([]);
   const [error, setError] = useState<unknown>(null);
@@ -800,7 +864,7 @@ export function Upload() {
     setError(null);
     try {
       const fd = new FormData();
-      fd.append('meta', JSON.stringify({ ...meta, type_id: info.type_id, fields, subtitle: meta.subtitle || undefined }));
+      fd.append('meta', JSON.stringify({ ...meta, type_id: info.type_id, fields: { ...fields, ...(match?.fields ?? {}) }, subtitle: meta.subtitle || undefined }));
       fd.append('torrent', file, file.name);
       for (const f of poster) fd.append('poster', f, f.name);
       for (const f of shots) fd.append('screenshot', f, f.name);
@@ -837,13 +901,17 @@ export function Upload() {
         <Field label={t('ui.upload.subtitle')}>
           <Input value={meta.subtitle} onChange={(e) => setMeta({ ...meta, subtitle: e.target.value })} maxLength={300} />
         </Field>
-        {info?.type_id === 'movie' && hasTmdb && (
-          <MetadataSearch
-            onPick={(h) => {
-              const id = Number(h.external_id.split(':')[1]);
-              setFields({ ...fields, tmdb_id: id, ...(h.title ? { title: h.original ?? h.title } : {}), ...(h.year ? { year: h.year } : {}) });
-            }}
-          />
+        {info && ['movie', 'tv', 'anime'].includes(info.type_id) && hasTmdb && (
+          <div className="span2">
+            <MetadataMatch
+              typeId={info.type_id}
+              name={meta.title || file?.name || ''}
+              onPick={(p) => {
+                setMatch(p);
+                if (p && !meta.subtitle) setMeta((m) => ({ ...m, subtitle: m.subtitle || p.subtitle }));
+              }}
+            />
+          </div>
         )}
         {info && (
           <Slot
@@ -995,6 +1063,7 @@ function HomeFeed() {
       <Slot name="home.announcements" ctx={{}} />
       <div className="with-sidebar reverse">
         <div className="main">
+          <Slot name="home.sections" ctx={{ user: me }} />
           <Card className="list-card" title={t('ui.home.latest')} actions={<Link to="/torrents">{t('ui.home.view_all')} →</Link>}>
             {res.isLoading ? <SkeletonRows n={6} /> : res.error ? <ErrorText error={res.error} /> : <TorrentTable rows={res.data?.hits.map((h) => h.document) ?? []} />}
           </Card>

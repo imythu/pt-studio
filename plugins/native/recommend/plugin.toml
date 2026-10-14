@@ -1,0 +1,54 @@
+id = "recommend"
+name = "首页智能推荐"
+version = "0.1.0"
+kind = "native"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "按用户的做种 / 下载历史（类型、题材）、热度、新鲜度和缺种情况生成首页推荐：为你推荐、近期热门、需要做种"
+
+requires = ["ctx.auth@^0.1", "ctx.torrents@^0.1", "ctx.accounting@^0.1"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_public", "torrent.v_torrent_fields", "torrent.v_group_fields", "accounting.v_torrent_peers", "accounting.v_snatch"]
+
+[[http.routes]]
+id = "home"
+method = "GET"
+path = "/v1/home"
+auth = "user"
+rate_limit = "user:60/m"
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["home.sections"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+
+[settings_schema.properties.enabled]
+type = "boolean"
+title = "启用首页推荐"
+default = true
+
+[settings_schema.properties.per_section]
+type = "integer"
+minimum = 3
+maximum = 24
+title = "每个栏目显示的数量"
+default = 8
+
+[settings_schema.properties.window_days]
+type = "integer"
+minimum = 1
+maximum = 365
+title = "候选种子的时间范围（天）"
+default = 60
+
+[terms]
+"recommend.name" = { zh-CN = "首页智能推荐", en = "Home recommendations" }

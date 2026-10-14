@@ -1,0 +1,18 @@
+[package]
+name = "pt-plugin-recommend"
+description = "PT Studio home recommendations: personalised, hot and needs-seeding sections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pt-plugin-api.workspace = true
+axum.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+
+[lints]
+workspace = true
