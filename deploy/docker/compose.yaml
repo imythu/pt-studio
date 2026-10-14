@@ -1,24 +1,29 @@
-# docker compose -f deploy/docker/compose.yaml up -d
-# 镜像由 GitHub Actions 构建并发布到 ghcr.io/imythu/pt-studio（latest 为最新的版本标签，main 为主分支最新提交）；
-# 要从源码构建，取消下面 server 中 build 一节的注释并加 --build。
-# 打开 http://localhost:31251 注册后授予管理员：
-#   docker compose -f deploy/docker/compose.yaml exec server pt-server --config /data/site.toml user grant-role <用户名> admin
-# 正式部署前修改下面的密码与 key，并把 PT_BASE_URL / PT_TRACKER_URL 改为对外地址。
+# PT Studio：docker compose 一键部署（站点 + tracker + PostgreSQL + Redis + Meilisearch）。
+# 快速开始见 deploy/docker/README.md：
+#   mkdir pt-studio && cd pt-studio
+#   curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/compose.yaml
+#   curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/initdb.sh && chmod +x initdb.sh
+#   docker compose up -d
+#
+# 全部数据在本目录的 ./data/ 下（postgres、redis、meilisearch、pt：站点配置 site.toml 与种子文件）。
+# 密码与对外地址从同目录的 .env 读取（没有 .env 时用下面的默认值，正式使用前务必修改）。
+# 镜像由 GitHub Actions 构建：ghcr.io/imythu/pt-studio（latest 为最新版本，main 为主分支最新提交；可用 PT_IMAGE 指定）。
 name: pt-studio
 
 x-env: &env
-  PT_DB_ADMIN_PASSWORD: change-me-admin
-  PT_DB_GATEWAY_PASSWORD: change-me-gateway
-  PT_MEILI_KEY: change-me-meili-master-key-0123456789
+  PT_DB_ADMIN_PASSWORD: ${PT_DB_ADMIN_PASSWORD:-change-me-admin}
+  PT_DB_GATEWAY_PASSWORD: ${PT_DB_GATEWAY_PASSWORD:-change-me-gateway}
+  PT_MEILI_KEY: ${PT_MEILI_KEY:-change-me-meili-master-key-0123456789}
 
 services:
   postgres:
     image: postgres:17
+    restart: unless-stopped
     environment:
       <<: *env
-      POSTGRES_PASSWORD: change-me-postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
     volumes:
-      - pg:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
       - ./initdb.sh:/docker-entrypoint-initdb.d/10-pt.sh:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
@@ -27,32 +32,37 @@ services:
 
   redis:
     image: redis:8
+    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - redis:/data
+      - ./data/redis:/data
 
   meilisearch:
     image: getmeili/meilisearch:v1.13
+    restart: unless-stopped
     environment:
-      MEILI_MASTER_KEY: change-me-meili-master-key-0123456789
+      MEILI_MASTER_KEY: ${PT_MEILI_KEY:-change-me-meili-master-key-0123456789}
       MEILI_NO_ANALYTICS: "true"
     volumes:
-      - meili:/meili_data
+      - ./data/meilisearch:/meili_data
 
   server:
-    image: ghcr.io/imythu/pt-studio:latest
+    image: ${PT_IMAGE:-ghcr.io/imythu/pt-studio:latest}
+    # 从源码构建时改用（在仓库的 deploy/docker 目录中执行 docker compose up -d --build）：
     # build:
     #   context: ../..
     #   dockerfile: deploy/docker/Dockerfile
+    restart: unless-stopped
     command: ["server"]
     environment:
       <<: *env
-      PT_BASE_URL: http://localhost:31251
-      PT_TRACKER_URL: http://localhost:31252
+      # 首次启动时写入 ./data/pt/site.toml；之后修改地址需编辑 site.toml
+      PT_BASE_URL: ${PT_BASE_URL:-http://localhost:31251}
+      PT_TRACKER_URL: ${PT_TRACKER_URL:-http://localhost:31252}
     ports:
-      - "31251:31251"
+      - "${PT_HTTP_PORT:-31251}:31251"
     volumes:
-      - data:/data
+      - ./data/pt:/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,15 +72,13 @@ services:
         condition: service_started
 
   tracker:
-    image: ghcr.io/imythu/pt-studio:latest
+    image: ${PT_IMAGE:-ghcr.io/imythu/pt-studio:latest}
+    restart: unless-stopped
     command: ["tracker"]
+    environment:
+      # 在反向代理之后时设为 true（从 X-Forwarded-For 取客户端 IP）
+      PT_TRUST_FORWARDED: ${PT_TRUST_FORWARDED:-false}
     ports:
-      - "31252:31252"
+      - "${PT_TRACKER_PORT:-31252}:31252"
     depends_on:
       - server
-
-volumes:
-  pg:
-  redis:
-  meili:
-  data:

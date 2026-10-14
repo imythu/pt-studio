@@ -35,13 +35,17 @@ Linux x86_64 服务器：从 [Releases](https://github.com/imythu/pt-studio/rele
 deploy/dev/run-site.sh        # 构建并启动：站点 http://localhost:31251，tracker http://localhost:31252
 ```
 
-Docker（镜像 `ghcr.io/imythu/pt-studio`，GitHub Actions 构建）：
+Docker（镜像 `ghcr.io/imythu/pt-studio`，GitHub Actions 构建；数据在 `./data/`，详见 [deploy/docker/README.md](deploy/docker/README.md)）：
 
 ```sh
-docker compose -f deploy/docker/compose.yaml up -d
+mkdir pt-studio && cd pt-studio
+curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/initdb.sh && chmod +x initdb.sh
+curl -fsSL  https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/.env.example -o .env   # 修改密码与地址
+docker compose up -d                                          # 打开 http://localhost:31251
 ```
 
-注册账号后授予管理员：`pt-server --config <site.toml> user grant-role <用户名> admin`（Docker 中用 `docker compose … exec server pt-server --config /data/site.toml user grant-role …`）。
+注册账号后授予管理员：`pt-server --config <site.toml> user grant-role <用户名> admin`（Docker 中用 `docker compose exec server pt-server --config /data/site.toml user grant-role …`）。
 
 ## 开始
 

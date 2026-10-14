@@ -5,7 +5,7 @@
 获取方式：
 
 - **发布包**：GitHub Releases（https://github.com/imythu/pt-studio/releases ），由 GitHub Actions（`.github/workflows/release.yml`）在推送 `v*` 标签时构建；也可以在 x86_64 的 Linux 上运行 `deploy/release/build-release.sh` 自行构建。
-- **Docker 镜像**：`ghcr.io/imythu/pt-studio:<版本>` / `latest`（`.github/workflows/docker.yml` 构建），用法见 `deploy/docker/compose.yaml`：`docker compose -f deploy/docker/compose.yaml up -d`。
+- **Docker 镜像**：`ghcr.io/imythu/pt-studio:<版本>` / `latest`（`.github/workflows/docker.yml` 构建），快速开始见 [deploy/docker/README.md](../docker/README.md)（数据映射到 compose 所在目录的 `./data/`）。
 
 ## 1. 包内容
 
