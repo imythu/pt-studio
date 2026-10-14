@@ -123,9 +123,11 @@ impl Lifecycle for Identity {
             .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
             .unwrap_or_default();
         let _ = self.locales.set(locales);
-        let _ = self
-            .insecure_cookies
-            .set(cfg.get("insecure_cookies").and_then(serde_json::Value::as_bool).unwrap_or(false));
+        let _ = self.insecure_cookies.set(
+            cfg.get("insecure_cookies")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        );
         Ok(())
     }
 }

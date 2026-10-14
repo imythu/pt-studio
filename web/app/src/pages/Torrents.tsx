@@ -1,6 +1,6 @@
 // 种子列表 / 搜索（search-meilisearch）、详情、发布（torrent）。筛选条件序列化到 URL，可分享。
 import { useQuery } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, apiFetch, parse } from '@pt-studio/sdk';
 import { Slot, useSlotColumns } from '@pt-studio/slots';
@@ -207,17 +207,52 @@ function timeAgo(ms: number): string {
   return new Date(ms).toLocaleDateString();
 }
 
+interface Swarm {
+  seeders: number;
+  leechers: number;
+  completed: number;
+}
+
+/** 列表页批量取做种 / 下载 / 完成人数 */
+function useSwarmBatch(ids: number[]) {
+  const key = ids.join(',');
+  return useQuery({
+    queryKey: ['swarm-batch', key],
+    queryFn: () => api<{ items: Record<string, Swarm> }>(`/api/p/accounting/v1/torrents/swarm?ids=${key}`),
+    enabled: ids.length > 0,
+    staleTime: 20_000,
+    retry: false,
+  }).data?.items;
+}
+
+export function SwarmCell({ s }: { s?: Swarm }) {
+  const n = s ?? { seeders: 0, leechers: 0, completed: 0 };
+  return (
+    <span className="swarm" title={`↑ ${n.seeders}  ↓ ${n.leechers}  ✓ ${n.completed}`}>
+      <b className={n.seeders > 0 ? 'seed' : 'seed zero'}>{n.seeders}</b>
+      <i>/</i>
+      <b className={n.leechers > 0 ? 'leech' : 'leech zero'}>{n.leechers}</b>
+      <i>/</i>
+      <b className="done">{n.completed}</b>
+    </span>
+  );
+}
+
 export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlights?: Map<number, Record<string, string>> }) {
   const t = useT();
   const pluginCols = useSlotColumns('torrent.list.columns');
+  const swarm = useSwarmBatch(rows.map((r) => r.id));
   const cols: Column<TorrentDoc>[] = [
     {
       key: 'title',
       header: t('ui.torrent.title'),
       render: (r) => {
         const tags = [r.rel_resolution, r.rel_source, r.rel_video_codec].filter((x): x is string => typeof x === 'string' && x !== '');
+        const poster = typeof r.poster === 'string' && r.poster.startsWith('/media/') ? r.poster : null;
         return (
-          <div>
+          <div className="t-row">
+            {poster && <img className="t-thumb" src={poster} alt="" loading="lazy" />}
+            <div>
             <Link className="t-title" to={`/torrents/${r.id}`}>
               {highlights?.get(r.id)?.title ? <Highlight text={highlights.get(r.id)?.title ?? ''} /> : r.title}
             </Link>
@@ -230,12 +265,14 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
               ))}
               <Slot name="torrent.list.row_badges" ctx={{ torrent: r }} />
             </div>
+            </div>
           </div>
         );
       },
     },
     { key: 'type', header: t('ui.torrent.type'), render: (r) => <TypeBadge typeId={r.type_id} /> },
     ...pluginCols.map((c) => ({ key: `p:${c.key}`, header: c.header, render: (r: TorrentDoc) => c.render({ torrent: r }) })),
+    { key: 'swarm', header: t('ui.torrent.swarm_short'), render: (r) => <SwarmCell s={swarm?.[String(r.id)]} />, className: 'num' },
     { key: 'size', header: t('ui.torrent.size'), render: (r) => formatBytes(r.size), className: 'num' },
     { key: 'created', header: t('ui.torrent.created'), render: (r) => (r.created_at ? timeAgo(r.created_at * 1000) : '-'), className: 'nowrap' },
   ];
@@ -427,50 +464,179 @@ function ManageTorrent({ d }: { d: TorrentDetail }) {
   );
 }
 
+function Lightbox({ src, onClose }: { src: string | null; onClose(): void }) {
+  useEffect(() => {
+    if (!src) return;
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', k);
+    return () => document.removeEventListener('keydown', k);
+  }, [src, onClose]);
+  if (!src) return null;
+  return (
+    <div className="lightbox" role="dialog" aria-modal="true" onClick={onClose}>
+      <img src={src} alt="" />
+    </div>
+  );
+}
+
+function fmtDuration(secs: number): string {
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+  return `${Math.floor(secs / 86400)}d`;
+}
+
+interface SwarmDetail extends Swarm {
+  peers: { user_id: number | null; mine: boolean; seeder: boolean; client: string | null; since: string; last_announce: string }[];
+  mine: { uploaded: number; downloaded: number; seed_secs: number; completed_at: string | null } | null;
+}
+
+/** 做种 / 下载状态：人数、我的记录、活跃 peer 列表 */
+function SwarmPanel({ id }: { id: number }) {
+  const t = useT();
+  const q = useQuery({
+    queryKey: ['swarm', id],
+    queryFn: () => api<SwarmDetail>(`/api/p/accounting/v1/torrents/${id}/swarm`),
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const d = q.data;
+  return (
+    <Card title={t('ui.torrent.swarm')}>
+      <div className="swarm-tiles">
+        <div className="tile seed">
+          <b>{d?.seeders ?? '–'}</b>
+          <span>{t('ui.torrent.seeders')}</span>
+        </div>
+        <div className="tile leech">
+          <b>{d?.leechers ?? '–'}</b>
+          <span>{t('ui.torrent.leechers')}</span>
+        </div>
+        <div className="tile done">
+          <b>{d?.completed ?? '–'}</b>
+          <span>{t('ui.torrent.completed')}</span>
+        </div>
+      </div>
+      {d?.mine && (
+        <p className="pt-muted small mine">
+          {t('ui.torrent.my_record', { up: formatBytes(d.mine.uploaded), down: formatBytes(d.mine.downloaded), seed: fmtDuration(d.mine.seed_secs) })}
+          {d.mine.completed_at ? ` · ${t('ui.torrent.my_done')}` : ''}
+        </p>
+      )}
+      {d && d.peers.length > 0 ? (
+        <div className="pt-table-wrap">
+          <table className="pt-table peers">
+            <thead>
+              <tr>
+                <th>{t('ui.torrent.peer_role')}</th>
+                <th>{t('ui.torrent.peer_client')}</th>
+                <th>{t('ui.torrent.peer_since')}</th>
+                <th>{t('ui.torrent.peer_last')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.peers.slice(0, 30).map((p, i) => (
+                <tr key={i} className={p.mine ? 'me' : undefined}>
+                  <td>
+                    <span className={`pt-badge ${p.seeder ? 'pt-badge-success' : 'pt-badge-primary'}`}>{p.seeder ? t('ui.torrent.role_seed') : t('ui.torrent.role_leech')}</span>
+                    {p.mine && <span className="pt-badge">{t('ui.torrent.me')}</span>}
+                  </td>
+                  <td>{p.client ?? '-'}</td>
+                  <td className="nowrap">{timeAgo(Date.parse(p.since))}</td>
+                  <td className="nowrap">{timeAgo(Date.parse(p.last_announce))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="pt-muted small">{q.isLoading ? '…' : t('ui.torrent.no_peers')}</p>
+      )}
+    </Card>
+  );
+}
+
 export function TorrentPage() {
   const t = useT();
   const { id } = useParams();
+  const [zoom, setZoom] = useState<string | null>(null);
   const tq = useQuery({ queryKey: ['torrent', id], queryFn: () => api<TorrentDetail>(`/api/p/torrent/v1/torrents/${id}`), staleTime: 60_000 });
   const files = useQuery({
     queryKey: ['torrent-files', id],
     queryFn: () => api<{ items: { path: string; size: number }[] | { path: string[]; length: number }[] }>(`/api/p/torrent/v1/torrents/${id}/files`),
     enabled: tq.isSuccess,
   });
-  if (tq.isLoading) return <Spinner />;
+  const groupId = tq.data?.group_id;
+  const group = useQuery({
+    queryKey: ['group', String(groupId)],
+    queryFn: () => api<GroupDetail>(`/api/p/torrent/v1/groups/${groupId}`),
+    enabled: !!groupId,
+    staleTime: 60_000,
+  });
+  if (tq.isLoading) return <SkeletonRows n={6} />;
   if (tq.error) return <ErrorText error={tq.error} />;
   const d = tq.data as TorrentDetail;
   const ctx = { torrent: d };
+  const media = (v: unknown) => (typeof v === 'string' && v.startsWith('/media/') ? v : null);
+  const poster = media(d.fields?.poster) ?? media(group.data?.fields?.poster);
+  const shots = Array.isArray(d.fields?.screenshots) ? (d.fields.screenshots as unknown[]).map(media).filter((x): x is string => !!x) : [];
+  const overview = typeof group.data?.fields?.overview === 'string' ? group.data.fields.overview : null;
+  const rating = typeof group.data?.fields?.rating === 'number' ? group.data.fields.rating : null;
   return (
     <div className="torrent">
-      <section className="t-head">
-        <div className="t-badges">
-          <TypeBadge typeId={d.type_id} />
-          {d.status !== 'approved' && <Badge tone="danger">{statusName(t, d.status)}</Badge>}
-          <Slot name="torrent.detail.header" ctx={ctx} />
-        </div>
-        <h1>{d.title}</h1>
-        {d.subtitle && <p className="sub">{d.subtitle}</p>}
-        <div className="t-meta">
-          <span>
-            <b>{formatBytes(d.size)}</b> · {d.file_count} {t('ui.torrent.files')}
-          </span>
-          <span>
-            {t('ui.torrent.uploader')}:{' '}
-            {d.uploader.anonymous ? t('ui.torrent.anonymous') : <Link to={`/users/${d.uploader.id}`}>{d.uploader.username ?? `#${d.uploader.id}`}</Link>}
-          </span>
-          <span>{new Date(d.created_at).toLocaleString()}</span>
-        </div>
-        <div className="t-actions">
-          {d.can_download && (
-            <a className="pt-btn pt-btn-primary" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download>
-              <Icon name="download" size={16} /> {t('ui.torrent.download')}
-            </a>
-          )}
-          <Slot name="torrent.detail.actions" ctx={ctx} />
+      <Lightbox src={zoom} onClose={() => setZoom(null)} />
+      <section className={`t-head${poster ? ' has-poster' : ''}`}>
+        {poster && (
+          <button type="button" className="t-poster" onClick={() => setZoom(poster)} aria-label={t('ui.torrent.zoom')}>
+            <img src={poster} alt="" />
+          </button>
+        )}
+        <div className="t-head-main">
+          <div className="t-badges">
+            <TypeBadge typeId={d.type_id} />
+            {d.status !== 'approved' && <Badge tone="danger">{statusName(t, d.status)}</Badge>}
+            {rating !== null && <span className="pt-badge pt-badge-primary">★ {rating.toFixed(1)}</span>}
+            <Slot name="torrent.detail.header" ctx={ctx} />
+          </div>
+          <h1>{d.title}</h1>
+          {d.subtitle && <p className="sub">{d.subtitle}</p>}
+          <div className="t-meta">
+            <span>
+              <b>{formatBytes(d.size)}</b> · {d.file_count} {t('ui.torrent.files')}
+            </span>
+            <span>
+              {t('ui.torrent.uploader')}:{' '}
+              {d.uploader.anonymous ? t('ui.torrent.anonymous') : <Link to={`/users/${d.uploader.id}`}>{d.uploader.username ?? `#${d.uploader.id}`}</Link>}
+            </span>
+            <span>{new Date(d.created_at).toLocaleString()}</span>
+          </div>
+          {overview && <p className="t-overview">{overview}</p>}
+          <div className="t-actions">
+            {d.can_download ? (
+              <a className="pt-btn pt-btn-primary" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download>
+                <Icon name="download" size={16} /> {t('ui.torrent.download')}
+              </a>
+            ) : (
+              <span className="pt-muted small">{t('ui.torrent.cannot_download')}</span>
+            )}
+            <Slot name="torrent.detail.actions" ctx={ctx} />
+          </div>
+          {d.can_download && <p className="pt-muted small t-hint">{t('ui.torrent.download_hint')}</p>}
         </div>
       </section>
       <div className="with-sidebar reverse">
         <div className="main">
+          <SwarmPanel id={d.id} />
+          {shots.length > 0 && (
+            <Card title={t('ui.torrent.screenshots')}>
+              <div className="shots">
+                {shots.map((u) => (
+                  <button key={u} type="button" onClick={() => setZoom(u)} aria-label={t('ui.torrent.zoom')}>
+                    <img src={u} alt="" loading="lazy" />
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
           {d.fields && Object.keys(d.fields).length > 0 && (
             <Card title={t('ui.torrent.info')} actions={d.group_id ? <Link to={`/groups/${d.group_id}`}>{t('ui.group.view')}</Link> : null}>
               <FieldsView typeId={d.type_id} fields={d.fields} />
@@ -553,6 +719,45 @@ function MetadataSearch({ onPick }: { onPick(h: MetaHit): void }) {
   );
 }
 
+/** 图片选择：带缩略图预览与移除；`multiple` 时最多 `max` 张 */
+function ImagePicker({ label, hint, files, onChange, max = 1 }: { label: string; hint?: string; files: File[]; onChange(f: File[]): void; max?: number }) {
+  const t = useT();
+  const urls = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+  return (
+    <div className="pt-field">
+      <span className="pt-field-label">{label}</span>
+      <div className="img-picker">
+        {urls.map((u, i) => (
+          <div key={u} className="img-thumb">
+            <img src={u} alt="" />
+            <button type="button" aria-label={t('ui.common.remove')} onClick={() => onChange(files.filter((_, j) => j !== i))}>
+              ×
+            </button>
+          </div>
+        ))}
+        {files.length < max && (
+          <label className="img-add">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple={max > 1}
+              onChange={(e) => {
+                const picked = [...(e.target.files ?? [])].filter((f) => f.size <= 3 << 20);
+                onChange([...files, ...picked].slice(0, max));
+                e.target.value = '';
+              }}
+            />
+            <Icon name="upload" size={20} />
+            <span>{t('ui.upload.add_image')}</span>
+          </label>
+        )}
+      </div>
+      {hint && <span className="pt-field-hint">{hint}</span>}
+    </div>
+  );
+}
+
 function TypeForm({ info, value, onChange, errors }: { info: TypeInfo; value: Record<string, unknown>; onChange(v: Record<string, unknown>): void; errors: Errors }) {
   const t = useT();
   if (!info.field_schema) return null;
@@ -567,6 +772,8 @@ export function Upload() {
   const [meta, setMeta] = useState({ title: '', subtitle: '', description: '', anonymous: false });
   const [fields, setFields] = useState<Record<string, unknown>>({});
   const [file, setFile] = useState<File | null>(null);
+  const [poster, setPoster] = useState<File[]>([]);
+  const [shots, setShots] = useState<File[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
@@ -595,6 +802,8 @@ export function Upload() {
       const fd = new FormData();
       fd.append('meta', JSON.stringify({ ...meta, type_id: info.type_id, fields, subtitle: meta.subtitle || undefined }));
       fd.append('torrent', file, file.name);
+      for (const f of poster) fd.append('poster', f, f.name);
+      for (const f of shots) fd.append('screenshot', f, f.name);
       const r = await parse<{ id: number }>(await apiFetch('/api/p/torrent/v1/torrents', { method: 'POST', body: fd, idempotent: true }));
       nav(`/torrents/${r.id}`);
     } catch (err) {
@@ -644,6 +853,8 @@ export function Upload() {
             empty={<TypeForm info={info} value={fields} onChange={setFields} errors={errors} />}
           />
         )}
+        <ImagePicker label={t('ui.upload.poster')} hint={t('ui.upload.image_hint')} files={poster} onChange={setPoster} />
+        <ImagePicker label={t('ui.upload.screenshots')} hint={t('ui.upload.image_hint')} files={shots} onChange={setShots} max={6} />
         <Field label={t('ui.torrent.description')}>
           <textarea className="pt-input" rows={6} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
         </Field>

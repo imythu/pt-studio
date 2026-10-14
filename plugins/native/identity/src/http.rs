@@ -75,7 +75,11 @@ struct LoginBody {
 
 /// `insecure` = `[plugin.identity] insecure_cookies`：无 `__Host-` 前缀、无 `Secure`，仅供 HTTP 测试部署。
 fn cookie(name: &str, value: &str, max_age: i64, http_only: bool, insecure: bool) -> HeaderValue {
-    let name = if insecure { name.trim_start_matches("__Host-") } else { name };
+    let name = if insecure {
+        name.trim_start_matches("__Host-")
+    } else {
+        name
+    };
     let secure = if insecure { "" } else { "; Secure" };
     let age = if max_age > 0 {
         format!("; Max-Age={max_age}")
@@ -103,11 +107,23 @@ async fn login(
     let h = resp.headers_mut();
     h.append(
         header::SET_COOKIE,
-        cookie("__Host-pt_session", &s.token, s.max_age_secs, true, id.insecure_cookies()),
+        cookie(
+            "__Host-pt_session",
+            &s.token,
+            s.max_age_secs,
+            true,
+            id.insecure_cookies(),
+        ),
     );
     h.append(
         header::SET_COOKIE,
-        cookie("__Host-pt_csrf", &s.csrf, s.max_age_secs, false, id.insecure_cookies()),
+        cookie(
+            "__Host-pt_csrf",
+            &s.csrf,
+            s.max_age_secs,
+            false,
+            id.insecure_cookies(),
+        ),
     );
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(resp)
@@ -117,8 +133,14 @@ async fn logout(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Res
     auth::logout(&ctx).await?;
     let mut resp = StatusCode::NO_CONTENT.into_response();
     let h = resp.headers_mut();
-    h.append(header::SET_COOKIE, cookie("__Host-pt_session", "", -1, true, id.insecure_cookies()));
-    h.append(header::SET_COOKIE, cookie("__Host-pt_csrf", "", -1, false, id.insecure_cookies()));
+    h.append(
+        header::SET_COOKIE,
+        cookie("__Host-pt_session", "", -1, true, id.insecure_cookies()),
+    );
+    h.append(
+        header::SET_COOKIE,
+        cookie("__Host-pt_csrf", "", -1, false, id.insecure_cookies()),
+    );
     Ok(resp)
 }
 

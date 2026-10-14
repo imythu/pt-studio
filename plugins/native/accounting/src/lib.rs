@@ -649,6 +649,86 @@ async fn http_snatches(
 }
 
 #[derive(Debug, Deserialize)]
+struct SwarmBatchQuery {
+    ids: String,
+}
+
+/// 列表页批量取做种 / 下载 / 完成人数（`?ids=1,2,3`，最多 100 个）
+async fn http_swarm_batch(ctx: RequestCtx, Query(q): Query<SwarmBatchQuery>) -> PResult<Response> {
+    ctx.require_user()?;
+    let ids: Vec<i64> = q
+        .ids
+        .split(',')
+        .filter_map(|x| x.trim().parse().ok())
+        .take(100)
+        .collect();
+    let mut c = ctx.sql.conn().await?;
+    let rows = sqlx::query(
+        "SELECT torrent_id, seeders, leechers, completed FROM v_torrent_peers WHERE torrent_id = ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(&mut *c)
+    .await?;
+    let mut items = serde_json::Map::new();
+    for r in &rows {
+        items.insert(
+            r.get::<i64, _>(0).to_string(),
+            json!({ "seeders": r.get::<i64, _>(1), "leechers": r.get::<i64, _>(2), "completed": r.get::<i64, _>(3) }),
+        );
+    }
+    Ok(Json(json!({ "items": items })).into_response())
+}
+
+/// 单个种子的 swarm：人数、活跃 peer 列表（只含客户端与时间；他人身份仅对有 `accounting.stats.read` 的用户可见）、
+/// 以及当前用户自己的记录
+async fn http_swarm(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
+    let me = u2i(ctx.require_user()?)?;
+    let staff = can_read_others(&ctx).await?;
+    let mut c = ctx.sql.conn().await?;
+    let counts =
+        sqlx::query("SELECT seeders, leechers, completed FROM v_torrent_peers WHERE torrent_id = $1")
+            .bind(id)
+            .fetch_optional(&mut *c)
+            .await?;
+    let (seeders, leechers, completed) = counts.map_or((0, 0, 0), |r| {
+        (r.get::<i64, _>(0), r.get::<i64, _>(1), r.get::<i64, _>(2))
+    });
+    let peers = sqlx::query(
+        "SELECT user_id, is_seeder, client_prefix, first_seen_at, last_announce_at FROM peers
+          WHERE torrent_id = $1 AND is_active ORDER BY is_seeder DESC, last_announce_at DESC LIMIT 100",
+    )
+    .bind(id)
+    .fetch_all(&mut *c)
+    .await?;
+    let peers: Vec<_> = peers
+        .iter()
+        .map(|r| {
+            let uid: i64 = r.get(0);
+            json!({
+                "user_id": (staff || uid == me).then_some(uid), "mine": uid == me, "seeder": r.get::<bool, _>(1),
+                "client": r.get::<Option<String>, _>(2),
+                "since": r.get::<chrono::DateTime<chrono::Utc>, _>(3).to_rfc3339(),
+                "last_announce": r.get::<chrono::DateTime<chrono::Utc>, _>(4).to_rfc3339(),
+            })
+        })
+        .collect();
+    let mine = sqlx::query(
+        "SELECT uploaded, downloaded, seed_secs, leech_secs, completed_at, last_action_at FROM snatches WHERE user_id = $1 AND torrent_id = $2",
+    )
+    .bind(me)
+    .bind(id)
+    .fetch_optional(&mut *c)
+    .await?
+    .map(|r| {
+        json!({ "uploaded": r.get::<i64, _>(0), "downloaded": r.get::<i64, _>(1), "seed_secs": r.get::<i64, _>(2),
+                "leech_secs": r.get::<i64, _>(3),
+                "completed_at": r.get::<Option<chrono::DateTime<chrono::Utc>>, _>(4).map(|d| d.to_rfc3339()),
+                "last_action_at": r.get::<chrono::DateTime<chrono::Utc>, _>(5).to_rfc3339() })
+    });
+    Ok(Json(json!({ "seeders": seeders, "leechers": leechers, "completed": completed, "peers": peers, "mine": mine })).into_response())
+}
+
+#[derive(Debug, Deserialize)]
 struct AdjustBody {
     d_up: i64,
     d_down: i64,
@@ -707,6 +787,8 @@ impl pt_plugin_api::HttpRoutes for Routes {
             .route("/v1/users/me/stats", get(http_my_stats))
             .route("/v1/users/{id}/stats", get(http_user_stats))
             .route("/v1/users/{id}/snatches", get(http_snatches))
+            .route("/v1/torrents/swarm", get(http_swarm_batch))
+            .route("/v1/torrents/{id}/swarm", get(http_swarm))
             .route("/v1/admin/users/{id}/adjustments", post(http_adjust))
     }
 }

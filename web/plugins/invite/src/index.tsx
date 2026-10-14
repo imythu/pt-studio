@@ -22,6 +22,13 @@ registerMessages('zh-CN', {
   'invite.ui.status': '状态',
   'invite.ui.expires': '到期',
   'invite.ui.not_eligible': '暂不能发邀：{reason}',
+  'invite.disabled': '站点已关闭邀请功能',
+  'invite.account_inactive': '账号状态异常，不能发邀',
+  'invite.account_too_new': '账号注册时间太短，满一定天数后才能发邀',
+  'invite.privilege_suspended': '发邀权限已被暂停',
+  'invite.outstanding_limit_reached': '未使用的邀请已达上限，请等待被使用或撤销后再发',
+  'invite.daily_limit_reached': '今天的发邀次数已用完',
+  'invite.quota_exhausted': '邀请名额已用完',
 });
 registerMessages('en', {
   'invite.ui.code': 'Invite code',
@@ -40,6 +47,13 @@ registerMessages('en', {
   'invite.ui.status': 'Status',
   'invite.ui.expires': 'Expires',
   'invite.ui.not_eligible': 'You cannot invite yet: {reason}',
+  'invite.disabled': 'Invitations are turned off',
+  'invite.account_inactive': 'Your account is not active',
+  'invite.account_too_new': 'Your account is too new to send invitations',
+  'invite.privilege_suspended': 'Your invitation privilege is suspended',
+  'invite.outstanding_limit_reached': 'You have too many unused invitations',
+  'invite.daily_limit_reached': 'Daily invitation limit reached',
+  'invite.quota_exhausted': 'No invitation quota left',
 });
 
 interface FormBinding {

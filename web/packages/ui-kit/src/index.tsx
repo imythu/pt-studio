@@ -1,7 +1,7 @@
 // @pt-studio/ui-kit：基础组件（样式见 styles.css，全部基于主题令牌）。
 
 import DOMPurify from 'dompurify';
-import { createContext, useCallback, useContext, useMemo, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import { createContext, isValidElement, useCallback, useContext, useMemo, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
 
 export function cx(...xs: (string | false | null | undefined)[]): string {
   return xs.filter(Boolean).join(' ');
@@ -90,10 +90,12 @@ export function EmptyArt({ className }: { className?: string }) {
 }
 
 export function Empty({ children }: { children: ReactNode }) {
+  // 插件常用 `—` 作占位文案：只显示插画
+  const blank = children === '—' || children === null || children === undefined;
   return (
     <div className="pt-empty">
       <EmptyArt />
-      <p>{children}</p>
+      {!blank && <p>{children}</p>}
     </div>
   );
 }
@@ -117,7 +119,7 @@ export interface Column<T> {
 }
 
 export function Table<T>({ rows, columns, rowKey, empty }: { rows: T[]; columns: Column<T>[]; rowKey(row: T): string | number; empty?: ReactNode }) {
-  if (rows.length === 0 && empty) return <Empty>{empty}</Empty>;
+  if (rows.length === 0 && empty) return isValidElement(empty) ? <>{empty}</> : <Empty>{empty}</Empty>;
   return (
     <div className="pt-table-wrap">
       <table className="pt-table">

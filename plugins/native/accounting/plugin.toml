@@ -66,6 +66,20 @@ auth = "user"
 rate_limit = "user:60/m"
 
 [[http.routes]]
+id = "swarm_batch"
+method = "GET"
+path = "/v1/torrents/swarm"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "torrent_swarm"
+method = "GET"
+path = "/v1/torrents/{id}/swarm"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
 id = "admin_adjust"
 method = "POST"
 path = "/v1/admin/users/{id}/adjustments"

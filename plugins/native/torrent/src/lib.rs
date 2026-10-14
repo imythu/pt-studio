@@ -304,6 +304,48 @@ pub struct UploadMeta {
     pub mediainfo: Option<String>,
     #[serde(default)]
     pub anonymous: bool,
+    /// 封面与截图（multipart 的 `poster` / `screenshot` 部分，已由 HTTP 层读入；不来自 JSON）
+    #[serde(skip)]
+    pub images: Vec<(bool, bytes::Bytes)>,
+}
+
+/// 图片类型按文件头判断（不信任客户端的 Content-Type）
+fn image_type(b: &[u8]) -> Option<(&'static str, &'static str)> {
+    if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(("image/jpeg", "jpg"))
+    } else if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some(("image/png", "png"))
+    } else if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        Some(("image/webp", "webp"))
+    } else {
+        None
+    }
+}
+
+const MAX_IMAGE_BYTES: usize = 3 << 20;
+const MAX_SCREENSHOTS: usize = 6;
+
+/// 存封面 / 截图到公开媒体（`/media/torrent/images/<sha256>.<ext>`），返回 (封面, 截图列表)
+async fn store_images(ctx: &Ctx, images: &[(bool, bytes::Bytes)]) -> PResult<(Option<String>, Vec<String>)> {
+    use sha2::{Digest, Sha256};
+    let mut poster = None;
+    let mut shots = Vec::new();
+    for (is_poster, data) in images {
+        if data.len() > MAX_IMAGE_BYTES {
+            return Err(PluginError::validation("image is too large (max 3 MiB)"));
+        }
+        let (ct, ext) =
+            image_type(data).ok_or_else(|| PluginError::validation("images must be JPEG, PNG or WebP"))?;
+        let name = format!("images/{}.{ext}", hex::encode(Sha256::digest(data)));
+        ctx.blob.put(&format!("public/{name}"), ct, data.clone()).await?;
+        let url = format!("/media/torrent/{name}");
+        if *is_poster {
+            poster = Some(url);
+        } else if shots.len() < MAX_SCREENSHOTS {
+            shots.push(url);
+        }
+    }
+    Ok((poster, shots))
 }
 
 fn sanitize_title(s: &str) -> PResult<String> {
@@ -428,7 +470,18 @@ pub async fn upload(t: &Torrent, ctx: &Ctx, m: UploadMeta, file: bytes::Bytes) -
         .get("title")
         .and_then(serde_json::Value::as_str)
         .map_or(Ok(title.clone()), sanitize_title)?;
-    let fields = out.get("fields").cloned().unwrap_or(fields);
+    let mut fields = out.get("fields").cloned().unwrap_or(fields);
+    if !m.images.is_empty() {
+        let (poster, shots) = store_images(ctx, &m.images).await?;
+        if let Some(o) = fields.as_object_mut() {
+            if let Some(p) = poster {
+                o.insert("poster".into(), json!(p));
+            }
+            if !shots.is_empty() {
+                o.insert("screenshots".into(), json!(shots));
+            }
+        }
+    }
     let status = out
         .get("initial_status")
         .and_then(serde_json::Value::as_str)
@@ -690,6 +743,7 @@ pub async fn build_download(t: &Torrent, ctx: &Ctx, id: i64, via: &str) -> PResu
 async fn http_upload(State(t): State<Arc<Torrent>>, ctx: RequestCtx, mut mp: Multipart) -> PResult<Response> {
     let mut file = None;
     let mut meta_json = None;
+    let mut images: Vec<(bool, bytes::Bytes)> = Vec::new();
     while let Some(field) = mp
         .next_field()
         .await
@@ -712,13 +766,24 @@ async fn http_upload(State(t): State<Arc<Torrent>>, ctx: RequestCtx, mut mp: Mul
                         .map_err(|e| PluginError::bad_request(format!("multipart: {e}")))?,
                 )
             }
+            Some(kind @ ("poster" | "screenshot")) => {
+                let is_poster = kind == "poster";
+                let data = field
+                    .bytes()
+                    .await
+                    .map_err(|e| PluginError::bad_request(format!("multipart: {e}")))?;
+                if !data.is_empty() && images.len() < 1 + MAX_SCREENSHOTS {
+                    images.push((is_poster, data));
+                }
+            }
             _ => {}
         }
     }
     let file = file.ok_or_else(|| PluginError::validation("part `torrent` is required"))?;
-    let meta: UploadMeta = serde_json::from_slice(
+    let mut meta: UploadMeta = serde_json::from_slice(
         &meta_json.ok_or_else(|| PluginError::validation("part `meta` is required"))?,
     )?;
+    meta.images = images;
     let body = upload(&t, &ctx, meta, file).await?;
     let loc = format!("/api/p/torrent/v1/torrents/{}", body["id"]);
     let mut resp = (StatusCode::CREATED, Json(body)).into_response();
