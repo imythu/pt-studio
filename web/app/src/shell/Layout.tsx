@@ -3,9 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
-import { Icon, Logo } from '../art';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@pt-studio/sdk';
+import { Icon, Logo, type IconName } from '../art';
 import { useSession } from '../session';
-import { useManifest } from '../manifest';
+import { useInstalled, useManifest } from '../manifest';
 
 function currentTheme(): 'dark' | 'light' {
   const set = document.documentElement.dataset.theme;
@@ -59,6 +61,39 @@ function NavSearch() {
       <Icon name="search" size={16} />
       <input type="search" name="nav_q" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('ui.torrent.search')} aria-label={t('ui.torrent.search')} />
     </form>
+  );
+}
+
+/** 顶栏常驻入口：通知、消息（带未读数；插件未安装时不显示） */
+function QuickLinks() {
+  const t = useT();
+  const notify = useInstalled('notify');
+  const messages = useInstalled('messages');
+  const nn = useQuery({
+    queryKey: ['unread', 'notify'],
+    queryFn: () => api<{ count: number }>('/api/p/notify/v1/unread'),
+    enabled: notify,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const nm = useQuery({
+    queryKey: ['unread', 'messages'],
+    queryFn: () => api<{ private: number }>('/api/p/messages/v1/unread'),
+    enabled: messages,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const item = (to: string, icon: IconName, label: string, n: number | undefined) => (
+    <NavLink to={to} className="icon-btn" aria-label={label} title={label}>
+      <Icon name={icon} />
+      {!!n && <span className="dot">{n > 99 ? '99+' : n}</span>}
+    </NavLink>
+  );
+  return (
+    <>
+      {notify && item('/p/notify/', 'bell', t('ui.nav.notifications'), nn.data?.count)}
+      {messages && item('/p/messages/', 'mail', t('ui.nav.messages'), nm.data?.private)}
+    </>
   );
 }
 
@@ -140,6 +175,7 @@ export function Layout() {
                   <NavLink to="/upload" className="nav-upload">
                     <Icon name="upload" size={16} /> {t('ui.nav.upload')}
                   </NavLink>
+                  <QuickLinks />
                   <Link to={`/users/${s.me.id}`} className="username">
                     <span className="avatar" aria-hidden="true">
                       {s.me.username.slice(0, 1).toUpperCase()}

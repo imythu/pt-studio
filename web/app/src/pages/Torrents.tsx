@@ -121,7 +121,7 @@ export function TypeBadge({ typeId }: { typeId?: string }) {
   const t = useT();
   const types = useTypes();
   const info = types.data?.find((x) => x.type_id === typeId);
-  return <Badge>{info ? t(`term:${info.name_term}`) : (typeId ?? '-')}</Badge>;
+  return <span className={`pt-badge type-badge type-${typeId ?? 'other'}`}>{info ? t(`term:${info.name_term}`) : (typeId ?? '-')}</span>;
 }
 
 /** 由元数据面板展示的字段，不在通用字段表中重复 */
@@ -195,6 +195,18 @@ export function FieldsView({ typeId, fields }: { typeId: string; fields: Record<
   );
 }
 
+/** 相对时间（一周内），更早显示日期 */
+function timeAgo(ms: number): string {
+  const secs = Math.round((ms - Date.now()) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(document.documentElement.lang || navigator.language, { numeric: 'auto' });
+  const abs = Math.abs(secs);
+  if (abs < 60) return rtf.format(Math.trunc(secs / 1), 'second');
+  if (abs < 3600) return rtf.format(Math.trunc(secs / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.trunc(secs / 3600), 'hour');
+  if (abs < 7 * 86400) return rtf.format(Math.trunc(secs / 86400), 'day');
+  return new Date(ms).toLocaleDateString();
+}
+
 export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlights?: Map<number, Record<string, string>> }) {
   const t = useT();
   const pluginCols = useSlotColumns('torrent.list.columns');
@@ -202,18 +214,30 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
     {
       key: 'title',
       header: t('ui.torrent.title'),
-      render: (r) => (
-        <div>
-          <Link to={`/torrents/${r.id}`}>{highlights?.get(r.id)?.title ? <Highlight text={highlights.get(r.id)?.title ?? ''} /> : r.title}</Link>{' '}
-          <Slot name="torrent.list.row_badges" ctx={{ torrent: r }} />
-          {r.subtitle && <div className="pt-muted small">{r.subtitle}</div>}
-        </div>
-      ),
+      render: (r) => {
+        const tags = [r.rel_resolution, r.rel_source, r.rel_video_codec].filter((x): x is string => typeof x === 'string' && x !== '');
+        return (
+          <div>
+            <Link className="t-title" to={`/torrents/${r.id}`}>
+              {highlights?.get(r.id)?.title ? <Highlight text={highlights.get(r.id)?.title ?? ''} /> : r.title}
+            </Link>
+            {r.subtitle && <div className="pt-muted small">{r.subtitle}</div>}
+            <div className="t-tags">
+              {tags.map((x, i) => (
+                <span key={x} className={`pt-badge${i === 0 ? ' tag-res' : ''}`}>
+                  {x}
+                </span>
+              ))}
+              <Slot name="torrent.list.row_badges" ctx={{ torrent: r }} />
+            </div>
+          </div>
+        );
+      },
     },
     { key: 'type', header: t('ui.torrent.type'), render: (r) => <TypeBadge typeId={r.type_id} /> },
     ...pluginCols.map((c) => ({ key: `p:${c.key}`, header: c.header, render: (r: TorrentDoc) => c.render({ torrent: r }) })),
     { key: 'size', header: t('ui.torrent.size'), render: (r) => formatBytes(r.size), className: 'num' },
-    { key: 'created', header: t('ui.torrent.created'), render: (r) => (r.created_at ? new Date(r.created_at * 1000).toLocaleString() : '-'), className: 'nowrap' },
+    { key: 'created', header: t('ui.torrent.created'), render: (r) => (r.created_at ? timeAgo(r.created_at * 1000) : '-'), className: 'nowrap' },
   ];
   return (
     <div className="torrent-table">
@@ -418,28 +442,47 @@ export function TorrentPage() {
   const ctx = { torrent: d };
   return (
     <div className="torrent">
-      <h1>{d.title}</h1>
-      {d.subtitle && <p className="pt-muted">{d.subtitle}</p>}
-      {d.status !== 'approved' && <Badge tone="danger">{statusName(t, d.status)}</Badge>}
-      <Slot name="torrent.detail.header" ctx={ctx} />
+      <section className="t-head">
+        <div className="t-badges">
+          <TypeBadge typeId={d.type_id} />
+          {d.status !== 'approved' && <Badge tone="danger">{statusName(t, d.status)}</Badge>}
+          <Slot name="torrent.detail.header" ctx={ctx} />
+        </div>
+        <h1>{d.title}</h1>
+        {d.subtitle && <p className="sub">{d.subtitle}</p>}
+        <div className="t-meta">
+          <span>
+            <b>{formatBytes(d.size)}</b> · {d.file_count} {t('ui.torrent.files')}
+          </span>
+          <span>
+            {t('ui.torrent.uploader')}:{' '}
+            {d.uploader.anonymous ? t('ui.torrent.anonymous') : <Link to={`/users/${d.uploader.id}`}>{d.uploader.username ?? `#${d.uploader.id}`}</Link>}
+          </span>
+          <span>{new Date(d.created_at).toLocaleString()}</span>
+        </div>
+        <div className="t-actions">
+          {d.can_download && (
+            <a className="pt-btn pt-btn-primary" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download>
+              <Icon name="download" size={16} /> {t('ui.torrent.download')}
+            </a>
+          )}
+          <Slot name="torrent.detail.actions" ctx={ctx} />
+        </div>
+      </section>
       <div className="with-sidebar reverse">
         <div className="main">
-          <Card
-            title={t('ui.torrent.files')}
-            actions={
-              d.can_download && (
-                <a className="pt-btn pt-btn-primary" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download>
-                  {t('ui.torrent.download')}
-                </a>
-              )
-            }
-          >
-            <p>
-              {formatBytes(d.size)} · {d.file_count} · {t('ui.torrent.uploader')}:{' '}
-              {d.uploader.anonymous ? t('ui.torrent.anonymous') : <Link to={`/users/${d.uploader.id}`}>{d.uploader.username ?? `#${d.uploader.id}`}</Link>} ·{' '}
-              {new Date(d.created_at).toLocaleString()}
-            </p>
-            <Slot name="torrent.detail.actions" ctx={ctx} />
+          {d.fields && Object.keys(d.fields).length > 0 && (
+            <Card title={t('ui.torrent.info')} actions={d.group_id ? <Link to={`/groups/${d.group_id}`}>{t('ui.group.view')}</Link> : null}>
+              <FieldsView typeId={d.type_id} fields={d.fields} />
+            </Card>
+          )}
+          <Slot name="torrent.detail.info" ctx={ctx} />
+          {d.description && (
+            <Card title={t('ui.torrent.description')}>
+              <UserContent text={d.description} />
+            </Card>
+          )}
+          <Card title={`${t('ui.torrent.files')} (${d.file_count})`}>
             <ul className="files">
               {(files.data?.items ?? []).slice(0, 200).map((f, i) => {
                 const anyF = f as { path: string | string[]; size?: number; length?: number };
@@ -452,17 +495,6 @@ export function TorrentPage() {
               })}
             </ul>
           </Card>
-          {d.fields && Object.keys(d.fields).length > 0 && (
-            <Card title={t('ui.torrent.info')} actions={d.group_id ? <Link to={`/groups/${d.group_id}`}>{t('ui.group.view')}</Link> : null}>
-              <FieldsView typeId={d.type_id} fields={d.fields} />
-            </Card>
-          )}
-          <Slot name="torrent.detail.info" ctx={ctx} />
-          {d.description && (
-            <Card title={t('ui.torrent.description')}>
-              <UserContent text={d.description} />
-            </Card>
-          )}
           <Slot name="torrent.detail.tabs" ctx={ctx} />
         </div>
         <aside className="sidebar">
@@ -539,7 +571,10 @@ export function Upload() {
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
   const list = types.data ?? [];
-  const info = list.find((x) => x.type_id === typeId) ?? list[0];
+  // 通用类型（other）放最后，默认选第一个具体类型
+  const rank = (id: string) => { const i = ['movie', 'tv', 'anime', 'music', 'generic'].indexOf(id); return i < 0 ? 4 : i; };
+  const ordered = [...list].sort((x, y) => rank(x.type_id) - rank(y.type_id));
+  const info = ordered.find((x) => x.type_id === typeId) ?? ordered[0];
   const hasTmdb = useInstalled('metadata-tmdb');
   const pick = (id: string) => {
     setTypeId(id);
@@ -570,14 +605,16 @@ export function Upload() {
     }
   };
   return (
-    <Card title={t('ui.upload.title')} className="narrow wide">
-      <form onSubmit={submit}>
+    <Card title={t('ui.upload.title')} className="upload">
+      <form onSubmit={submit} className="upload-grid">
+        <div className="span2">
         <Field label={t('ui.upload.file')}>
           <input name="torrent" type="file" accept=".torrent,application/x-bittorrent" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required />
         </Field>
+        </div>
         <Field label={t('ui.torrent.type')}>
           <select className="pt-input" name="type_id" value={info?.type_id ?? ''} onChange={(e) => pick(e.target.value)}>
-            {list.map((x) => (
+            {ordered.map((x) => (
               <option key={x.type_id} value={x.type_id}>
                 {t(`term:${x.name_term}`)}
               </option>
@@ -587,6 +624,7 @@ export function Upload() {
         <Field label={t('ui.torrent.title')} hint={info?.plugin ? t('ui.upload.title_hint') : undefined}>
           <Input name="title" value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} required={!info?.plugin} maxLength={300} />
         </Field>
+        <div className="span2">
         <Field label={t('ui.upload.subtitle')}>
           <Input value={meta.subtitle} onChange={(e) => setMeta({ ...meta, subtitle: e.target.value })} maxLength={300} />
         </Field>
@@ -617,6 +655,7 @@ export function Upload() {
         <Button type="submit" variant="primary" disabled={busy || !file || !info}>
           {t('ui.upload.submit')}
         </Button>
+        </div>
       </form>
     </Card>
   );
@@ -737,14 +776,6 @@ function HomeFeed() {
         <div>
           <h1>{t('ui.home.welcome', { name: me?.username ?? '' })}</h1>
           <p>{t('ui.home.welcome_sub')}</p>
-        </div>
-        <div className="actions">
-          <Link className="pt-btn pt-btn-primary" to="/upload">
-            <Icon name="upload" size={16} /> {t('ui.nav.upload')}
-          </Link>
-          <Link className="pt-btn" to="/torrents">
-            <Icon name="search" size={16} /> {t('ui.nav.torrents')}
-          </Link>
         </div>
       </section>
       <Slot name="home.announcements" ctx={{}} />
