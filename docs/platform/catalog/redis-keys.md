@@ -26,7 +26,9 @@
 |---|---|---|---|---|---|---|
 | `acct:<partition>` | acct | STREAM | pt-tracker | accounting（消费组 `accounting`） | `MAXLEN ~` 配置 | 流量增量，`partition = user_id % N`，N 全站固定（默认 64），字段见 design/10 §5.4 |
 | `u:<user_id>:live` | acct | HASH | pt-tracker（HINCRBY）、accounting（结算后扣减/重置） | accounting | 7 天无更新过期 | 实时原始计数 `up`、`down`、`seed_time` |
-| `ps:<info_hash_hex>` | tracker_state | HASH | pt-tracker | pt-tracker；tracker-bridge 只读（peer 列表） | `max_peer_timeout × 2` | peer 会话状态，design/10 §5.6 |
+| `ps:{<info_hash_hex>}` | tracker_state | HASH | pt-tracker | pt-tracker | `max_peer_timeout × 2`（每次写刷新） | 会话状态：field `<uid>:<peer_id_hex>` → JSON（累计值、left、最近时间、是否完成、IP、端口）。`{}` 是真实的 Cluster 哈希标签（D20），同一种子的 `ps:` / `sw:` 键在同一 slot |
+| `sw:{<info_hash_hex>}:s` / `sw:{<info_hash_hex>}:l` | tracker_state | ZSET | pt-tracker | pt-tracker | 同上 | 做种者 / 下载者：member 同上，score 为最近 announce 时间；超时成员在 announce 脚本中清理 |
+| `sw:{<info_hash_hex>}:n` | tracker_state | STRING(计数器) | pt-tracker | pt-tracker | 同上 | 完成次数（scrape 的 downloaded） |
 | `trk:pk:<passkey>` | tracker_sync | HASH | tracker-bridge | pt-tracker | 无（随用户生命周期删除） | `uid`、`st`、`ver` |
 | `trk:t:<info_hash_hex>` | tracker_sync | HASH | tracker-bridge | pt-tracker | 无 | `tid`、`st`、`acct`、`size`、`ver` |
 | `trk:clients` | tracker_sync | STRING(JSON) | tracker-bridge | pt-tracker | 无 | 客户端白名单 |

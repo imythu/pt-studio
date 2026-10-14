@@ -36,14 +36,15 @@ PT Studio 是一个面向几十万用户、可水平扩展的 PT 站点系统：
 | D6 | 不做多租户：一套部署对应一个 PT 站 | 需求 |
 | D7 | 站点可自定义术语（魔力值、等级等的名称），由术语表系统统一支持 | 需求 |
 | D8 | 支持混合资源类型，资源类型本身是插件 | 需求 |
-| D9 | Tracker 使用 Torrust，具体集成方案通过实测确定 | 需求 |
+| D9 | ~~Tracker 使用 Torrust，具体集成方案通过实测确定~~ → 由 D20 取代：tracker 自研 | 需求（2026-10-14 用户改为自研） |
 | D10 | 原生支持 AI，提供 MCP 服务 | 需求 |
 | D11 | 借鉴现有开源 PT 程序的教训，避免重复犯错 | 需求 |
 | D12 | 搜索由 `search-meilisearch` 插件提供 `ctx.search` 服务 | 需求 |
 | D13 | 账本也是插件（`ledger` 提供 `ctx.ledger`，支持多币种） | 由 D5 推出 |
-| D14 | pt-tracker 采用“收窄组装”（方案 B′）：只依赖 torrust 的 swarm-coordination-registry、http-protocol、primitives、events（git rev 锁定），HTTP 入口、鉴权、过滤、增量和事件出口自己实现，torrust 藏在适配层后面 | spike 实测，见 10 号文档；细化 D9 |
+| D14 | ~~pt-tracker 采用“收窄组装”（方案 B′）：只依赖 torrust 的 swarm-coordination-registry、http-protocol、primitives、events（git rev 锁定），HTTP 入口、鉴权、过滤、增量和事件出口自己实现，torrust 藏在适配层后面~~ → 由 D20 取代 | spike 实测，见 10 号文档；细化 D9 |
 | D15 | tracker 只支持 HTTP(S) announce，不提供 UDP | spike 实测（torrust 私有模式禁用 UDP，也没有实现 BEP 41） |
 | D16 | `crates/pt-tracker` 单独使用 AGPL-3.0-only 许可证，与内核和插件只通过 Redis 通信，不互相链接代码 | torrust 各包都是 AGPL-3.0-only；用户确认保留 AGPL，不切换方案 D |
 | D17 | 增量计算依据 pt-tracker 自己维护的 peer 会话状态（user_id + info_hash + peer_id，写穿 Redis），不依赖 torrust 的 swarm 或 events | spike 实测（torrust 的事件和 swarm 不带用户身份，也拿不到旧值） |
 | D18 | 数据库使用 PostgreSQL（最低 16，推荐 17），不支持 MySQL | 用户确认 |
 | D19 | 内核与插件采用 MIT OR Apache-2.0 双许可证；pt-tracker 仍为 AGPL-3.0-only（D16），二者只通过 Redis 通信、互不链接代码 | 用户确认 |
+| D20 | pt-tracker 自研，不依赖 torrust：HTTP 协议（BEP 3 / 23 / 7 / 48）、准入、增量计算与事件出口自己实现；**swarm 与会话状态全部存在 Redis**（每个种子的做种 / 下载 ZSET + 会话 HASH，Lua 脚本 CAS），tracker 无状态、可多节点水平扩展、不需要按 info_hash 分片。D15（只做 HTTP）、D16（AGPL，只经 Redis 通信）、D17（自己维护会话状态）保持不变 | 2026-10-14 用户决定（torrust 相关包未发布到 crates.io，develop 分支 API 不稳定）；真实客户端（Transmission 4.1）与压测验证见 components/pt-tracker、dev/README |

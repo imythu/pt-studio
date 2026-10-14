@@ -75,6 +75,7 @@ pub fn failure(msg: &str) -> Vec<u8> {
 pub struct PeerAddr {
     pub ip: IpAddr,
     pub port: u16,
+    pub peer_id: [u8; 20],
 }
 
 pub struct AnnounceReply<'a> {
@@ -83,10 +84,47 @@ pub struct AnnounceReply<'a> {
     pub interval: u64,
     pub min_interval: u64,
     pub peers: &'a [PeerAddr],
+    /// `compact=0` 时用字典列表（BEP 3 原始格式）
+    pub compact: bool,
+    /// `no_peer_id=1`：非紧凑格式中省略 peer id
+    pub no_peer_id: bool,
+}
+
+/// 非紧凑格式：`peers` 为 `[{ip, peer id, port}]`
+fn announce_dicts(r: &AnnounceReply) -> Vec<u8> {
+    let n = |x: u64| i64::try_from(x).unwrap_or(i64::MAX);
+    let mut o = b"d".to_vec();
+    bstr(&mut o, b"complete");
+    bint(&mut o, n(r.complete));
+    bstr(&mut o, b"incomplete");
+    bint(&mut o, n(r.incomplete));
+    bstr(&mut o, b"interval");
+    bint(&mut o, n(r.interval));
+    bstr(&mut o, b"min interval");
+    bint(&mut o, n(r.min_interval));
+    bstr(&mut o, b"peers");
+    o.push(b'l');
+    for p in r.peers {
+        o.push(b'd');
+        bstr(&mut o, b"ip");
+        bstr(&mut o, p.ip.to_string().as_bytes());
+        if !r.no_peer_id {
+            bstr(&mut o, b"peer id");
+            bstr(&mut o, &p.peer_id);
+        }
+        bstr(&mut o, b"port");
+        bint(&mut o, i64::from(p.port));
+        o.push(b'e');
+    }
+    o.extend(b"ee");
+    o
 }
 
 /// 紧凑格式（BEP 23 / BEP 7）：IPv4 进 `peers`，IPv6 进 `peers6`；键按字典序
 pub fn announce(r: &AnnounceReply) -> Vec<u8> {
+    if !r.compact {
+        return announce_dicts(r);
+    }
     let mut v4 = Vec::new();
     let mut v6 = Vec::new();
     for p in r.peers {
@@ -177,23 +215,35 @@ mod tests {
             PeerAddr {
                 ip: "1.2.3.4".parse().unwrap(),
                 port: 0x1ae1,
+                peer_id: [b'p'; 20],
             },
             PeerAddr {
                 ip: "::1".parse().unwrap(),
                 port: 1,
+                peer_id: [b'q'; 20],
             },
         ];
-        let r = announce(&AnnounceReply {
+        let reply = |compact, no_peer_id| AnnounceReply {
             complete: 1,
             incomplete: 2,
             interval: 1800,
             min_interval: 900,
             peers: &peers,
-        });
+            compact,
+            no_peer_id,
+        };
+        let r = announce(&reply(true, false));
         let mut want = b"d8:completei1e10:incompletei2e8:intervali1800e12:min intervali900e5:peers6:\x01\x02\x03\x04\x1a\xe16:peers618:".to_vec();
         want.extend([0u8; 15]);
         want.extend([1, 0, 1, b'e']);
         assert_eq!(r, want);
+        let d = String::from_utf8_lossy(&announce(&reply(false, false))).into_owned();
+        assert!(
+            d.contains("5:peersld2:ip7:1.2.3.47:peer id20:pppppppppppppppppppp4:porti6881eed2:ip3:::1"),
+            "{d}"
+        );
+        let d = String::from_utf8_lossy(&announce(&reply(false, true))).into_owned();
+        assert!(!d.contains("peer id") && d.ends_with("4:porti1eeee"), "{d}");
         let s = scrape(&[([7u8; 20], 3, 5, 1)]);
         assert!(s.starts_with(b"d5:filesd20:"));
         assert!(s.ends_with(b"d8:completei3e10:downloadedi5e10:incompletei1eeee"));

@@ -127,6 +127,12 @@ fn hash_key(hex_hash: &str) -> Option<[u8; 20]> {
     Some(h)
 }
 
+impl Default for Admission {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Admission {
     pub fn new() -> Self {
         Self {
