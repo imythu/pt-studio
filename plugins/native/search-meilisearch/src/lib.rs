@@ -1107,17 +1107,18 @@ async fn reap_tasks(s: &Search, ctx: &Ctx) -> PResult<()> {
     for r in rows {
         let task: i64 = r.get(0);
         let (status, err) = meili.task_status(u64::try_from(task).unwrap_or(0)).await?;
-        let mut c = ctx.sql.conn().await?;
+        // 连接守卫持有事务锁，必须在 commit 之前释放，否则 commit 等锁直到超时
         match status.as_str() {
             "succeeded" => {
                 sqlx::query("DELETE FROM meili_tasks WHERE instance_id = $1 AND task_uid = $2")
                     .bind(&meili.id)
                     .bind(task)
-                    .execute(&mut *c)
+                    .execute(&mut *ctx.sql.conn().await?)
                     .await?;
             }
             "failed" | "canceled" => {
                 tracing::warn!(task, error = ?err, "meilisearch task failed; re-marking entities");
+                let mut c = ctx.sql.conn().await?;
                 sqlx::query(
                     "UPDATE meili_tasks SET status = 'failed', error_code = $3, finished_at = now()
                       WHERE instance_id = $1 AND task_uid = $2",
