@@ -217,11 +217,19 @@ impl Uow {
                 .await?;
         }
         for a in &audits {
+            // 公开入口（MCP、OAuth token 端点）在插件内部才完成鉴权：调用上下文是匿名的，
+            // 插件在 details.on_behalf_of 里给出实际用户，审计的 actor 记为该用户
+            let actor = match (&self.invocation.actor.kind, a.details["on_behalf_of"].as_u64()) {
+                (pt_plugin_api::ActorKind::Anonymous, Some(uid)) => {
+                    pt_plugin_api::Actor::user(uid, a.details["token_id"].as_str().map(str::to_owned))
+                }
+                _ => self.invocation.actor.clone(),
+            };
             sqlx::query(
                 "INSERT INTO kernel.audit_log (actor, plugin_id, action, target, outcome, request_id, details)
                  VALUES ($1,$2,$3,$4,'ok',$5,$6)",
             )
-            .bind(serde_json::to_value(&self.invocation.actor)?)
+            .bind(serde_json::to_value(&actor)?)
             .bind(&self.plugin_id)
             .bind(&a.action)
             .bind(&a.target)

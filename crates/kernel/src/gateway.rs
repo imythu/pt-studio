@@ -243,9 +243,21 @@ async fn plugin_mw(
         .and_then(|v| v.to_str().ok())
         .filter(|v| v.len() <= 64)
         .map_or_else(|| uuid::Uuid::now_v7().to_string(), str::to_owned);
+    // 访问日志（target = "access"）：只记路由模板（不含路径参数与查询串，避免记下 feed key 等），状态、耗时、用户与客户端 IP
+    let started = std::time::Instant::now();
+    let method = req.method().clone();
+    let route_tpl = matched
+        .as_ref()
+        .map(|m| m.as_str().to_owned())
+        .unwrap_or_default();
+    let ip = client_ip(&req, req.headers(), &st.shared.cfg.http.trusted_proxies);
+    let mut user = None;
     let resp = match prepare(&st, matched, &mut req, &request_id).await {
         Err(e) => e.into_response(),
-        Ok(p) => run_prepared(&st, p, req, next).await,
+        Ok(p) => {
+            user = p.ctx.actor().user_id;
+            run_prepared(&st, p, req, next).await
+        }
     };
     // 限流超限：Retry-After
     let resp = match resp.extensions().get::<ErrorMarker>() {
@@ -278,6 +290,10 @@ async fn plugin_mw(
     {
         tracing::error!(plugin = %st.plugin, %request_id, code = %m.0.code, message = %m.0.message, "request failed");
     }
+    let code = resp.extensions().get::<ErrorMarker>().map(|m| m.0.code.clone());
+    tracing::info!(target: "access", plugin = %st.plugin, %method, route = %route_tpl, status = resp.status().as_u16(),
+        ms = started.elapsed().as_millis() as u64, user = ?user, ip = ip.as_deref().unwrap_or("-"), code = code.as_deref().unwrap_or("-"),
+        %request_id);
     finish_problem(resp, &request_id)
 }
 

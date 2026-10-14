@@ -198,7 +198,7 @@ pub async fn issue(
         .write(pt_plugin_api::AuditEntry {
             action: "identity.token_issue".into(),
             target: format!("user:{user_id}"),
-            details: json!({ "token_id": id, "kind": kind.as_str(), "name": name, "scopes": scopes }),
+            details: json!({ "token_id": id, "kind": kind.as_str(), "name": name, "scopes": scopes, "on_behalf_of": user_id }),
         })
         .await?;
     Ok((id, secret, expires))

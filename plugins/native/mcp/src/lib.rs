@@ -140,7 +140,7 @@ async fn execute(
                     .write(pt_plugin_api::AuditEntry {
                         action: format!("mcp.call:{}", def.name),
                         target: format!("user:{}", p.user_id),
-                        details: json!({ "token_id": p.credential_id, "args_summary": summary }),
+                        details: json!({ "token_id": p.credential_id, "on_behalf_of": p.user_id, "args_summary": summary }),
                     })
                     .await?;
             }
