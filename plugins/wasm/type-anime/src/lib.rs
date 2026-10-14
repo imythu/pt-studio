@@ -155,13 +155,17 @@ fn svc(service: &str, method: &str, args: &Value) -> Result<Value, PluginError> 
 impl on_event::Guest for TypeAnime {
     fn handle(evt: on_event::EventEnvelope, _d: on_event::DeliveryInfo) -> Result<(), PluginError> {
         let p: Value = serde_json::from_str(&evt.payload).unwrap_or(Value::Null);
-        if evt.event_type == "group.created" && p["type_id"] == "anime" {
+        let fresh_torrent = evt.event_type == "torrent.created" && p["group_id"].as_i64().is_some();
+        if (evt.event_type == "group.created" || fresh_torrent) && p["type_id"] == "anime" {
             let gid = p["group_id"].as_i64().unwrap_or(0);
             jobs::schedule_once(
                 "fetch_metadata",
                 time::now(),
                 &json!({ "group_id": gid }).to_string(),
-                Some(&format!("meta:{gid}")),
+                Some(&match p["torrent_id"].as_i64() {
+                    Some(tid) if fresh_torrent => format!("meta:{gid}:t{tid}"),
+                    _ => format!("meta:{gid}"),
+                }),
             )?;
         }
         Ok(())
@@ -178,8 +182,9 @@ impl on_cron::Guest for TypeAnime {
         let g = svc("ctx.torrents", "get_group", &json!({ "id": gid }))?;
         let f = &g["fields"];
         // 目前只有 TMDB 元数据源；剧场版暂不补全
+        // 没填 media 时按 TV 动画处理
         match (f["tmdb_tv_id"].as_u64(), f["media"].as_str()) {
-            (Some(id), Some(m)) if m != "movie" => enrich(gid, &format!("tv:{id}"), f["season"].as_i64()),
+            (Some(id), m) if m != Some("movie") => enrich(gid, &format!("tv:{id}"), f["season"].as_i64()),
             _ => Ok(()),
         }
     }

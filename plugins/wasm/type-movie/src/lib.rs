@@ -146,13 +146,17 @@ fn svc(service: &str, method: &str, args: &Value) -> Result<Value, PluginError> 
 impl on_event::Guest for TypeMovie {
     fn handle(evt: on_event::EventEnvelope, _d: on_event::DeliveryInfo) -> Result<(), PluginError> {
         let p: Value = serde_json::from_str(&evt.payload).unwrap_or(Value::Null);
-        if evt.event_type == "group.created" && p["type_id"] == "movie" {
+        let fresh_torrent = evt.event_type == "torrent.created" && p["group_id"].as_i64().is_some();
+        if (evt.event_type == "group.created" || fresh_torrent) && p["type_id"] == "movie" {
             let gid = p["group_id"].as_i64().unwrap_or(0);
             jobs::schedule_once(
                 "fetch_metadata",
                 time::now(),
                 &json!({ "group_id": gid }).to_string(),
-                Some(&format!("meta:{gid}")),
+                Some(&match p["torrent_id"].as_i64() {
+                    Some(tid) if fresh_torrent => format!("meta:{gid}:t{tid}"),
+                    _ => format!("meta:{gid}"),
+                }),
             )?;
         }
         Ok(())

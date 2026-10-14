@@ -304,7 +304,14 @@ fn search(query: &str, type_id: &str, limit: u32, language: &str, year: Option<u
     let kind = if type_id == "movie" { "movie" } else { "tv" };
     let mut params: Vec<(&str, String)> = vec![("query", q.into()), ("language", language.into())];
     if let Some(y) = year {
-        params.push((if kind == "movie" { "year" } else { "first_air_date_year" }, y.to_string()));
+        params.push((
+            if kind == "movie" {
+                "year"
+            } else {
+                "first_air_date_year"
+            },
+            y.to_string(),
+        ));
     }
     let Some(r) = api_json(&c, &format!("/3/search/{kind}"), &params)? else {
         return Ok(vec![]);

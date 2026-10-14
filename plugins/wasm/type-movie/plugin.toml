@@ -23,6 +23,11 @@ views = ["torrent.v_torrent_fields"]
 name = "on_group_created"
 event = "group.created"
 
+# 已有 Group 但还没补全元数据时（如首次上传未填 ID），新种子进入该 Group 也触发一次补全
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+
 [[jobs]]
 name = "fetch_metadata"
 timeout_secs = 60
