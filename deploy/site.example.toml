@@ -40,6 +40,7 @@ sensitive = ["user.ip", "user.email"]
 sensitive = ["user.email"]
 
 [plugin.identity]
+# insecure_cookies = true                # 仅限 HTTP 测试部署：会话 cookie 去掉 __Host- 前缀与 Secure（浏览器不接受 HTTP 页面上的 Secure cookie）；正式部署用 HTTPS，不要开启
 secret_key = "@SECRET_HEX_32"          # 32 字节十六进制（64 个字符）：邮箱加密、passkey、HMAC 的根密钥，设定后不要更换
 
 [plugin.invite]

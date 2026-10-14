@@ -59,6 +59,8 @@ services:
       # 首次启动时写入 ./data/pt/site.toml；之后修改地址需编辑 site.toml
       PT_BASE_URL: ${PT_BASE_URL:-http://localhost:31251}
       PT_TRACKER_URL: ${PT_TRACKER_URL:-http://localhost:31252}
+      # 仅 HTTP 测试部署：会话 cookie 不带 Secure（正式使用请上 HTTPS）
+      PT_INSECURE_COOKIES: ${PT_INSECURE_COOKIES:-false}
     ports:
       - "${PT_HTTP_PORT:-31251}:31251"
     volumes:

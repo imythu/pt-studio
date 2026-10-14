@@ -21,6 +21,9 @@ use crate::runtime::{CallSpec, Shared};
 
 pub const SESSION_COOKIE: &str = "__Host-pt_session";
 pub const CSRF_COOKIE: &str = "__Host-pt_csrf";
+/// 测试部署（`[plugin.identity] insecure_cookies = true`，HTTP + IP 访问）用的无前缀名；浏览器不接受 HTTP 页面上的 `__Host-`/`Secure` cookie。
+pub const SESSION_COOKIE_PLAIN: &str = "pt_session";
+pub const CSRF_COOKIE_PLAIN: &str = "pt_csrf";
 
 #[derive(Clone)]
 struct PluginState {
@@ -134,7 +137,9 @@ pub(crate) fn credential(headers: &HeaderMap) -> Option<Credential> {
     {
         return Some(Credential::Bearer(tok.trim().to_owned()));
     }
-    cookie(headers, SESSION_COOKIE).map(|s| Credential::Session(s.to_owned()))
+    cookie(headers, SESSION_COOKIE)
+        .or_else(|| cookie(headers, SESSION_COOKIE_PLAIN))
+        .map(|s| Credential::Session(s.to_owned()))
 }
 
 pub(crate) fn locale(headers: &HeaderMap) -> Option<String> {
@@ -204,7 +209,7 @@ fn origin_of(url: &str) -> &str {
 /// CSRF（§8.2 第 5 步）：仅会话凭据的非安全方法。
 pub(crate) fn csrf_ok(headers: &HeaderMap, base_url: &str) -> bool {
     let token = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
-    let cookie_token = cookie(headers, CSRF_COOKIE);
+    let cookie_token = cookie(headers, CSRF_COOKIE).or_else(|| cookie(headers, CSRF_COOKIE_PLAIN));
     let tokens_ok = matches!((token, cookie_token), (Some(a), Some(b)) if !a.is_empty() && a == b);
     let site_ok = match headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
         Some(s) => s == "same-origin" || s == "none",

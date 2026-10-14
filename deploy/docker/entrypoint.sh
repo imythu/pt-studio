@@ -26,6 +26,10 @@ case "$mode" in
           -e "s#@MEILI_MASTER_KEY#${PT_MEILI_KEY:-}#" \
           -e "s#http://localhost:31252/announce#${PT_TRACKER_URL:-http://localhost:31252}/announce#" \
           /opt/pt/site.example.toml > "$CFG"
+      # HTTP 测试部署（没有 HTTPS）：PT_INSECURE_COOKIES=true
+      if [ "${PT_INSECURE_COOKIES:-false}" = "true" ]; then
+        sed -i 's/^# insecure_cookies = true.*/insecure_cookies = true/' "$CFG"
+      fi
       echo "generated $CFG (keep it: it holds the site secrets)"
     fi
     pt-server --config "$CFG" migrate

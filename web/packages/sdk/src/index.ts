@@ -14,14 +14,14 @@ export class ApiError extends Error {
   }
 }
 
-const CSRF_COOKIE = '__Host-pt_csrf';
+const CSRF_COOKIES = ['__Host-pt_csrf', 'pt_csrf'];
 
 /** CSRF 双提交 cookie（非 HttpOnly，由 identity 登录时写入） */
 export function csrfToken(): string | null {
   if (typeof document === 'undefined') return null;
   for (const part of document.cookie.split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (k === CSRF_COOKIE) return decodeURIComponent(v.join('='));
+    if (CSRF_COOKIES.includes(k)) return decodeURIComponent(v.join('='));
   }
   return null;
 }

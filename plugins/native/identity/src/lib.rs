@@ -44,6 +44,8 @@ pub struct Identity {
     keys: OnceLock<crypto::Keyring>,
     /// 允许的界面语言（`[plugin.identity] locales`，空 = 不限制）
     locales: OnceLock<Vec<String>>,
+    /// `[plugin.identity] insecure_cookies`：HTTP 测试部署用的无前缀、无 Secure cookie
+    insecure_cookies: OnceLock<bool>,
 }
 
 impl Identity {
@@ -51,6 +53,10 @@ impl Identity {
         self.keys
             .get()
             .ok_or_else(|| PluginError::unavailable("identity is not initialised"))
+    }
+
+    pub fn insecure_cookies(&self) -> bool {
+        self.insecure_cookies.get().copied().unwrap_or(false)
     }
 
     pub fn locales(&self) -> Vec<String> {
@@ -117,6 +123,9 @@ impl Lifecycle for Identity {
             .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
             .unwrap_or_default();
         let _ = self.locales.set(locales);
+        let _ = self
+            .insecure_cookies
+            .set(cfg.get("insecure_cookies").and_then(serde_json::Value::as_bool).unwrap_or(false));
         Ok(())
     }
 }
