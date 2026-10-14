@@ -306,9 +306,9 @@ fn evaluate(tier: &str) -> R<usize> {
     let s = settings();
     let hour = time::now().div_euclid(3_600_000) % 6;
     let filter = if tier == "hot" {
-        "state = 'active' AND deadline < now() + interval '48 hours'"
+        "r.state = 'active' AND r.deadline < now() + interval '48 hours'"
     } else {
-        "state = 'active' AND deadline >= now() + interval '48 hours' AND abs(hashtext(user_id::text)) % 6 = $2"
+        "r.state = 'active' AND r.deadline >= now() + interval '48 hours' AND abs(hashtext(r.user_id::text)) % 6 = $2"
     };
     let mut done = 0;
     let mut after = 0i64;
@@ -326,7 +326,7 @@ fn evaluate(tier: &str) -> R<usize> {
                    FROM records r
                    LEFT JOIN accounting.v_snatch sn ON sn.user_id = r.user_id AND sn.torrent_id = r.torrent_id
                    LEFT JOIN torrent.v_torrent_public tr ON tr.id = r.torrent_id
-                  WHERE r.{filter} AND r.id > $1 ORDER BY r.id LIMIT ${lim} FOR UPDATE OF r SKIP LOCKED",
+                  WHERE {filter} AND r.id > $1 ORDER BY r.id LIMIT ${lim} FOR UPDATE OF r SKIP LOCKED",
                 ms("r.deadline")
             ),
             &params,

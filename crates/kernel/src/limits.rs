@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn scale_by_class() {
-        let r = parse("ip:30/m,user:20/h,global:5/s").unwrap();
+        let r = parse("ip:30/m,user:20/h,global:5/s").expect("valid spec");
         let s = scale(&r, 2.5);
         assert_eq!(s[0].count, 75);
         assert_eq!(s[0].text, "ip:75/m");

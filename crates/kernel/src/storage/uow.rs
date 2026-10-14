@@ -296,6 +296,11 @@ fn bind_values<'q>(
     mut q: Query<'q, Postgres, PgArguments>,
     params: &'q [SqlValue],
 ) -> Query<'q, Postgres, PgArguments> {
+    // 无类型 NULL 的参数类型由 Postgres 按上下文推断；若语句进了按 SQL 文本缓存的预编译缓存，
+    // 下次同一语句带非空值时会按推断出的类型解码而报 "incorrect binary data format"
+    if params.iter().any(|p| matches!(p, SqlValue::Null)) {
+        q = q.persistent(false);
+    }
     for p in params {
         q = match p {
             SqlValue::Null => q.bind(UntypedNull),

@@ -268,6 +268,9 @@ fn i(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
 
+/// 空闲分区落库水位的最小间隔
+const IDLE_PERSIST_MS: i64 = 5_000;
+
 /// 一次轮询（kernel 在返回 Ok 时提交工作单元）。
 pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PResult<PollOutcome> {
     let cfg = state.cfg()?;
@@ -301,7 +304,8 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
         )
         .retryable());
     }
-    sqlx::query("UPDATE stream_cursors SET fence = $2 WHERE part = $1")
+    // 只在换租约时写：空闲分区每次轮询都 UPDATE 会把小机器的 Postgres 压满
+    sqlx::query("UPDATE stream_cursors SET fence = $2 WHERE part = $1 AND fence <> $2")
         .bind(part_i)
         .bind(fence_i)
         .execute(&mut *c)
@@ -319,15 +323,20 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
     let raw = xread_entries(&reply);
     let w = i64::from(cfg.window_secs);
     if raw.is_empty() {
-        // 读空：以 Redis 时间推进水位并关闭已完整的窗口
+        // 读空：以 Redis 时间推进水位并关闭已完整的窗口。
+        // 落库的水位只供快照判断是否迟到，按 IDLE_PERSIST_MS 节流即可，窗口关闭用内存中的 wm
         let (secs, micros): (i64, i64) = redis::cmd("TIME").query_async(&mut conn).await?;
         let now_ms = secs * 1000 + micros / 1000;
         let wm = watermark.max(now_ms - 1);
-        sqlx::query("UPDATE stream_cursors SET watermark_ms = $2, idle_since = coalesce(idle_since, now()), updated_at = now() WHERE part = $1")
-            .bind(part_i)
-            .bind(wm)
-            .execute(&mut *c)
-            .await?;
+        sqlx::query(
+            "UPDATE stream_cursors SET watermark_ms = $2, idle_since = coalesce(idle_since, now()), updated_at = now()
+              WHERE part = $1 AND (idle_since IS NULL OR watermark_ms <= $2 - $3)",
+        )
+        .bind(part_i)
+        .bind(wm)
+        .bind(IDLE_PERSIST_MS)
+        .execute(&mut *c)
+        .await?;
         drop(c);
         close_windows(ctx, cfg, part_i, wm).await?;
         return Ok(PollOutcome::Idle {
