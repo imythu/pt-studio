@@ -68,6 +68,14 @@ auth = "user"
 rate_limit = "user:60/m"
 
 [[http.routes]]
+id = "admin_classes"
+method = "GET"
+path = "/v1/admin/classes"
+auth = "admin"
+permission = "levels.manage"
+rate_limit = "user:60/m"
+
+[[http.routes]]
 id = "set_user_class"
 method = "POST"
 path = "/v1/admin/users/{user_id}/class"
@@ -111,19 +119,393 @@ premake = 3
 
 [frontend]
 entry = "index.js"
-slots = ["user.profile.stats"]
-routes = []
+slots = ["user.profile.stats", "nav.user_menu"]
+routes = ["/p/levels/*"]
 settings_ui = "schema"
 
+# 运行时设置（后台“插件设置”）。等级列表的顺序即等级高低（从低到高）；key 是等级的唯一标识
+# （NexusPHP 英文名小写、空格换成下划线），name / description 留空时使用内置的多语言名称与说明。
+[settings_schema]
+type = "object"
+x-pt-order = ["classes", "promote_mode", "protect_days", "warning_days"]
+
+[settings_schema.properties.promote_mode]
+type = "string"
+title = "升级方式"
+enum = ["highest", "one_step"]
+x-pt-enum-titles = ["直接升到满足条件的最高等级", "每次只升一级"]
+default = "highest"
+
+[settings_schema.properties.protect_days]
+type = "integer"
+title = "升级保护期（天）"
+description = "升级后这段时间内不做保级检查"
+minimum = 0
+maximum = 365
+default = 7
+
+[settings_schema.properties.warning_days]
+type = "integer"
+title = "保级警告期（天）"
+description = "不满足保级条件时先警告，期满仍不满足才降级"
+minimum = 1
+maximum = 90
+default = 7
+
+[settings_schema.properties.classes]
+type = "array"
+title = "等级"
+description = "从低到高排列。普通等级按条件自动升降；VIP / 荣誉 / 管理组只能由管理员手动设置。删除一个等级后，处于该等级的用户回到默认等级再重新评估。"
+
+[settings_schema.properties.classes.items]
+type = "object"
+required = ["key", "type"]
+additionalProperties = false
+x-pt-order = ["key", "name", "description", "type", "is_default", "promote", "keep", "can_invite", "protected", "color"]
+
+[settings_schema.properties.classes.items.properties.key]
+type = "string"
+title = "标识"
+description = "唯一，小写字母、数字、下划线，如 power_user；改名等于删除旧等级并新建"
+pattern = "^[a-z][a-z0-9_]{0,31}$"
+
+[settings_schema.properties.classes.items.properties.name]
+type = "string"
+title = "名称"
+description = "留空使用内置名称（随界面语言变化）"
+maxLength = 32
+
+[settings_schema.properties.classes.items.properties.description]
+type = "string"
+title = "说明"
+description = "留空使用内置说明；显示在等级说明页"
+maxLength = 1000
+x-pt-widget = "textarea"
+
+[settings_schema.properties.classes.items.properties.type]
+type = "string"
+title = "类型"
+enum = ["normal", "vip", "honor", "staff"]
+x-pt-enum-titles = ["普通（按条件自动升降）", "VIP（手动）", "荣誉（手动）", "管理组（手动）"]
+default = "normal"
+
+[settings_schema.properties.classes.items.properties.is_default]
+type = "boolean"
+title = "新用户的初始等级"
+description = "只能有一个，且必须是普通等级"
+default = false
+
+[settings_schema.properties.classes.items.properties.promote]
+type = "array"
+title = "升级条件"
+description = "全部满足时升到该等级；为空则不会自动升到该等级"
+
+[settings_schema.properties.classes.items.properties.promote.items]
+type = "object"
+required = ["metric", "op", "value"]
+additionalProperties = false
+x-pt-order = ["metric", "op", "value"]
+
+[settings_schema.properties.classes.items.properties.promote.items.properties.metric]
+type = "string"
+title = "指标"
+enum = ["account_age_days", "uploaded_gib", "downloaded_gib", "ratio", "seed_hours", "avg_seed_hours", "seeding_size_gib", "uploads_count"]
+x-pt-enum-titles = ["注册天数", "上传量（GiB）", "下载量（GiB）", "分享率", "做种时长（小时）", "平均每个完成种子的做种时长（小时）", "当前做种体积（GiB）", "发布数（已通过）"]
+
+[settings_schema.properties.classes.items.properties.promote.items.properties.op]
+type = "string"
+title = "比较"
+enum = ["gte", "gt", "lte", "lt"]
+x-pt-enum-titles = ["≥", ">", "≤", "<"]
+
+[settings_schema.properties.classes.items.properties.promote.items.properties.value]
+type = "number"
+title = "数值"
+minimum = 0
+
+[settings_schema.properties.classes.items.properties.keep]
+type = "array"
+title = "保级条件"
+description = "不满足时进入警告期，期满降级；为空则不会因条件降级"
+
+[settings_schema.properties.classes.items.properties.keep.items]
+type = "object"
+required = ["metric", "op", "value"]
+additionalProperties = false
+x-pt-order = ["metric", "op", "value"]
+
+[settings_schema.properties.classes.items.properties.keep.items.properties.metric]
+type = "string"
+title = "指标"
+enum = ["account_age_days", "uploaded_gib", "downloaded_gib", "ratio", "seed_hours", "avg_seed_hours", "seeding_size_gib", "uploads_count"]
+x-pt-enum-titles = ["注册天数", "上传量（GiB）", "下载量（GiB）", "分享率", "做种时长（小时）", "平均每个完成种子的做种时长（小时）", "当前做种体积（GiB）", "发布数（已通过）"]
+
+[settings_schema.properties.classes.items.properties.keep.items.properties.op]
+type = "string"
+title = "比较"
+enum = ["gte", "gt", "lte", "lt"]
+x-pt-enum-titles = ["≥", ">", "≤", "<"]
+
+[settings_schema.properties.classes.items.properties.keep.items.properties.value]
+type = "number"
+title = "数值"
+minimum = 0
+
+[settings_schema.properties.classes.items.properties.can_invite]
+type = "boolean"
+title = "可以发邀请"
+default = true
+
+[settings_schema.properties.classes.items.properties.protected]
+type = "boolean"
+title = "不降级"
+description = "达到后不再做保级检查"
+default = false
+
+[settings_schema.properties.classes.items.properties.color]
+type = "string"
+title = "颜色"
+description = "用户名与等级标签的颜色，如 #e53935；留空为默认"
+pattern = "^(#[0-9a-fA-F]{6})?$"
+
+[[settings_schema.properties.classes.default]]
+key = "peasant"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = []
+keep = []
+can_invite = false
+protected = false
+color = "#8c8c8c"
+
+[[settings_schema.properties.classes.default]]
+key = "user"
+name = ""
+description = ""
+type = "normal"
+is_default = true
+promote = [{ metric = "ratio", op = "gte", value = 0.6 }]
+keep = [{ metric = "ratio", op = "gte", value = 0.5 }]
+can_invite = true
+protected = false
+color = ""
+
+[[settings_schema.properties.classes.default]]
+key = "power_user"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 28 }, { metric = "uploaded_gib", op = "gte", value = 50 }, { metric = "ratio", op = "gte", value = 1.05 }]
+keep = [{ metric = "ratio", op = "gte", value = 0.95 }]
+can_invite = true
+protected = false
+color = "#f9a825"
+
+[[settings_schema.properties.classes.default]]
+key = "elite_user"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 56 }, { metric = "uploaded_gib", op = "gte", value = 120 }, { metric = "ratio", op = "gte", value = 1.55 }]
+keep = [{ metric = "ratio", op = "gte", value = 1.45 }]
+can_invite = true
+protected = false
+color = "#7cb342"
+
+[[settings_schema.properties.classes.default]]
+key = "crazy_user"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 84 }, { metric = "uploaded_gib", op = "gte", value = 300 }, { metric = "ratio", op = "gte", value = 2.05 }]
+keep = [{ metric = "ratio", op = "gte", value = 1.95 }]
+can_invite = true
+protected = false
+color = "#00897b"
+
+[[settings_schema.properties.classes.default]]
+key = "insane_user"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 112 }, { metric = "uploaded_gib", op = "gte", value = 500 }, { metric = "ratio", op = "gte", value = 2.55 }]
+keep = [{ metric = "ratio", op = "gte", value = 2.45 }]
+can_invite = true
+protected = false
+color = "#039be5"
+
+[[settings_schema.properties.classes.default]]
+key = "veteran_user"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 168 }, { metric = "uploaded_gib", op = "gte", value = 750 }, { metric = "ratio", op = "gte", value = 3.05 }]
+keep = [{ metric = "ratio", op = "gte", value = 2.95 }]
+can_invite = true
+protected = true
+color = "#3949ab"
+
+[[settings_schema.properties.classes.default]]
+key = "extreme_user"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 224 }, { metric = "uploaded_gib", op = "gte", value = 1024 }, { metric = "ratio", op = "gte", value = 3.55 }]
+keep = [{ metric = "ratio", op = "gte", value = 3.45 }]
+can_invite = true
+protected = true
+color = "#8e24aa"
+
+[[settings_schema.properties.classes.default]]
+key = "ultimate_user"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 280 }, { metric = "uploaded_gib", op = "gte", value = 1536 }, { metric = "ratio", op = "gte", value = 4.05 }]
+keep = [{ metric = "ratio", op = "gte", value = 3.95 }]
+can_invite = true
+protected = true
+color = "#d81b60"
+
+[[settings_schema.properties.classes.default]]
+key = "nexus_master"
+name = ""
+description = ""
+type = "normal"
+is_default = false
+promote = [{ metric = "account_age_days", op = "gte", value = 364 }, { metric = "uploaded_gib", op = "gte", value = 3072 }, { metric = "ratio", op = "gte", value = 4.55 }]
+keep = [{ metric = "ratio", op = "gte", value = 4.45 }]
+can_invite = true
+protected = true
+color = "#e53935"
+
+[[settings_schema.properties.classes.default]]
+key = "vip"
+name = ""
+description = ""
+type = "vip"
+is_default = false
+promote = []
+keep = []
+can_invite = true
+protected = true
+color = "#ff6f00"
+
+[[settings_schema.properties.classes.default]]
+key = "retiree"
+name = ""
+description = ""
+type = "honor"
+is_default = false
+promote = []
+keep = []
+can_invite = true
+protected = true
+color = "#6d4c41"
+
+[[settings_schema.properties.classes.default]]
+key = "uploader"
+name = ""
+description = ""
+type = "staff"
+is_default = false
+promote = []
+keep = []
+can_invite = true
+protected = true
+color = "#2e7d32"
+
+[[settings_schema.properties.classes.default]]
+key = "moderator"
+name = ""
+description = ""
+type = "staff"
+is_default = false
+promote = []
+keep = []
+can_invite = true
+protected = true
+color = "#1565c0"
+
+[[settings_schema.properties.classes.default]]
+key = "administrator"
+name = ""
+description = ""
+type = "staff"
+is_default = false
+promote = []
+keep = []
+can_invite = true
+protected = true
+color = "#4527a0"
+
+[[settings_schema.properties.classes.default]]
+key = "sysop"
+name = ""
+description = ""
+type = "staff"
+is_default = false
+promote = []
+keep = []
+can_invite = true
+protected = true
+color = "#b71c1c"
+
+[[settings_schema.properties.classes.default]]
+key = "staff_leader"
+name = ""
+description = ""
+type = "staff"
+is_default = false
+promote = []
+keep = []
+can_invite = true
+protected = true
+color = "#000000"
+
 [terms]
-"levels.class.10.name" = { zh-CN = "农民", en = "Peasant" }
-"levels.class.20.name" = { zh-CN = "用户", en = "User" }
-"levels.class.30.name" = { zh-CN = "精英用户", en = "Power User" }
-"levels.class.40.name" = { zh-CN = "爱好者", en = "Elite User" }
-"levels.class.50.name" = { zh-CN = "狂热者", en = "Crazy User" }
-"levels.class.60.name" = { zh-CN = "疯狂者", en = "Insane User" }
-"levels.class.70.name" = { zh-CN = "府丞", en = "Veteran User" }
-"levels.class.80.name" = { zh-CN = "府尹", en = "Extreme User" }
-"levels.class.90.name" = { zh-CN = "极限玩家", en = "Ultimate User" }
-"levels.class.100.name" = { zh-CN = "大师", en = "Nexus Master" }
-"levels.class.200.name" = { zh-CN = "贵宾", en = "VIP" }
+"levels.class.peasant.name" = { zh-CN = "农民", en = "Peasant" }
+"levels.class.peasant.desc" = { zh-CN = "分享率过低被降级的用户。不能发送邀请。", en = "Demoted for a low share ratio. Cannot send invites." }
+"levels.class.user.name" = { zh-CN = "用户", en = "User" }
+"levels.class.user.desc" = { zh-CN = "新用户的初始等级。", en = "The default class of new users." }
+"levels.class.power_user.name" = { zh-CN = "高级用户", en = "Power User" }
+"levels.class.power_user.desc" = { zh-CN = "可以查看用户列表、请求续种。", en = "Can view the user list and request reseeds." }
+"levels.class.elite_user.name" = { zh-CN = "精英用户", en = "Elite User" }
+"levels.class.elite_user.desc" = { zh-CN = "高级用户的全部权限。", en = "Everything a Power User can do." }
+"levels.class.crazy_user.name" = { zh-CN = "狂热用户", en = "Crazy User" }
+"levels.class.crazy_user.desc" = { zh-CN = "精英用户的全部权限。", en = "Everything an Elite User can do." }
+"levels.class.insane_user.name" = { zh-CN = "疯狂用户", en = "Insane User" }
+"levels.class.insane_user.desc" = { zh-CN = "可以查看普通日志。", en = "Can view the general log." }
+"levels.class.veteran_user.name" = { zh-CN = "资深用户", en = "Veteran User" }
+"levels.class.veteran_user.desc" = { zh-CN = "达到后不会被降级。", en = "Never demoted once reached." }
+"levels.class.extreme_user.name" = { zh-CN = "极限用户", en = "Extreme User" }
+"levels.class.extreme_user.desc" = { zh-CN = "达到后不会被降级。", en = "Never demoted once reached." }
+"levels.class.ultimate_user.name" = { zh-CN = "终极用户", en = "Ultimate User" }
+"levels.class.ultimate_user.desc" = { zh-CN = "达到后不会被降级。", en = "Never demoted once reached." }
+"levels.class.nexus_master.name" = { zh-CN = "养老族", en = "Nexus Master" }
+"levels.class.nexus_master.desc" = { zh-CN = "最高的普通等级，达到后不会被降级。", en = "The highest regular class; never demoted." }
+"levels.class.vip.name" = { zh-CN = "贵宾", en = "VIP" }
+"levels.class.vip.desc" = { zh-CN = "由管理员授予，不受分享率考核。", en = "Granted by staff; exempt from ratio requirements." }
+"levels.class.retiree.name" = { zh-CN = "养老人员", en = "Retiree" }
+"levels.class.retiree.desc" = { zh-CN = "退休的管理组成员。", en = "Retired staff member." }
+"levels.class.uploader.name" = { zh-CN = "发布员", en = "Uploader" }
+"levels.class.uploader.desc" = { zh-CN = "专职发布资源。", en = "Dedicated uploader." }
+"levels.class.moderator.name" = { zh-CN = "总版主", en = "Moderator" }
+"levels.class.moderator.desc" = { zh-CN = "管理种子、评论与举报。", en = "Moderates torrents, comments and reports." }
+"levels.class.administrator.name" = { zh-CN = "管理员", en = "Administrator" }
+"levels.class.administrator.desc" = { zh-CN = "管理用户与站点内容。", en = "Manages users and site content." }
+"levels.class.sysop.name" = { zh-CN = "维护开发员", en = "SysOp" }
+"levels.class.sysop.desc" = { zh-CN = "负责站点运行与维护。", en = "Runs and maintains the site." }
+"levels.class.staff_leader.name" = { zh-CN = "主管", en = "Staff Leader" }
+"levels.class.staff_leader.desc" = { zh-CN = "管理组负责人。", en = "Leads the staff." }
+"levels.perm.manage" = { zh-CN = "管理用户等级", en = "Manage user classes" }
+"levels.perm.protect" = { zh-CN = "为用户保号", en = "Protect users from demotion" }

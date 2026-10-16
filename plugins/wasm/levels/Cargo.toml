@@ -13,3 +13,5 @@ crate-type = ["cdylib"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }
+# 解析本插件清单中的预设等级（settings_schema 的 classes 默认值），预设只维护一份
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }

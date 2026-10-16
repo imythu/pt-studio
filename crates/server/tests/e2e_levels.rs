@@ -75,7 +75,7 @@ async fn levels_end_to_end() {
             .fetch_one(&mut db)
             .await
             .unwrap();
-    assert_eq!(n, 11);
+    assert_eq!(n, 17);
 
     let admin = register_login(&app, "lv_admin").await;
     common::grant_role(admin.id, "admin").await;
@@ -108,7 +108,9 @@ async fn levels_end_to_end() {
     let r = call(&app, "GET", "/api/p/levels/v1/me", None, &hv(&user.headers())).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     assert_eq!(r.body["class"]["id"], 20);
+    assert_eq!(r.body["class"]["key"], "user");
     assert_eq!(r.body["next"]["id"], 30);
+    assert_eq!(r.body["next"]["key"], "power_user");
     let progress = r.body["next"]["progress"].as_array().unwrap();
     assert_eq!(progress.len(), 3);
     assert!(
@@ -124,7 +126,13 @@ async fn levels_end_to_end() {
         &hv(&user.headers()),
     )
     .await;
-    assert_eq!(r.body["items"].as_array().unwrap().len(), 11);
+    let items = r.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 17);
+    assert_eq!(items[2]["key"], "power_user");
+    assert_eq!(items[2]["id"], 30);
+    assert_eq!(items[2]["name_key"], "levels.class.power_user.name");
+    assert_eq!(items[16]["key"], "staff_leader");
+    assert_eq!(r.body["items"][1]["is_default"], true);
 
     // 满足 power_user：注册 30 天、上传 60 GiB、分享率 ∞ → 每日评估升级，带保护期
     sqlx::query("UPDATE identity.users SET created_at = now() - interval '30 days' WHERE id = $1")
@@ -265,6 +273,124 @@ async fn levels_end_to_end() {
         causes,
         vec!["promoted", "demoted", "override", "override_expired", "promoted"]
     );
+
+    // 等级定义改由插件设置维护：改名、降低 elite_user 的条件、删除其他等级、新增荣誉等级 legend
+    let settings_path = "/api/kernel/v1/admin/plugins/levels/settings";
+    let r = call(&app, "GET", settings_path, None, &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(
+        r.body["schema"]["properties"]["classes"]["default"]
+            .as_array()
+            .unwrap()
+            .len()
+            == 17
+    );
+    let version = r.body["version"].as_i64().unwrap();
+    let classes = json!([
+        { "key": "peasant", "type": "normal", "keep": [] },
+        { "key": "user", "type": "normal", "is_default": true,
+          "promote": [{ "metric": "ratio", "op": "gte", "value": 0.6 }], "keep": [{ "metric": "ratio", "op": "gte", "value": 0.5 }] },
+        { "key": "power_user", "name": "大佬", "description": "自定义说明", "type": "normal",
+          "promote": [{ "metric": "uploaded_gib", "op": "gte", "value": 50 }], "keep": [] },
+        { "key": "elite_user", "type": "normal", "color": "#00ff00",
+          "promote": [{ "metric": "uploaded_gib", "op": "gte", "value": 1 }], "keep": [] },
+        { "key": "legend", "type": "honor", "protected": true }
+    ]);
+    let mut h = admin.headers();
+    h.push(("idempotency-key", "s1".into()));
+    let r = call(
+        &app,
+        "PUT",
+        settings_path,
+        Some(json!({ "settings": { "classes": classes, "protect_days": 3 }, "version": version })),
+        &hv(&h),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = call(
+        &app,
+        "GET",
+        "/api/p/levels/v1/classes",
+        None,
+        &hv(&user.headers()),
+    )
+    .await;
+    let items = r.body["items"].as_array().unwrap().clone();
+    assert_eq!(items.len(), 5, "{items:?}");
+    assert_eq!(
+        (items[2]["id"].clone(), items[2]["name"].clone()),
+        (json!(30), json!("大佬"))
+    );
+    assert_eq!(items[3]["color"], "#00ff00");
+    let legend = items[4]["id"].as_i64().unwrap();
+    assert!(legend > 999, "{legend}");
+    let inactive: i64 = sqlx::query_scalar("SELECT count(*) FROM levels.classes WHERE NOT active")
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(inactive, 13);
+    // 定义变化 → 下一次增量评估先做一次全量评估：60 GiB 满足新的 elite_user
+    kernel
+        .run_job_now("levels", "incr_evaluate", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(class_of(&mut db, user.id).await, (40, 40));
+
+    // 无效设置（重复 key）：保留上一份定义，后台可看到原因
+    let r = call(&app, "GET", settings_path, None, &hv(&admin.headers())).await;
+    let version = r.body["version"].as_i64().unwrap();
+    let mut h = admin.headers();
+    h.push(("idempotency-key", "s2".into()));
+    let bad = json!([{ "key": "user", "is_default": true }, { "key": "user" }]);
+    let r = call(
+        &app,
+        "PUT",
+        settings_path,
+        Some(json!({ "settings": { "classes": bad }, "version": version })),
+        &hv(&h),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = call(
+        &app,
+        "GET",
+        "/api/p/levels/v1/admin/classes",
+        None,
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(
+        r.body["settings_error"].as_str().unwrap().contains("duplicate"),
+        "{:?}",
+        r.body
+    );
+    assert_eq!(r.body["items"].as_array().unwrap().len(), 5);
+    let r = call(
+        &app,
+        "GET",
+        "/api/p/levels/v1/admin/classes",
+        None,
+        &hv(&user.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // 手动等级按 key 指定
+    let mut h = admin.headers();
+    h.push(("idempotency-key", "l5".into()));
+    let r = call(
+        &app,
+        "POST",
+        &path,
+        Some(json!({"class": "legend", "reason": "x"})),
+        &hv(&h),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    assert_eq!(class_of(&mut db, user.id).await, (legend as i32, legend as i32));
+    let r = call(&app, "GET", "/api/p/levels/v1/me", None, &hv(&user.headers())).await;
+    assert_eq!(r.body["class"]["key"], "legend", "{:?}", r.body);
 
     kernel.shutdown().await;
 }
