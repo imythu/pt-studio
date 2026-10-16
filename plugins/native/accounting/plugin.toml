@@ -41,6 +41,11 @@ timeout_secs = 3000
 catch_up = "once"
 tx = "manual"
 
+[[cron]]
+name = "reap_peers"
+schedule = "*/10 * * * *"
+timeout_secs = 300
+
 [[subscriptions]]
 name = "mirror_torrent"
 event = "torrent.created"

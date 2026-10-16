@@ -43,6 +43,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0003_torrent_peers_view.sql"),
     ),
     ("0004_signals.sql", include_str!("../migrations/0004_signals.sql")),
+    (
+        "0005_peer_liveness.sql",
+        include_str!("../migrations/0005_peer_liveness.sql"),
+    ),
 ];
 pub const ACCOUNTING: &str = "ctx.accounting";
 
@@ -405,6 +409,20 @@ impl pt_plugin_api::OnCron for Accounting {
                 tracing::info!(signals = n, "cross check done");
                 Ok(())
             }
+            // 长时间未汇报的 peer 置为非活跃（客户端崩溃 / 换 peer_id / 未发 stopped）
+            "reap_peers" => {
+                let mut c = ctx.sql.conn().await?;
+                let n = sqlx::query(
+                    "UPDATE peers SET is_active = false WHERE is_active AND last_announce_at < now() - interval '1 hour'",
+                )
+                .execute(&mut *c)
+                .await?
+                .rows_affected();
+                if n > 0 {
+                    tracing::info!(peers = n, "reaped stale peers");
+                }
+                Ok(())
+            }
             other => Err(PluginError::internal(format!("unknown job `{other}`"))),
         }
     }
@@ -759,7 +777,8 @@ async fn http_swarm(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
     });
     let peers = sqlx::query(
         "SELECT user_id, is_seeder, client_prefix, first_seen_at, last_announce_at FROM peers
-          WHERE torrent_id = $1 AND is_active ORDER BY is_seeder DESC, last_announce_at DESC LIMIT 100",
+          WHERE torrent_id = $1 AND is_active AND last_announce_at > now() - interval '1 hour'
+          ORDER BY is_seeder DESC, last_announce_at DESC LIMIT 100",
     )
     .bind(id)
     .fetch_all(&mut *c)
