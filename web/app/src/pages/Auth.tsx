@@ -69,6 +69,8 @@ export function Login() {
   const [binding, extra] = useBinding();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  // 默认保持登录：会话 cookie 带 Max-Age，关闭浏览器后再打开不需要重新登录
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const registered = (useLocation().state as { registered?: boolean } | null)?.registered;
@@ -77,7 +79,7 @@ export function Login() {
     setBusy(true);
     setError(null);
     try {
-      await api('/api/p/identity/v1/sessions', { json: { username, password, ...splitExtra(extra) } });
+      await api('/api/p/identity/v1/sessions', { json: { username, password, remember, ...splitExtra(extra) } });
       await s.refresh();
       nav('/');
     } catch (err) {
@@ -105,6 +107,9 @@ export function Login() {
           <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
         <Slot name="auth.login.extra" ctx={{ form: binding }} />
+        <label className="pt-check">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> {t('ui.login.remember')}
+        </label>
         <ErrorText error={error} />
         <Button type="submit" variant="primary" disabled={busy}>
           {t('ui.login.submit')}

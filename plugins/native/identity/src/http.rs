@@ -69,8 +69,13 @@ pub fn router(id: Arc<Identity>) -> Router {
 struct LoginBody {
     username: String,
     password: String,
-    #[serde(default)]
+    /// 缺省为保持登录（与网页登录表单的默认值一致）
+    #[serde(default = "yes")]
     remember: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// `insecure` = `[plugin.identity] insecure_cookies`：无 `__Host-` 前缀、无 `Secure`，仅供 HTTP 测试部署。
@@ -81,10 +86,11 @@ fn cookie(name: &str, value: &str, max_age: i64, http_only: bool, insecure: bool
         name
     };
     let secure = if insecure { "" } else { "; Secure" };
-    let age = if max_age > 0 {
-        format!("; Max-Age={max_age}")
-    } else {
-        String::new()
+    // > 0：持久 cookie；0：浏览器会话 cookie；< 0：立即删除（登出）
+    let age = match max_age {
+        0 => String::new(),
+        n if n < 0 => "; Max-Age=0".to_owned(),
+        n => format!("; Max-Age={n}"),
     };
     let ho = if http_only { "; HttpOnly" } else { "" };
     HeaderValue::from_str(&format!("{name}={value}; Path=/{secure}{ho}; SameSite=Lax{age}"))

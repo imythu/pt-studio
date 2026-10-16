@@ -6,8 +6,9 @@ use sqlx::Row;
 
 use crate::{Identity, accounts, crypto};
 
-pub const IDLE_DAYS: i64 = 14;
-pub const ABSOLUTE_DAYS: i64 = 90;
+/// “保持登录”会话：30 天不访问才过期（每次访问顺延），最长 365 天后需要重新登录
+pub const IDLE_DAYS: i64 = 30;
+pub const ABSOLUTE_DAYS: i64 = 365;
 pub const SHORT_IDLE_HOURS: i64 = 12;
 pub const TOUCH_SECS: i64 = 15 * 60;
 
