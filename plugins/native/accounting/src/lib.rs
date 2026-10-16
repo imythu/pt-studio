@@ -9,7 +9,10 @@ pub mod rates;
 pub mod signals;
 pub mod snapshot;
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use async_trait::async_trait;
 use axum::{
@@ -74,7 +77,7 @@ fn d_grace() -> u32 {
 fn d_batch() -> u32 {
     5000
 }
-/// 空闲分区的轮询间隔：64 个分区 × 每秒一次；窗口 900 s，1 s 延迟无影响
+/// 空闲分区的轮询间隔；空闲轮询只查 Redis（见 ingest 的快速路径），窗口 900 s，1 s 延迟无影响
 fn d_idle() -> u64 {
     1000
 }
@@ -87,6 +90,8 @@ fn d_max_up() -> u32 {
 pub struct State {
     cfg: OnceLock<Config>,
     pub eids: ingest::EidCache,
+    /// 各分区的游标快照（空闲快速路径，见 [`ingest::PartCache`]）
+    parts: Mutex<HashMap<u32, ingest::PartCache>>,
     /// (索引, 版本号, 装载时间 ms)
     rates: Mutex<(Arc<RateIndex>, i64, i64)>,
 }
@@ -100,6 +105,22 @@ impl State {
 
     pub fn rate_index(&self) -> Arc<RateIndex> {
         self.rates.lock().map(|g| g.0.clone()).unwrap_or_default()
+    }
+
+    pub fn part_cache(&self, part: u32) -> Option<ingest::PartCache> {
+        self.parts.lock().ok()?.get(&part).cloned()
+    }
+
+    pub fn set_part_cache(&self, part: u32, pc: ingest::PartCache) {
+        if let Ok(mut g) = self.parts.lock() {
+            g.insert(part, pc);
+        }
+    }
+
+    pub fn forget_part(&self, part: u32) {
+        if let Ok(mut g) = self.parts.lock() {
+            g.remove(&part);
+        }
     }
 
     /// 规则版本号变化或超过 10 s 时重载索引（03 §1.3）。

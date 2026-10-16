@@ -167,6 +167,18 @@ tracker 无状态（swarm 存在 Redis），可以在多台机器上运行多个
 
 关于 `kernel.mode = "dev"`：插件包签名尚未实现，加载未签名的 WASM 插件包只允许在 dev 模式下进行（`plugins.allow_unsigned = true`）。dev 模式另外只放宽两点：后台可设置钩子超时倍数、插件出站请求允许 `http://`（其他仍要求 https）。鉴权、权限、CSRF、限流、SQL 隔离在两种模式下相同。
 
+### 小内存部署（≤ 1 GB）
+
+站点、PostgreSQL、Redis、Meilisearch 同机且内存只有 1 GB 左右时：
+
+- `[database] pool_size` 降到 8～10，PostgreSQL 的 `max_connections` 相应调小（如 30），`shared_buffers` 64 MB 左右；
+- 记账（accounting）后台 worker 的并发轮询数为 `pool_size / 4`，其余分区排队，不会占满连接池；
+  空闲分区只查 Redis，不开数据库事务；依赖超时或不可用时按 1 s → 60 s 指数退避重试；
+- 新站点可以把记账分区数调小：`site.toml` 的 `[plugin.accounting] default_partitions = 8`，
+  同时 `tracker.toml` 的 `partitions = 8`。分区数在首次启动时写入 Redis（`acct:_meta`），之后改配置不生效，已运行的站点不要改；
+- Meilisearch 设 `MEILI_MAX_INDEXING_MEMORY=128Mb`、`MEILI_MAX_INDEXING_THREADS=1`；
+- 建议开启 1～2 GB swap。没有 swap 时内存一紧张就会触发 OOM，SSH 也可能失去响应。
+
 ## 5. 反向代理与 HTTPS（nginx 示例）
 
 ```nginx

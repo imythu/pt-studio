@@ -226,6 +226,15 @@ impl EidCache {
         true
     }
 
+    /// 分区的上一批没有提交（游标未前进）：无法知道是哪些 eid，整个分区的窗口作废
+    pub fn clear(&self, part: u32) {
+        let mut g = self
+            .parts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        g.remove(&part);
+    }
+
     /// 回滚的批次：从缓存中撤销（下次重读时不能被误判为重复）
     pub fn forget(&self, part: u32, eids: &[String]) {
         let mut g = self
@@ -278,8 +287,52 @@ fn i(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
 
-/// 空闲分区落库水位的最小间隔
-const IDLE_PERSIST_MS: i64 = 5_000;
+/// 空闲分区落库水位的最小间隔。水位只供快照告警与交叉校验（按小时）判断进度，
+/// 一分钟的滞后无影响；间隔过短会让 64 个空闲分区持续写 WAL（issue #1）
+const IDLE_PERSIST_MS: i64 = 60_000;
+
+/// 分区在本进程内的游标快照（只在同一 fence 下有效：同一租约内只有本进程写这个分区）。
+/// 空闲轮询据此只查 Redis，不开数据库事务。
+#[derive(Debug, Clone)]
+pub struct PartCache {
+    fence: u64,
+    last_id: String,
+    /// 最近一次把水位写入数据库的 Redis 时间
+    wm_persisted_ms: i64,
+    /// 结算缓冲中最早窗口可关闭的时间；None = 缓冲为空
+    close_due_ms: Option<i64>,
+}
+
+/// 空闲快速路径：同一租约下，流中没有新条目、没有到期窗口、水位近期已落库时直接返回 Idle。
+/// 返回 None 表示需要走完整路径。
+async fn idle_fast_path(
+    state: &crate::State,
+    conn: &mut redis::aio::ConnectionManager,
+    part: u32,
+    fence: u64,
+) -> PResult<Option<i64>> {
+    let Some(pc) = state.part_cache(part).filter(|pc| pc.fence == fence) else {
+        return Ok(None);
+    };
+    let reply: Value = redis::cmd("XREAD")
+        .arg("COUNT")
+        .arg(1)
+        .arg("STREAMS")
+        .arg(format!("acct:{part}"))
+        .arg(&pc.last_id)
+        .query_async(conn)
+        .await?;
+    if !xread_entries(&reply).is_empty() {
+        return Ok(None);
+    }
+    let (secs, micros): (i64, i64) = redis::cmd("TIME").query_async(conn).await?;
+    let now_ms = secs * 1000 + micros / 1000;
+    let due = pc.close_due_ms.is_some_and(|d| now_ms >= d);
+    if due || now_ms - pc.wm_persisted_ms >= IDLE_PERSIST_MS {
+        return Ok(None);
+    }
+    Ok(Some(now_ms))
+}
 
 /// 一次轮询（kernel 在返回 Ok 时提交工作单元）。
 pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PResult<PollOutcome> {
@@ -287,6 +340,11 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
     let fence_i = i64::try_from(fence).unwrap_or(i64::MAX);
     let part_i = i16::try_from(part).map_err(|_| PluginError::internal("partition out of range"))?;
     let mut conn = ctx.redis.global("acct")?;
+    if idle_fast_path(state, &mut conn, part, fence).await?.is_some() {
+        return Ok(PollOutcome::Idle {
+            sleep_ms: cfg.idle_sleep_ms,
+        });
+    }
     let partitions: u32 = redis::cmd("HGET")
         .arg("acct:_meta")
         .arg("partitions")
@@ -307,6 +365,16 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
             .await?;
     let last_id: String = cur.get(0);
     let watermark: i64 = cur.get(1);
+    // 同一租约下缓存的游标与库中不一致：上一批在 kernel 提交时失败（插件看不到提交结果）。
+    // 那批 eid 已进入去重窗口，必须作废，否则重读时会被当成重复丢弃
+    if let Some(pc) = state.part_cache(part)
+        && pc.fence == fence
+        && pc.last_id != last_id
+    {
+        tracing::warn!(part, cached = %pc.last_id, stored = %last_id, "accounting: previous batch was not committed; resetting dedupe window");
+        state.eids.clear(part);
+    }
+    state.forget_part(part);
     if cur.get::<i64, _>(2) > fence_i {
         return Err(PluginError::new(
             "accounting.lease_lost",
@@ -338,7 +406,7 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
         let (secs, micros): (i64, i64) = redis::cmd("TIME").query_async(&mut conn).await?;
         let now_ms = secs * 1000 + micros / 1000;
         let wm = watermark.max(now_ms - 1);
-        sqlx::query(
+        let persisted = sqlx::query(
             "UPDATE stream_cursors SET watermark_ms = $2, idle_since = coalesce(idle_since, now()), updated_at = now()
               WHERE part = $1 AND (idle_since IS NULL OR watermark_ms <= $2 - $3)",
         )
@@ -346,9 +414,19 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
         .bind(wm)
         .bind(IDLE_PERSIST_MS)
         .execute(&mut *c)
-        .await?;
+        .await?
+        .rows_affected();
         drop(c);
-        close_windows(ctx, cfg, part_i, wm).await?;
+        let due = close_windows(ctx, cfg, part_i, wm).await?;
+        state.set_part_cache(
+            part,
+            PartCache {
+                fence,
+                last_id,
+                wm_persisted_ms: if persisted == 1 { now_ms } else { watermark },
+                close_due_ms: due,
+            },
+        );
         return Ok(PollOutcome::Idle {
             sleep_ms: cfg.idle_sleep_ms,
         });
@@ -408,6 +486,7 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
     }
     drop(c);
     close_windows(ctx, cfg, part_i, i(last.0)).await?;
+    // 忙碌批次后不建快照：下一轮读空时走完整路径，以 Redis 时间推进并落库水位
     Ok(PollOutcome::Busy)
 }
 
@@ -849,7 +928,20 @@ async fn store(
 }
 
 /// 窗口关闭（§1.6）：结算缓冲 → 分段明细 + 每 (窗口, 用户) 一条 `traffic.settled`。
-pub async fn close_windows(ctx: &Ctx, cfg: &Config, part: i16, watermark_ms: i64) -> PResult<()> {
+/// 返回结算缓冲中剩余最早窗口的可关闭时间（ms），缓冲为空时为 None。
+pub async fn close_windows(ctx: &Ctx, cfg: &Config, part: i16, watermark_ms: i64) -> PResult<Option<i64>> {
+    settle_closable(ctx, cfg, part, watermark_ms).await?;
+    let mut c = ctx.sql.conn().await?;
+    let min_ws: Option<i64> =
+        sqlx::query_scalar("SELECT min(window_start) FROM settle_buffer WHERE part = $1")
+            .bind(part)
+            .fetch_one(&mut *c)
+            .await?;
+    // 与 settle_closable 的判定一致：win(wm - grace, w) > window_start ⇔ wm ≥ (window_start + w + grace) 秒
+    Ok(min_ws.map(|ws| (ws + i64::from(cfg.window_secs) + i64::from(cfg.settle_grace_secs)) * 1000))
+}
+
+async fn settle_closable(ctx: &Ctx, cfg: &Config, part: i16, watermark_ms: i64) -> PResult<()> {
     let w = i64::from(cfg.window_secs);
     let closable = win(watermark_ms - i64::from(cfg.settle_grace_secs) * 1000, w);
     let mut c = ctx.sql.conn().await?;

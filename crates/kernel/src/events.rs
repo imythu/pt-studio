@@ -59,6 +59,38 @@ pub fn spawn_background(sh: Arc<Shared>, stop: watch::Receiver<bool>) -> Vec<tok
     tasks
 }
 
+/// 失败重试的指数退避（带抖动）：依赖（Postgres/Redis）变慢或不可用时，
+/// 避免所有后台循环以固定 1 s 同时重试，把连接池与 I/O 压垮（issue #1）。
+#[derive(Debug)]
+pub(crate) struct Backoff {
+    cur: Duration,
+    min: Duration,
+    max: Duration,
+}
+
+impl Backoff {
+    pub(crate) fn new(min: Duration, max: Duration) -> Self {
+        Self { cur: min, min, max }
+    }
+
+    /// 本次失败后应等待的时长（区间 [cur/2, cur]），并把下一次翻倍
+    pub(crate) fn fail(&mut self) -> Duration {
+        let d = self.cur;
+        self.cur = (self.cur * 2).min(self.max);
+        let half = d / 2;
+        let jitter_ms = u64::try_from(half.as_millis()).unwrap_or(0);
+        half + Duration::from_millis(if jitter_ms == 0 {
+            0
+        } else {
+            rand::random_range(0..=jitter_ms)
+        })
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.cur = self.min;
+    }
+}
+
 async fn sleep_or_stop(d: Duration, stop: &mut watch::Receiver<bool>) -> bool {
     tokio::select! {
         _ = tokio::time::sleep(d) => *stop.borrow(),
@@ -85,22 +117,36 @@ async fn relay_loop(sh: Arc<Shared>, mut stop: watch::Receiver<bool>) {
         if let Some(l) = listener.as_mut() {
             let _ = l.listen("pt_outbox").await;
         }
+        let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
         loop {
             if *stop.borrow() || lease.is_lost() {
                 break;
             }
             match relay_once(&sh, &redis).await {
-                Ok(n) if n > 0 => continue,
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "outbox relay failed"),
+                Ok(n) if n > 0 => {
+                    backoff.reset();
+                    continue;
+                }
+                Ok(_) => backoff.reset(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "outbox relay failed");
+                    if sleep_or_stop(backoff.fail(), &mut stop).await {
+                        break;
+                    }
+                    continue;
+                }
             }
-            // 等待 NOTIFY 或 200 ms 兜底轮询
+            // 等待 NOTIFY；有监听连接时兜底轮询放宽到 5 s（提交时总会 NOTIFY），无监听时 200 ms
             match listener.as_mut() {
                 Some(l) => {
-                    tokio::select! {
-                        _ = l.recv() => {}
-                        _ = tokio::time::sleep(Duration::from_millis(200)) => {}
-                        _ = stop.changed() => {}
+                    let lost = tokio::select! {
+                        r = l.recv() => r.is_err(),
+                        _ = tokio::time::sleep(Duration::from_secs(5)) => false,
+                        _ = stop.changed() => false,
+                    };
+                    // 监听连接断开且重连失败：退回轮询，避免 recv 立即出错造成空转
+                    if lost {
+                        listener = None;
                     }
                 }
                 None => {
@@ -238,12 +284,13 @@ async fn consumer_loop(
             )
             .await
     };
+    let mut conn_backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
     let mut c = loop {
         match dedicated().await {
             Ok(c) => break c,
             Err(e) => {
                 tracing::warn!(error = %e, "consumer connection failed");
-                if sleep_or_stop(Duration::from_secs(1), &mut stop).await {
+                if sleep_or_stop(conn_backoff.fail(), &mut stop).await {
                     return;
                 }
             }
@@ -267,6 +314,7 @@ async fn consumer_loop(
         };
         // 接管时先处理挂起的条目（本消费者名下与超时的）
         let mut pending = true;
+        let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
         while !*stop.borrow() && !lease.is_lost() {
             let v: redis::RedisResult<Value> = if pending {
                 redis::cmd("XAUTOCLAIM")
@@ -302,10 +350,13 @@ async fn consumer_loop(
                     .await
             };
             let batch = match v {
-                Ok(v) => entries(&v),
+                Ok(v) => {
+                    backoff.reset();
+                    entries(&v)
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, %stream, "xreadgroup failed");
-                    if sleep_or_stop(Duration::from_secs(1), &mut stop).await {
+                    if sleep_or_stop(backoff.fail(), &mut stop).await {
                         break;
                     }
                     if let Ok(nc) = dedicated().await {
@@ -455,13 +506,23 @@ async fn delayed_jobs_loop(sh: Arc<Shared>, mut stop: watch::Receiver<bool>) {
             }
             continue;
         };
+        let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
         while !*stop.borrow() && !lease.is_lost() {
-            match run_due_jobs(&sh).await {
-                Ok(n) if n > 0 => continue,
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "delayed jobs failed"),
-            }
-            if sleep_or_stop(Duration::from_secs(1), &mut stop).await {
+            let pause = match run_due_jobs(&sh).await {
+                Ok(n) if n > 0 => {
+                    backoff.reset();
+                    continue;
+                }
+                Ok(_) => {
+                    backoff.reset();
+                    Duration::from_secs(1)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "delayed jobs failed");
+                    backoff.fail()
+                }
+            };
+            if sleep_or_stop(pause, &mut stop).await {
                 break;
             }
         }
@@ -587,6 +648,10 @@ async fn worker_supervisor(
         tracing::warn!(%plugin, worker = %decl.name, "no redis for worker; not started");
         return;
     };
+    // 同一 worker 的并发轮询上限：分区数（默认 64）远大于连接池时，依赖变慢会让所有分区同时占满连接池，
+    // HTTP 请求随之超时（issue #1）。上限取连接池的 1/4，至少 1
+    let permits = usize::try_from(sh.cfg.database.pool_size / 4).unwrap_or(1).max(1);
+    let gate = Arc::new(tokio::sync::Semaphore::new(permits));
     let mut running: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     loop {
         let mut c = redis.clone();
@@ -606,6 +671,7 @@ async fn worker_supervisor(
                 plugin.clone(),
                 decl.name.clone(),
                 worker.clone(),
+                gate.clone(),
                 p,
                 stop.clone(),
             )));
@@ -624,10 +690,12 @@ async fn partition_loop(
     plugin: String,
     name: String,
     worker: Arc<dyn pt_plugin_api::PartitionWorker>,
+    gate: Arc<tokio::sync::Semaphore>,
     partition: u32,
     mut stop: watch::Receiver<bool>,
 ) {
     let Some(redis) = main_redis(&sh) else { return };
+    let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
     let key = format!("k:lock:worker:{plugin}:{name}:{partition}");
     loop {
         let Some(lease) = Lease::try_acquire(&redis, &key, &sh.node_id, LEASE_TTL).await else {
@@ -638,14 +706,23 @@ async fn partition_loop(
         };
         tracing::debug!(%plugin, worker = %name, partition, fence = lease.fence(), "partition acquired");
         while !*stop.borrow() && !lease.is_lost() {
-            let pause = match poll_once(&sh, &plugin, &worker, partition, lease.fence()).await {
-                Ok(pt_plugin_api::PollOutcome::Busy) => Duration::ZERO,
+            let r = {
+                let Ok(_permit) = gate.acquire().await else { return };
+                poll_once(&sh, &plugin, &worker, partition, lease.fence()).await
+            };
+            let pause = match r {
+                Ok(pt_plugin_api::PollOutcome::Busy) => {
+                    backoff.reset();
+                    Duration::ZERO
+                }
                 Ok(pt_plugin_api::PollOutcome::Idle { sleep_ms }) => {
-                    Duration::from_millis(sleep_ms.clamp(10, 10_000))
+                    backoff.reset();
+                    Duration::from_millis(sleep_ms.clamp(10, 60_000))
                 }
                 Err(e) => {
-                    tracing::warn!(%plugin, worker = %name, partition, error = %e, "worker poll failed");
-                    Duration::from_secs(1)
+                    let d = backoff.fail();
+                    tracing::warn!(%plugin, worker = %name, partition, error = %e, retry_ms = d.as_millis(), "worker poll failed");
+                    d
                 }
             };
             if !pause.is_zero() && sleep_or_stop(pause, &mut stop).await {

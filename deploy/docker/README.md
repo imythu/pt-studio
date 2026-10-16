@@ -76,4 +76,6 @@ docker compose exec server pt-server --config /data/site.toml user grant-role <�
 - 只暴露 31251 / 31252（或反向代理的 443）；PostgreSQL、Redis、Meilisearch 在 compose 内部网络中，没有映射到宿主机。
 - 可选功能（TMDB 元数据、Claude、邮件通知）在 `./data/pt/site.toml` 中配置，见其中的注释；改完 `docker compose restart server`。
 
+- 1 GB 左右的小内存主机：先看 [../release/DEPLOY.md](../release/DEPLOY.md) §4“小内存部署”，并在 `compose.override.yaml` 中为各容器设置 `mem_limit`。
+
 更完整的说明（配置项、故障排查）见 [../release/DEPLOY.md](../release/DEPLOY.md)。
