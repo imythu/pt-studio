@@ -71,6 +71,9 @@ pub struct Delta {
     pub seed: u64,
     pub leech: u64,
     pub flags: u32,
+    /// 因超速而未计入的上传 / 下载（随 speed_exceeded 写入流，供 accounting 产生速度信号）
+    pub dropped_up: u64,
+    pub dropped_down: u64,
 }
 
 impl Delta {
@@ -113,6 +116,8 @@ pub fn compute(
             let limit = max_rate.saturating_mul(elapsed.max(1));
             if max_rate > 0 && (d.up > limit || d.down > limit) {
                 d.flags |= SPEED_EXCEEDED;
+                d.dropped_up = d.up;
+                d.dropped_down = d.down;
                 d.up = 0;
                 d.down = 0;
             }
@@ -219,6 +224,7 @@ mod tests {
         // 超过速度上限：这一段不计，基线前移
         let (d, s3) = compute(s2.as_ref(), &rep(60 << 30, 0, 100, Event::None, 2800), 2700, 100);
         assert_eq!((d.up, d.down, d.flags, d.leech), (0, 0, SPEED_EXCEEDED, 900));
+        assert_eq!(d.dropped_up, (60 << 30) - (50 << 30) - 1000);
         assert_eq!(s3.unwrap().up, 60 << 30);
         // 同一秒内的增量按 1 秒算
         let (d, _) = compute(

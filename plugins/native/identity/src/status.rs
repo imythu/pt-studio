@@ -117,8 +117,46 @@ pub async fn apply(ctx: &Ctx, a: &Apply<'_>) -> PResult<i64> {
     .fetch_one(&mut *c)
     .await?;
     drop(c);
+    let mut payload = json!({ "user_id": a.user_id, "restriction_id": id, "kind": a.kind, "source": a.source,
+                              "op": "applied", "reason_code": a.reason_code });
+    if let Some(u) = a.until_ms {
+        payload["until"] = json!(u);
+    }
+    changed(ctx, a.user_id, payload).await?;
     recompute(ctx, a.user_id, a.source, a.reason_code).await?;
     Ok(id)
+}
+
+/// `user.restriction_changed`：限制施加 / 解除 / 到期（anticheat 据此识别外部解除）
+async fn changed(ctx: &Ctx, uid: i64, payload: Value) -> PResult<()> {
+    ctx.events
+        .publish(NewEvent::v1(
+            "user.restriction_changed",
+            format!("user:{uid}"),
+            payload,
+        ))
+        .await?;
+    Ok(())
+}
+
+async fn lifted(
+    ctx: &Ctx,
+    uid: i64,
+    rows: &[sqlx::postgres::PgRow],
+    op: &str,
+    by: &str,
+    reason: &str,
+) -> PResult<()> {
+    for r in rows {
+        changed(
+            ctx,
+            uid,
+            json!({ "user_id": uid, "restriction_id": r.get::<i64, _>(0), "kind": r.get::<String, _>(1),
+                    "source": r.get::<String, _>(2), "op": op, "lifted_by": by, "reason_code": reason }),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// 解除限制：`kind = None` 表示该来源的全部类型；`all_sources` 时忽略来源（管理员“全部解除”）。返回解除条数
@@ -132,9 +170,10 @@ pub async fn lift(
     all_sources: bool,
 ) -> PResult<u64> {
     let mut c = ctx.sql.conn().await?;
-    let n = sqlx::query(
+    let rows = sqlx::query(
         "UPDATE restrictions SET lifted_at = now(), lifted_by = $5, lift_reason = $6
-          WHERE user_id = $1 AND lifted_at IS NULL AND ($4 OR source = $3) AND ($2::text IS NULL OR kind = $2)",
+          WHERE user_id = $1 AND lifted_at IS NULL AND ($4 OR source = $3) AND ($2::text IS NULL OR kind = $2)
+          RETURNING id, kind, source",
     )
     .bind(uid)
     .bind(kind)
@@ -142,35 +181,35 @@ pub async fn lift(
     .bind(all_sources)
     .bind(by_user)
     .bind(reason)
-    .execute(&mut *c)
-    .await?
-    .rows_affected();
+    .fetch_all(&mut *c)
+    .await?;
     drop(c);
-    if n > 0 {
+    if !rows.is_empty() {
+        lifted(ctx, uid, &rows, "lifted", source, reason).await?;
         recompute(ctx, uid, source, reason).await?;
     }
-    Ok(n)
+    Ok(rows.len() as u64)
 }
 
 /// 按单条限制 ID 解除（管理员接口）
 pub async fn lift_one(ctx: &Ctx, uid: i64, rid: i64, reason: &str, by_user: Option<i64>) -> PResult<bool> {
     let mut c = ctx.sql.conn().await?;
-    let n = sqlx::query(
+    let rows = sqlx::query(
         "UPDATE restrictions SET lifted_at = now(), lifted_by = $3, lift_reason = $4
-          WHERE id = $2 AND user_id = $1 AND lifted_at IS NULL",
+          WHERE id = $2 AND user_id = $1 AND lifted_at IS NULL RETURNING id, kind, source",
     )
     .bind(uid)
     .bind(rid)
     .bind(by_user)
     .bind(reason)
-    .execute(&mut *c)
-    .await?
-    .rows_affected();
+    .fetch_all(&mut *c)
+    .await?;
     drop(c);
-    if n > 0 {
+    if !rows.is_empty() {
+        lifted(ctx, uid, &rows, "lifted", "admin", reason).await?;
         recompute(ctx, uid, "admin", reason).await?;
     }
-    Ok(n > 0)
+    Ok(!rows.is_empty())
 }
 
 /// 重新计算有效状态；变化时发布 `user.status_changed`
@@ -260,7 +299,7 @@ pub async fn sweep(ctx: &Ctx) -> PResult<usize> {
             "UPDATE restrictions SET lifted_at = until, lift_reason = 'expired'
               WHERE id IN (SELECT id FROM restrictions WHERE lifted_at IS NULL AND until <= now()
                            ORDER BY until LIMIT 500 FOR UPDATE SKIP LOCKED)
-             RETURNING user_id, source",
+             RETURNING user_id, source, id, kind",
         )
         .fetch_all(&mut *c)
         .await?;
@@ -269,6 +308,16 @@ pub async fn sweep(ctx: &Ctx) -> PResult<usize> {
             return Ok(total);
         }
         total += rows.len();
+        for r in &rows {
+            let uid: i64 = r.get(0);
+            changed(
+                ctx,
+                uid,
+                json!({ "user_id": uid, "restriction_id": r.get::<i64, _>(2), "kind": r.get::<String, _>(3),
+                        "source": r.get::<String, _>(1), "op": "expired", "lifted_by": "identity", "reason_code": "expired" }),
+            )
+            .await?;
+        }
         let mut users: Vec<(i64, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
         users.sort();
         users.dedup_by_key(|u| u.0);

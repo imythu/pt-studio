@@ -9,7 +9,7 @@ description = "消费 pt-tracker 的流量流，按时间窗口聚合结算上�
 
 provides = ["ctx.accounting@0.1.0"]
 requires = ["ctx.rbac@^0.1"]
-publishes = ["traffic.settled", "traffic.snatch_completed", "traffic.adjusted", "traffic.seeding_snapshot_taken"]
+publishes = ["traffic.settled", "traffic.snatch_completed", "traffic.adjusted", "traffic.seeding_snapshot_taken", "traffic.signal_raised"]
 
 [capabilities]
 kv = true
@@ -31,6 +31,13 @@ default_partitions = 64
 name = "seeding_snapshot"
 schedule = "2 * * * *"
 timeout_secs = 3300
+catch_up = "once"
+tx = "manual"
+
+[[cron]]
+name = "cross_check"
+schedule = "7 * * * *"
+timeout_secs = 3000
 catch_up = "once"
 tx = "manual"
 
@@ -88,6 +95,14 @@ permission = "accounting.traffic.adjust"
 rate_limit = "user:30/m"
 idempotent = true
 
+[[http.routes]]
+id = "admin_signals"
+method = "GET"
+path = "/v1/admin/signals"
+auth = "admin"
+permission = "accounting.signals.read"
+rate_limit = "user:60/m"
+
 [[permissions]]
 name = "accounting.stats.read"
 description_term = "accounting.perm.stats_read"
@@ -105,7 +120,7 @@ default_roles = ["moderator"]
 
 [database]
 migrations = "migrations"
-views = ["v_user_totals", "v_snatch", "v_user_daily", "v_torrent_peers"]
+views = ["v_user_totals", "v_snatch", "v_user_daily", "v_torrent_peers", "v_swarm_peers"]
 
 [[database.partitions]]
 table = "user_daily"

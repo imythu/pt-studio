@@ -330,7 +330,8 @@ impl Store {
         let seq = self.seq.fetch_add(1, Ordering::Relaxed) + 1;
         let ua: String = fact.ua.chars().take(128).collect();
         let mut p = redis::pipe();
-        p.cmd("XADD")
+        let xadd = p.cmd("XADD");
+        xadd
             .arg(format!("acct:{}", fact.uid % self.partitions))
             .arg("MAXLEN")
             .arg("~")
@@ -373,8 +374,12 @@ impl Store {
             .arg("flags")
             .arg(delta.flags)
             .arg("ua")
-            .arg(ua)
-            .ignore();
+            .arg(ua);
+        if delta.dropped_up > 0 || delta.dropped_down > 0 {
+            // 超速未计入的量（v1 的可选字段，旧版 accounting 忽略）
+            xadd.arg("xup").arg(delta.dropped_up).arg("xdown").arg(delta.dropped_down);
+        }
+        xadd.ignore();
         let live = format!("u:{}:live", fact.uid);
         for (f, v) in [("up", delta.up), ("down", delta.down), ("seed_time", delta.seed)] {
             if v > 0 {

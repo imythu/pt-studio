@@ -180,3 +180,32 @@
 | `mcp.oauth_invalid_request` | 400 | mcp | OAuth 授权请求参数错误（同意页接口；令牌端点按 RFC 6749 返回 `error` 字段） |
 | `identity.token_limit_exceeded` | 409 | identity | 有效 token 数量达到上限 |
 | `llm-claude.upstream_error`、`llm-openai-compat.upstream_error` | 502 | llm-* | 模型服务出错 |
+| `anticheat.scope_required` | 403 | anticheat | 服务调用方缺少 `read` / `write` / `report` 作用域 |
+| `anticheat.case_not_found` | 404 | anticheat | 案件不存在 |
+| `anticheat.case_state_invalid` | 409 | anticheat | 案件状态不允许该操作 |
+| `anticheat.case_claimed` | 409 | anticheat | 案件已被他人认领 |
+| `anticheat.claim_required` | 409 | anticheat | 需要先认领（或认领已被他人取得） |
+| `anticheat.action_not_allowed` | 403 | anticheat | 缺少该处置所需权限（`details.permission`） |
+| `anticheat.target_protected` | 403 | anticheat | 受保护用户不能施加该处置 |
+| `anticheat.action_unavailable` | 422 | anticheat | 依赖服务未启用（如 ledger 缺失时锁定钱包、passkey 重置） |
+| `anticheat.adjust_invalid` | 422 | anticheat | 回收字节数非正或超过当前计入上传 |
+| `anticheat.four_eyes_required` | 403 | anticheat | 违反四眼原则 |
+| `anticheat.sanction_not_found` | 404 | anticheat | 处置不存在 |
+| `anticheat.sanction_state_invalid` | 409 | anticheat | 处置状态不允许批准 / 解除 |
+| `anticheat.report_invalid` | 422 | anticheat | 外部证据种类前缀、时间或 details 不合法 |
+| `anticheat.user_not_found` | 404 | anticheat | 用户不存在 |
+| `anticheat.ruleset_invalid` | 422 | anticheat | 规则集未通过校验（`details.errors[]`） |
+| `anticheat.ruleset_not_draft` | 409 | anticheat | 只能修改草案 |
+| `anticheat.ruleset_not_found` | 404 | anticheat | 规则集版本不存在 |
+| `anticheat.simulation_required` | 409 | anticheat | 激活前需要该草案的完成模拟 |
+| `anticheat.simulation_in_progress` | 409 | anticheat | 该版本已有模拟在运行 |
+| `anticheat.appeal_not_allowed` | 422 | anticheat | 案件结论不可申诉 |
+| `anticheat.appeal_window_closed` | 422 | anticheat | 已过申诉期限 |
+| `anticheat.appeal_limit_reached` | 422 | anticheat | 超过申诉次数 |
+| `anticheat.appeal_exists` | 409 | anticheat | 已有处理中的申诉 |
+| `anticheat.appeal_token_invalid` | 422 | anticheat | 申诉令牌无效、已用或过期（不区分） |
+| `anticheat.appeal_state_invalid` | 409 | anticheat | 申诉状态不允许该操作 |
+| `anticheat.appeal_change_invalid` | 422 | anticheat | 减轻处置时试图加重或修改非本案处置 |
+| `anticheat.transfer_blocked` | 403 | anticheat | 账户审核中禁止转出（`ledger.before_transfer`） |
+| `anticheat.checkin_blocked` | 403 | anticheat | 流量冻结期禁止签到（`checkin.before_check_in`） |
+| `anticheat.llm_unavailable` | 503 | anticheat | `ctx.llm` 未启用或调用失败 |

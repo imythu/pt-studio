@@ -1,8 +1,8 @@
 //! 分区 worker（accounting 03 §1.1～§1.6）：读 `acct:<p>` 微批 → 解析 → 去重 → 聚合 → 落库 → 关闭窗口 → 游标 CAS。
 //! 整个微批与游标在同一事务中提交，因此对数据库的效果恰好一次。
 //!
-//! 实现说明（与 03 的差异）：落库使用 `unnest` 多行语句代替 COPY + 暂存表；peers 不维护小时槽（快照在后续迭代）；
-//! 基础信号、实时计数扣减（live）、流修剪在后续迭代实现。
+//! 实现说明（与 03 的差异）：落库使用 `unnest` 多行语句代替 COPY + 暂存表；基础信号见 [`crate::signals`]；
+//! 实时计数扣减（live）、流修剪在后续迭代实现。
 
 // 批量写入以“列向量元组”组织参数（对应 unnest 的各列），类型较长是有意的
 #![allow(clippy::type_complexity)]
@@ -72,6 +72,14 @@ pub struct Entry {
     pub dleech: u64,
     pub flags: u32,
     pub client: String,
+    /// 客户端上报的累计值（信号 details 用）
+    pub rep_up: Option<u64>,
+    pub rep_down: Option<u64>,
+    /// pt-tracker 因超速未计入的量（可选字段）
+    pub xup: u64,
+    pub xdown: u64,
+    /// 增量超界被丢弃（counter_jump / out_of_range）
+    pub out_of_range: bool,
 }
 
 /// 字段解析（§1.1.2）。返回拒收原因代号。
@@ -107,11 +115,8 @@ pub fn parse(
         return Err("number");
     };
     // 评审 R1 F-03：流量增量超界只丢弃流量字段，保留时长与完成标记
-    let (dup, ddown) = if dup > MAX_DELTA || ddown > MAX_DELTA {
-        (0, 0)
-    } else {
-        (dup, ddown)
-    };
+    let out_of_range = dup > MAX_DELTA || ddown > MAX_DELTA;
+    let (dup, ddown) = if out_of_range { (0, 0) } else { (dup, ddown) };
     let (dseed, dleech) = if dseed + dleech > 86_400 {
         (0, 0)
     } else {
@@ -143,6 +148,11 @@ pub fn parse(
         dleech,
         flags,
         client,
+        rep_up: num("up"),
+        rep_down: num("down"),
+        xup: num("xup").unwrap_or(0).min(MAX_DELTA),
+        xdown: num("xdown").unwrap_or(0).min(MAX_DELTA),
+        out_of_range,
     })
 }
 
@@ -614,6 +624,39 @@ async fn store(
         .execute(&mut *c)
         .await?;
     }
+
+    // ---- 交叉校验的小时明细（§1.10；小时 = 窗口所在小时） ----
+    {
+        let hour = i32::try_from(window_start.div_euclid(3600)).unwrap_or(0);
+        let (mut u, mut t, mut up, mut down) = (vec![], vec![], vec![], vec![]);
+        for ((uid, tid), a) in &snatch {
+            if a.up_raw > 0 || a.down_raw > 0 {
+                u.push(i(*uid));
+                t.push(i(*tid));
+                up.push(i(a.up_raw));
+                down.push(i(a.down_raw));
+            }
+        }
+        if !u.is_empty() {
+            sqlx::query(
+                "INSERT INTO torrent_user_hourly AS h (hour, torrent_id, user_id, up_raw, down_raw)
+                 SELECT $1, t, u, up, down FROM unnest($2::bigint[], $3::bigint[], $4::bigint[], $5::bigint[]) AS x(u, t, up, down)
+                 ORDER BY t, u
+                 ON CONFLICT (hour, torrent_id, user_id) DO UPDATE SET
+                    up_raw = h.up_raw + EXCLUDED.up_raw, down_raw = h.down_raw + EXCLUDED.down_raw",
+            )
+            .bind(hour)
+            .bind(&u)
+            .bind(&t)
+            .bind(&up)
+            .bind(&down)
+            .execute(&mut *c)
+            .await?;
+        }
+    }
+
+    // ---- 基础信号（§1.4，与结算同一事务） ----
+    crate::signals::for_batch(ctx, c, &cfg.signals, entries).await?;
 
     // ---- torrent_counters 与首次完成事件 ----
     let mut completions: Vec<(i64, i64, i64)> = Vec::new();

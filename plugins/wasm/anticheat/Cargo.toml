@@ -1,0 +1,16 @@
+[package]
+name = "pt-wasm-anticheat"
+description = "PT Studio anticheat plugin (WASM): evidence, scoring, cases, sanctions, appeals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }
+sha2 = { version = "0.10", default-features = false }

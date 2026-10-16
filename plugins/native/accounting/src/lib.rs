@@ -2,10 +2,11 @@
 //!
 //! 本版本实现：分区 worker（微批、eid 去重、倍率、peers / snatches / 用户总量 / 日统计、结算窗口与
 //! `traffic.settled`、首次完成与 `traffic.snatch_completed`、游标与 fencing 的恰好一次提交）、倍率规则服务、
-//! 流量调整、种子镜像、统计 HTTP 接口。基础信号、swarm 统计、小时快照、交叉校验、重算在后续迭代实现。
+//! 流量调整、种子镜像、统计 HTTP 接口、基础信号与交叉校验（`traffic.signal_raised`）。swarm 统计、重算在后续迭代实现。
 
 pub mod ingest;
 pub mod rates;
+pub mod signals;
 pub mod snapshot;
 
 use std::sync::{Arc, Mutex, OnceLock};
@@ -38,6 +39,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0003_torrent_peers_view.sql",
         include_str!("../migrations/0003_torrent_peers_view.sql"),
     ),
+    ("0004_signals.sql", include_str!("../migrations/0004_signals.sql")),
 ];
 pub const ACCOUNTING: &str = "ctx.accounting";
 
@@ -56,6 +58,8 @@ pub struct Config {
     pub idle_sleep_ms: u64,
     #[serde(default = "d_max_up")]
     pub max_up_permille: u32,
+    #[serde(default)]
+    pub signals: signals::SignalCfg,
 }
 
 fn d_parts() -> u32 {
@@ -166,6 +170,15 @@ pub trait AccountingService: Send + Sync {
         reason: &str,
         idempotency_key: &str,
     ) -> PResult<AdjustResult>;
+    /// 用户的基础信号（作用域 `read:signals`，区间 ≤ 366 天）
+    async fn signals(
+        &self,
+        ctx: &Ctx,
+        user: u64,
+        from: i64,
+        to: i64,
+        cursor: Option<String>,
+    ) -> PResult<signals::SignalPage>;
 }
 
 fn scope(ctx: &Ctx, s: &str) -> PResult<()> {
@@ -364,6 +377,13 @@ impl pt_plugin_api::OnCron for Accounting {
                 tracing::info!(users = n, "seeding snapshot done");
                 Ok(())
             }
+            "cross_check" => {
+                let cfg = self.0.cfg()?;
+                let n = signals::cross_check(ctx, &cfg.signals).await?;
+                signals::purge_dedupe(ctx).await?;
+                tracing::info!(signals = n, "cross check done");
+                Ok(())
+            }
             other => Err(PluginError::internal(format!("unknown job `{other}`"))),
         }
     }
@@ -468,6 +488,17 @@ impl AccountingService for Accounting {
         )
         .await
     }
+    async fn signals(
+        &self,
+        ctx: &Ctx,
+        user: u64,
+        from: i64,
+        to: i64,
+        cursor: Option<String>,
+    ) -> PResult<signals::SignalPage> {
+        scope(ctx, "read:signals")?;
+        signals::list(ctx, Some(u2i(user)?), None, from, to, cursor.as_deref(), 200).await
+    }
 }
 
 #[async_trait]
@@ -513,6 +544,17 @@ impl pt_plugin_api::JsonService for Accounting {
                     arg(&a, "d_down")?,
                     &arg::<String>(&a, "reason")?,
                     &arg::<String>(&a, "idempotency_key")?,
+                )
+                .await?,
+            )?,
+            "signals" => serde_json::to_value(
+                AccountingService::signals(
+                    self,
+                    ctx,
+                    arg(&a, "user")?,
+                    arg(&a, "from")?,
+                    arg(&a, "to")?,
+                    arg(&a, "cursor")?,
                 )
                 .await?,
             )?,
@@ -780,6 +822,34 @@ async fn http_adjust(
     Ok((status, Json(r)).into_response())
 }
 
+#[derive(Debug, Deserialize)]
+struct SignalQuery {
+    user_id: Option<i64>,
+    signal: Option<String>,
+    from: Option<i64>,
+    to: Option<i64>,
+    cursor: Option<String>,
+    limit: Option<i64>,
+}
+
+/// 后台：信号列表（`accounting.signals.read`）
+async fn http_signals(ctx: RequestCtx, Query(q): Query<SignalQuery>) -> PResult<Response> {
+    let now = ctx.time.now();
+    let to = q.to.unwrap_or(now);
+    let from = q.from.unwrap_or(to - 30 * 86_400_000);
+    let page = signals::list(
+        &ctx,
+        q.user_id,
+        q.signal.as_deref(),
+        from,
+        to,
+        q.cursor.as_deref(),
+        q.limit.unwrap_or(50),
+    )
+    .await?;
+    Ok(Json(page).into_response())
+}
+
 struct Routes;
 
 impl pt_plugin_api::HttpRoutes for Routes {
@@ -791,6 +861,7 @@ impl pt_plugin_api::HttpRoutes for Routes {
             .route("/v1/torrents/swarm", get(http_swarm_batch))
             .route("/v1/torrents/{id}/swarm", get(http_swarm))
             .route("/v1/admin/users/{id}/adjustments", post(http_adjust))
+            .route("/v1/admin/signals", get(http_signals))
     }
 }
 

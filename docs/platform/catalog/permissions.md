@@ -57,6 +57,9 @@
 | `anticheat.cases.read` | anticheat | 查看作弊案件 | moderator |
 | `anticheat.cases.moderate` | anticheat | 处置作弊案件 | moderator |
 | `anticheat.rules.manage` | anticheat | 规则配置 | admin |
+| `anticheat.sanctions.manage` | anticheat | 禁止下载、封禁、批准封禁（四眼） | admin |
+| `anticheat.appeals.moderate` | anticheat | 复核申诉 | moderator |
+| `anticheat.appeals.create` | anticheat | 提交申诉 | user |
 | `bonus.balance.read_own` | bonus | 查看自己的魔力值 | user |
 | `bonus.rules.manage` | bonus | 魔力值公式配置 | admin |
 | `shop.use` | shop | 购买 | user |

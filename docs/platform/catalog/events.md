@@ -85,6 +85,7 @@ JSON 示例：
 | `user.two_factor_changed` | identity | `user:<id>` | `user_id, kind(totp/webauthn), enabled: bool` |
 | `user.passkey_reset` | identity | `user:<id>` | `user_id`（不含 passkey） |
 | `user.status_changed` | identity | `user:<id>` | `user_id, from, to, reason, until?` |
+| `user.restriction_changed` | identity | `user:<id>` | `user_id, restriction_id, kind(ban/leech_disabled/pending), source, op(applied/lifted/expired), reason_code, until?, lifted_by?`（解除方：插件 ID、`admin` 或 `identity`；anticheat 据此识别外部解除） |
 | `user.class_changed` | identity | `user:<id>` | `user_id, from_class, to_class, reason, by_plugin` |
 | `user.title_changed` | identity | `user:<id>` | `user_id, title?` |
 | `user.roles_changed` | identity | `user:<id>` | `user_id, added[], removed[]` |
@@ -126,8 +127,11 @@ JSON 示例：
 | `ledger.currency_registered` | ledger | `global` | `currency, scale, name_term, owner_plugin` |
 | `ledger.entry_posted` | ledger | `user:<id>` | `entry_id, currency, user_id, amount, balance_after, reason, counterparty_user_id?` |
 | `ledger.entry_reversed` | ledger | `user:<id>` | `entry_id, reversal_entry_id, reason` |
-| `anticheat.case_opened` | anticheat | `user:<id>` | `case_id, user_id, rule, score` |
-| `anticheat.case_resolved` | anticheat | `user:<id>` | `case_id, user_id, action(none/warn/disable_download/ban/adjust_traffic), by` |
+| `anticheat.case_opened` | anticheat | `user:<id>` | `case_id, user_id, rule, score, band, opened_reason(score/manual/report), ruleset_version, evidence_count` |
+| `anticheat.case_resolved` | anticheat | `user:<id>` | `case_id, user_id, action(none/warn/freeze_traffic/lock_wallet/adjust_traffic/disable_download/ban/reset_passkey，最严重的一项), actions[], resolution(sanctioned/no_action/dismissed/overturned), false_positive, by` |
+| `anticheat.sanction_changed` | anticheat | `user:<id>` | `sanction_id, user_id, case_id?, kind, op(applied/expired/lifted/overturned/failed), until?` |
+| `anticheat.appeal_submitted` | anticheat | `user:<id>` | `appeal_id, case_id, user_id, via(session/token)`（不含正文） |
+| `anticheat.appeal_decided` | anticheat | `user:<id>` | `appeal_id, case_id, user_id, outcome(upheld/reduced/overturned), by` |
 
 ### 4.5 经济
 

@@ -362,6 +362,18 @@ impl pt_plugin_api::JsonService for Svc {
                 .await?;
                 Ok(serde_json::json!({ "restriction_id": rid }))
             }
+            // ctx.users.restrictions：某用户的限制（含已解除，最近 200 条）；作用域 write:status 或 read:restrictions
+            "restrictions" => {
+                if !(ctx.invocation.has_scope("write:status")
+                    || ctx.invocation.has_scope("read:restrictions"))
+                {
+                    return Err(PluginError::forbidden(
+                        "scope write:status or read:restrictions required",
+                    ));
+                }
+                let uid = i64::try_from(id("user")?).map_err(|_| PluginError::bad_request("bad user id"))?;
+                status::list(ctx, uid).await
+            }
             "check" => {
                 let perm = a
                     .get("permission")

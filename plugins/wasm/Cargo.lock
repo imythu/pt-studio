@@ -228,6 +228,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-anticheat"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "pt-wasm-bonus"
 version = "0.1.0"
 dependencies = [

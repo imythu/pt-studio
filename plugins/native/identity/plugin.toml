@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "账号、会话、鉴权（ctx.auth）、权限（ctx.rbac）、用户资料（ctx.users）"
 
 provides = ["ctx.auth@0.1.0", "ctx.rbac@0.1.0", "ctx.users@0.1.0"]
-publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset"]
+publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.restriction_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset"]
 
 [capabilities]
 kv = true
