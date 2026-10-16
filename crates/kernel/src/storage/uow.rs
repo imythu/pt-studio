@@ -43,6 +43,8 @@ pub struct UowCaps {
     pub publishes: Vec<String>,
     pub jobs: Vec<String>,
     pub max_rows: u32,
+    /// 不受信任的插件（WASM）：语句先经 [`super::sqlcheck::check_runtime`] 检查
+    pub check_sql: bool,
 }
 
 pub struct Uow {
@@ -138,6 +140,18 @@ impl Uow {
         } else {
             Err(PluginError::capability_denied("capability `sql` not declared"))
         }
+    }
+
+    /// 语句检查（kernel/03 §6.3）：拒绝时返回 `kernel.sql_rejected`
+    fn check_stmt(&self, stmt: &str) -> PResult<()> {
+        if !self.caps.check_sql {
+            return Ok(());
+        }
+        super::sqlcheck::check_runtime(stmt).map_err(|reason| {
+            tracing::warn!(plugin = %self.plugin_id, %reason, "plugin SQL rejected");
+            PluginError::new("kernel.sql_rejected", "statement rejected by the SQL gateway")
+                .with_details(serde_json::json!({ "reason": reason }))
+        })
     }
 
     fn require_kv(&self) -> PResult<()> {
@@ -370,6 +384,7 @@ fn decode(row: &sqlx::postgres::PgRow, i: usize) -> PResult<SqlValue> {
 impl Sql for Uow {
     async fn query(&self, stmt: &str, params: &[SqlValue]) -> PResult<RowSet> {
         self.require_sql()?;
+        self.check_stmt(stmt)?;
         let mut g = self.guard().await?;
         let tx = g
             .as_mut()
@@ -402,6 +417,7 @@ impl Sql for Uow {
 
     async fn execute(&self, stmt: &str, params: &[SqlValue]) -> PResult<u64> {
         self.require_sql()?;
+        self.check_stmt(stmt)?;
         let mut g = self.guard().await?;
         let tx = g
             .as_mut()
@@ -414,6 +430,7 @@ impl Sql for Uow {
 
     async fn execute_batch(&self, stmt: &str, param_sets: &[Vec<SqlValue>]) -> PResult<u64> {
         self.require_sql()?;
+        self.check_stmt(stmt)?;
         let mut g = self.guard().await?;
         let tx = g
             .as_mut()

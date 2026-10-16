@@ -666,6 +666,17 @@ pub fn check_package(dir: &Path) -> Result<Manifest, LoadFailure> {
             ));
         }
     }
+    // 与加载时相同的迁移语句检查（kernel/03 §6.3），插件作者在 CI 中即可发现
+    if m.database.as_ref().is_some_and(|d| d.plpgsql) {
+        return Err(fail(
+            "E-MIG-REJECTED",
+            "plpgsql is only available to native plugins".into(),
+        ));
+    }
+    for (file, sql) in p.migrations {
+        crate::storage::sqlcheck::check_migration(sql)
+            .map_err(|reason| fail("E-MIG-REJECTED", format!("{file}: {reason}")))?;
+    }
     Ok(m)
 }
 

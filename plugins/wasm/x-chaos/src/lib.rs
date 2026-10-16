@@ -37,6 +37,14 @@ impl Guest for Chaos {
                 Ok(ok(&v.len().to_string()))
             }
             "peek" => sql::query("SELECT count(*) FROM identity.users", &[]).map(|_| ok("read")),
+            // 角色逃逸尝试：应被内核语句检查拒绝（kernel.sql_rejected）
+            "reset_role" => sql::execute("RESET ROLE", &[]).map(|_| ok("escaped")),
+            "set_config" => sql::query("SELECT set_config('role', 'postgres', true)", &[]).map(|_| ok("escaped")),
+            "mkfunc" => sql::execute(
+                "CREATE FUNCTION f() RETURNS text LANGUAGE sql SET role = 'postgres' AS 'SELECT 1'",
+                &[],
+            )
+            .map(|_| ok("escaped")),
             "eval" => redis::call(&redis::Command {
                 name: "EVAL".into(),
                 args: vec![b"return 1".to_vec(), b"0".to_vec()],

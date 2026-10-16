@@ -202,6 +202,7 @@ impl Shared {
                         .as_ref()
                         .and_then(|d| d.max_rows)
                         .unwrap_or(self.cfg.database.max_rows),
+                    check_sql: m.kind == pt_plugin_api::manifest::PluginKind::Wasm,
                 };
                 (
                     Some(rt.role.clone()),

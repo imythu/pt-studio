@@ -3,4 +3,5 @@
 pub mod blob;
 pub mod migrate;
 pub mod redis;
+pub mod sqlcheck;
 pub mod uow;

@@ -363,6 +363,9 @@ async fn wasm_bonus_end_to_end() {
         ("alloc", "kernel.resource_exhausted"),
         ("peek", "kernel.internal"),
         ("eval", "kernel.redis_command_denied"),
+        ("reset_role", "kernel.sql_rejected"),
+        ("set_config", "kernel.sql_rejected"),
+        ("mkfunc", "kernel.sql_rejected"),
     ] {
         let started = std::time::Instant::now();
         let r = call(&app, "GET", &format!("/api/p/x-chaos/v1/{op}"), None, &[]).await;

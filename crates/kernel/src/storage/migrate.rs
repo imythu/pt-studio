@@ -24,6 +24,12 @@ pub enum MigrateError {
         file: String,
         source: sqlx::Error,
     },
+    #[error("error[E-MIG-REJECTED] plugin `{plugin}`: {file}: {reason}")]
+    Rejected {
+        plugin: String,
+        file: String,
+        reason: String,
+    },
     #[error("database error: {0}")]
     Db(#[from] sqlx::Error),
 }
@@ -142,6 +148,23 @@ async fn migrate_locked(
                 .await?;
         }
         let files = p.native.as_ref().map(|n| n.migrations).unwrap_or(&[]);
+        // WASM 插件包不受信任：迁移在管理连接上执行，先做语句检查（kernel/03 §6.3）
+        if p.manifest.kind == pt_plugin_api::manifest::PluginKind::Wasm {
+            if p.manifest.database.as_ref().is_some_and(|d| d.plpgsql) {
+                return Err(MigrateError::Rejected {
+                    plugin: p.id().to_owned(),
+                    file: "plugin.toml".into(),
+                    reason: "plpgsql is only available to native plugins".into(),
+                });
+            }
+            for (name, sql) in files {
+                super::sqlcheck::check_migration(sql).map_err(|reason| MigrateError::Rejected {
+                    plugin: p.id().to_owned(),
+                    file: (*name).to_owned(),
+                    reason,
+                })?;
+            }
+        }
         apply_files(conn, p.id(), &role, &schema, files).await?;
     }
     sync_view_grants(conn, cfg, plugins).await?;
