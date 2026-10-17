@@ -1,6 +1,6 @@
 // 种子列表 / 搜索（search-meilisearch）、详情、发布（torrent）。筛选条件序列化到 URL，可分享。
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, apiFetch, parse } from '@pt-studio/sdk';
 import { Slot, useSlotColumns } from '@pt-studio/slots';
@@ -934,6 +934,8 @@ export function Upload() {
     setFields(i?.field_schema ? ((withDefaults(i.field_schema as Schema, {}) as Record<string, unknown>) ?? {}) : {});
     setErrors({});
   };
+  // 插件登记的发布后回调（如 mediainfo 保存粘贴的报告）；失败只提示，不影响跳转
+  const afterUpload = useRef<((id: number) => Promise<void> | void)[]>([]);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!file || !info) return;
@@ -950,6 +952,7 @@ export function Upload() {
       for (const f of poster) fd.append('poster', f, f.name);
       for (const f of shots) fd.append('screenshot', f, f.name);
       const r = await parse<{ id: number }>(await apiFetch('/api/p/torrent/v1/torrents', { method: 'POST', body: fd, idempotent: true }));
+      await Promise.allSettled(afterUpload.current.map((cb) => Promise.resolve().then(() => cb(r.id))));
       nav(`/torrents/${r.id}`);
     } catch (err) {
       if (err instanceof ApiError) setErrors(serverErrors(err.details));
@@ -1054,6 +1057,13 @@ export function Upload() {
               draft: { ...meta, type_id: info?.type_id, fields },
               // 插件回填标题 / 副标题 / 描述（如豆瓣简介）
               update: (patch: Partial<typeof meta>) => setMeta((m) => ({ ...m, ...patch })),
+              // 发布成功后以种子 ID 回调；返回取消登记的函数
+              afterUpload: (cb: (id: number) => Promise<void> | void) => {
+                afterUpload.current.push(cb);
+                return () => {
+                  afterUpload.current = afterUpload.current.filter((x) => x !== cb);
+                };
+              },
             }}
           />
           <ErrorText error={error} />

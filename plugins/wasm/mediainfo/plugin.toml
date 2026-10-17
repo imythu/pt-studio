@@ -1,0 +1,73 @@
+id = "mediainfo"
+name = "MediaInfo"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "MediaInfo / BDInfo 解析：脱敏保存、规格摘要（分辨率 / 编码 / HDR / 音轨 / 字幕），与发布时声明的字段比较"
+
+provides = ["ctx.mediainfo@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+publishes = ["mediainfo.updated"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_fields", "torrent.v_torrent_tracker"]
+
+[[subscriptions]]
+name = "on_torrent_deleted"
+event = "torrent.deleted"
+
+[[http.routes]]
+id = "parse"
+method = "POST"
+path = "/v1/parse"
+auth = "user"
+permission = "mediainfo.use"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "put"
+method = "PUT"
+path = "/v1/torrents/{id}"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "delete"
+method = "DELETE"
+path = "/v1/torrents/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "get"
+method = "GET"
+path = "/v1/torrents/{id}"
+auth = "user"
+
+[[permissions]]
+name = "mediainfo.use"
+description_term = "mediainfo.perm.use"
+default_roles = ["user"]
+
+[[permissions]]
+name = "mediainfo.manage"
+description_term = "mediainfo.perm.manage"
+default_roles = ["moderator"]
+
+[error_codes]
+"mediainfo.too_large" = 413
+"mediainfo.unrecognized" = 422
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.upload.extra", "torrent.detail.info"]
+
+[terms]
+"mediainfo.name" = { zh-CN = "MediaInfo", en = "MediaInfo" }
+"mediainfo.perm.use" = { zh-CN = "解析 MediaInfo", en = "Parse MediaInfo" }
+"mediainfo.perm.manage" = { zh-CN = "编辑任意种子的 MediaInfo", en = "Edit MediaInfo of any torrent" }

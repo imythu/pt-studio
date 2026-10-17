@@ -314,6 +314,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-mediainfo"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+ "sha2",
+]
+
+[[package]]
 name = "pt-wasm-messages"
 version = "0.1.0"
 dependencies = [

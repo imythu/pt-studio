@@ -142,9 +142,17 @@ try {
   await p.locator('input[name=title]').fill('Web.Movie.2024.2160p.WEB-DL.H265.DDP5.1-WEB');
   await p.getByText(/更多资源信息/).click();
   await p.getByText('IMDb', { exact: true }).locator('..').locator('input').fill('https://www.imdb.com/title/tt1234567/');
+  // MediaInfo：粘贴即预览（路径脱敏），发布成功后由 afterUpload 保存，种子页显示规格
+  await p
+    .locator('textarea[name=mediainfo]')
+    .fill('General\nComplete name : /home/alice/Web.Movie.mkv\nFormat : Matroska\n\nVideo\nFormat : HEVC\nWidth : 3 840 pixels\nHeight : 2 160 pixels\n\nAudio\nFormat : E-AC-3\nChannel(s) : 6 channels\n');
+  await p.getByText(/检测到（text）/).waitFor();
   await p.getByRole('button', { name: '发布' }).click();
   await p.waitForURL(/\/torrents\/\d+$/);
   await p.getByRole('heading', { name: '资源信息', exact: true }).waitFor();
+  await p.locator('.mediainfo-summary').getByText('HEVC', { exact: true }).waitFor();
+  await p.getByText('查看完整报告').click();
+  if ((await p.locator('.mediainfo-text').textContent())?.includes('alice')) throw new Error('mediainfo paths must be sanitised');
   await p.getByText('2160p', { exact: true }).waitFor();
   await p.getByText('tt1234567', { exact: true }).waitFor();
   await p.getByRole('link', { name: '查看作品' }).click();
