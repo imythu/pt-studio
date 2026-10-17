@@ -433,6 +433,7 @@ export function TorrentList() {
 
 interface TorrentDetail {
   id: number;
+  description_html?: string;
   sticky_until?: string | null;
   title: string;
   subtitle: string | null;
@@ -762,7 +763,7 @@ export function TorrentPage() {
           <Slot name="torrent.detail.info" ctx={ctx} />
           {d.description && (
             <Card title={t('ui.torrent.description')}>
-              <UserContent text={d.description} />
+              {d.description_html !== undefined ? <UserContent html={d.description_html} /> : <UserContent text={d.description} />}
             </Card>
           )}
           <Card title={`${t('ui.torrent.files')} (${d.file_count})`}>

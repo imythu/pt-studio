@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 pt-plugin-api.workspace = true
 pt-plugin-identity = { path = "../identity" }
+pt-markup = { path = "../../../crates/markup" }
 async-trait.workspace = true
 axum.workspace = true
 bytes.workspace = true

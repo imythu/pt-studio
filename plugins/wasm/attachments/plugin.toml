@@ -1,0 +1,104 @@
+id = "attachments"
+name = "图片上传"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "站内图床：上传 PNG / JPEG / GIF / WebP（去除 EXIF 等元数据），用于种子简介、论坛帖子与评论"
+
+requires = ["ctx.rbac@^0.1"]
+
+[capabilities]
+sql = true
+blob = true
+views = ["identity.v_user_public"]
+
+[[http.routes]]
+id = "upload"
+method = "POST"
+path = "/v1/images"
+auth = "user"
+permission = "attachments.upload"
+rate_limit = "user:30/m"
+max_body_kb = 20480
+
+[[http.routes]]
+id = "mine"
+method = "GET"
+path = "/v1/images"
+auth = "user"
+
+[[http.routes]]
+id = "delete"
+method = "DELETE"
+path = "/v1/images/{id}"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_list"
+method = "GET"
+path = "/v1/admin/images"
+auth = "admin"
+permission = "attachments.manage"
+
+[[permissions]]
+name = "attachments.upload"
+description_term = "attachments.perm.upload"
+default_roles = ["user"]
+
+[[permissions]]
+name = "attachments.manage"
+description_term = "attachments.perm.manage"
+default_roles = ["moderator"]
+
+[error_codes]
+"attachments.too_large" = 413
+"attachments.unsupported" = 415
+"attachments.invalid" = 422
+"attachments.quota_exceeded" = 429
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.upload.extra", "nav.user_menu"]
+routes = ["/p/attachments/*", "/admin/p/attachments/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["max_size_kb", "max_dimension", "daily_count", "daily_mb"]
+
+[settings_schema.properties.max_size_kb]
+type = "integer"
+minimum = 16
+maximum = 20480
+default = 5120
+title = "单张图片最大体积（KiB）"
+
+[settings_schema.properties.max_dimension]
+type = "integer"
+minimum = 64
+maximum = 65535
+default = 16384
+title = "图片最大边长（像素）"
+
+[settings_schema.properties.daily_count]
+type = "integer"
+minimum = 1
+default = 50
+title = "每人每天最多上传张数"
+
+[settings_schema.properties.daily_mb]
+type = "integer"
+minimum = 1
+default = 100
+title = "每人每天最多上传总量（MiB）"
+
+[terms]
+"attachments.name" = { zh-CN = "图片上传", en = "Image uploads" }
+"attachments.perm.upload" = { zh-CN = "上传图片", en = "Upload images" }
+"attachments.perm.manage" = { zh-CN = "管理用户上传的图片", en = "Manage uploaded images" }

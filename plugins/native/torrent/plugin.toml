@@ -146,6 +146,19 @@ input_schema = { type = "object", additionalProperties = false, required = ["tor
 migrations = "migrations"
 views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent_fingerprint", "v_uploader_counts", "v_group_public", "v_group_fields", "v_torrent_review"]
 
+[frontend]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["description_image_hosts"]
+
+[settings_schema.properties.description_image_hosts]
+type = "array"
+title = "种子简介中允许外链图片的域名（站内上传的图片总是允许）"
+default = []
+items = { type = "string" }
+
 [terms]
 "torrent.field.type_id" = { zh-CN = "类型", en = "Type" }
 "torrent.field.sticky" = { zh-CN = "置顶", en = "Sticky" }

@@ -819,7 +819,19 @@ async fn http_get(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
     } else {
         json!({ "anonymous": true })
     };
+    // 简介按 BBCode 渲染（PT 惯例；纯文本保留换行）：站内 /media/ 图片与设置中的外链域名显示为图片
+    let hosts: Vec<String> = ctx.config.get_settings().await["description_image_hosts"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str()).map(str::to_owned).collect())
+        .unwrap_or_default();
+    let description_html = pt_markup::render(
+        &t.description,
+        pt_markup::Markup::BbCode,
+        &pt_markup::RenderOptions { image_hosts: &hosts, ..Default::default() },
+    )
+    .html;
     Ok(Json(json!({
+        "description_html": description_html,
         "id": t.id, "group_id": t.group_id, "type_id": t.type_id, "title": t.title, "subtitle": t.subtitle,
         "size": t.size, "file_count": t.file_count, "status": t.status, "uploader": uploader,
         "info_hash_v1": t.ih_v1.as_ref().map(hex::encode), "info_hash_v2": t.ih_v2.as_ref().map(hex::encode),

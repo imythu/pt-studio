@@ -147,11 +147,19 @@ try {
     .locator('textarea[name=mediainfo]')
     .fill('General\nComplete name : /home/alice/Web.Movie.mkv\nFormat : Matroska\n\nVideo\nFormat : HEVC\nWidth : 3 840 pixels\nHeight : 2 160 pixels\n\nAudio\nFormat : E-AC-3\nChannel(s) : 6 channels\n');
   await p.getByText(/检测到（text）/).waitFor();
+  // 图片上传：插入到简介（BBCode），详情页渲染为站内图片
+  await p.locator('input[name=image_upload]').setInputFiles({
+    name: 'shot.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'),
+  });
+  await p.getByText('图片已插入简介').waitFor();
   await p.getByRole('button', { name: '发布' }).click();
   await p.waitForURL(/\/torrents\/\d+$/);
   const movieUrl = p.url();
   await p.getByRole('heading', { name: '资源信息', exact: true }).waitFor();
   await p.locator('.mediainfo-summary').getByText('HEVC', { exact: true }).waitFor();
+  await p.locator('.pt-user-content img[src^="/media/attachments/i/"]').waitFor();
   await p.getByText('查看完整报告').click();
   if ((await p.locator('.mediainfo-text').textContent())?.includes('alice')) throw new Error('mediainfo paths must be sanitised');
   await p.getByText('2160p', { exact: true }).waitFor();
