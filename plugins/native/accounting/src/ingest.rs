@@ -80,6 +80,8 @@ pub struct Entry {
     pub xdown: u64,
     /// 增量超界被丢弃（counter_jump / out_of_range）
     pub out_of_range: bool,
+    /// peer 的 IP（只用于盒子网段比对，不落库）
+    pub ip: Option<std::net::IpAddr>,
 }
 
 /// 字段解析（§1.1.2）。返回拒收原因代号。
@@ -148,6 +150,7 @@ pub fn parse(
         dleech,
         flags,
         client,
+        ip: get("ip").and_then(|v| v.parse().ok()),
         rep_up: num("up"),
         rep_down: num("down"),
         xup: num("xup").unwrap_or(0).min(MAX_DELTA),
@@ -277,6 +280,8 @@ struct PeerAgg {
     last_ts: i64,
     /// 本微批的做种秒数（写入小时槽，由小时快照折叠进 snatches，03 §1.9）
     seed: u64,
+    /// 来自已批准的盒子网段
+    seedbox: bool,
 }
 
 fn ts_dt(secs: i64) -> DateTime<Utc> {
@@ -352,6 +357,7 @@ pub async fn poll(state: &crate::State, ctx: &Ctx, part: u32, fence: u64) -> PRe
         .await?
         .unwrap_or(cfg.default_partitions);
     state.refresh_rates(ctx).await?;
+    state.refresh_seedbox(ctx).await?;
 
     let mut c = ctx.sql.conn().await?;
     sqlx::query("INSERT INTO stream_cursors (part) VALUES ($1) ON CONFLICT DO NOTHING")
@@ -502,6 +508,7 @@ async fn store(
     rejected: &[(String, &'static str, serde_json::Value)],
 ) -> PResult<()> {
     let idx = state.rate_index();
+    let boxes = state.seedbox_ranges();
     // ---- 聚合（§1.2）：键有序，保证写入顺序一致 ----
     let mut pairs: BTreeMap<(u64, u64, i64), PairAgg> = BTreeMap::new();
     let mut peers: BTreeMap<(u64, u64, [u8; 20]), PeerAgg> = BTreeMap::new();
@@ -540,7 +547,13 @@ async fn store(
             client: e.client.clone(),
             last_ts: e.ts,
             seed: 0,
+            seedbox: false,
         });
+        if !boxes.is_empty()
+            && let Some(ip) = &e.ip
+        {
+            pe.seedbox = boxes.contains(e.uid, ip);
+        }
         pe.seed += e.dseed;
         pe.is_seeder = e.left == 0;
         pe.active = e.ev != Ev::Stopped;
@@ -550,8 +563,8 @@ async fn store(
 
     // ---- peers ----
     if !peers.is_empty() {
-        let (mut u, mut t, mut pid, mut seeder, mut active, mut client, mut at, mut secs) =
-            (vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+        let (mut u, mut t, mut pid, mut seeder, mut active, mut client, mut at, mut secs, mut sbox) =
+            (vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
         for ((uid, tid, p), a) in &peers {
             u.push(i(*uid));
             t.push(i(*tid));
@@ -561,20 +574,22 @@ async fn store(
             client.push(a.client.clone());
             at.push(ts_dt(a.last_ts));
             secs.push(i32::try_from(a.seed.min(86_400)).unwrap_or(0));
+            sbox.push(a.seedbox);
         }
         // 小时 = 窗口所在小时（窗口整除 1 小时，微批不跨窗口）；按 hour % 2 选槽，槽内同小时累加、换小时覆盖
         let hour = i32::try_from(window_start.div_euclid(3600)).unwrap_or(0);
         sqlx::query(
             "INSERT INTO peers AS p (user_id, torrent_id, peer_id, part, is_seeder, is_active, client_prefix, first_seen_at, last_announce_at,
-                                    slot0_hour, slot0_secs, slot1_hour, slot1_secs)
+                                    slot0_hour, slot0_secs, slot1_hour, slot1_secs, is_seedbox)
              SELECT u, t, pid, $1, s, a, cl, at, at,
                     CASE WHEN $9 % 2 = 0 THEN $9 END, CASE WHEN $9 % 2 = 0 THEN sec ELSE 0 END,
-                    CASE WHEN $9 % 2 = 1 THEN $9 END, CASE WHEN $9 % 2 = 1 THEN sec ELSE 0 END
-               FROM unnest($2::bigint[], $3::bigint[], $4::bytea[], $5::bool[], $6::bool[], $7::text[], $8::timestamptz[], $10::int[])
-                  AS x(u, t, pid, s, a, cl, at, sec)
+                    CASE WHEN $9 % 2 = 1 THEN $9 END, CASE WHEN $9 % 2 = 1 THEN sec ELSE 0 END, sb
+               FROM unnest($2::bigint[], $3::bigint[], $4::bytea[], $5::bool[], $6::bool[], $7::text[], $8::timestamptz[], $10::int[], $11::bool[])
+                  AS x(u, t, pid, s, a, cl, at, sec, sb)
              ORDER BY u, t, pid
              ON CONFLICT (user_id, torrent_id, peer_id) DO UPDATE SET
                 is_seeder = EXCLUDED.is_seeder, is_active = EXCLUDED.is_active, client_prefix = EXCLUDED.client_prefix,
+                is_seedbox = EXCLUDED.is_seedbox,
                 last_announce_at = greatest(p.last_announce_at, EXCLUDED.last_announce_at),
                 slot0_secs = CASE WHEN EXCLUDED.slot0_hour IS NULL THEN p.slot0_secs
                                   WHEN p.slot0_hour = EXCLUDED.slot0_hour THEN p.slot0_secs + EXCLUDED.slot0_secs
@@ -595,6 +610,7 @@ async fn store(
         .bind(&at)
         .bind(hour)
         .bind(&secs)
+        .bind(&sbox)
         .execute(&mut *c)
         .await?;
     }

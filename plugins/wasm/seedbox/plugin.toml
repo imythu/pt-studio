@@ -1,0 +1,105 @@
+id = "seedbox"
+name = "盒子登记"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "盒子（seedbox）登记：用户登记盒子的 IP 段，管理员审核；accounting 据此标记来自盒子的 peer，供 H&R、魔力值与反作弊规则使用"
+
+provides = ["ctx.seedbox@0.1.0"]
+publishes = ["seedbox.registered", "seedbox.reviewed", "seedbox.removed"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public", "accounting.v_swarm_peers"]
+
+[[cron]]
+name = "expire"
+schedule = "7 * * * *"
+
+[[http.routes]]
+id = "my_boxes"
+method = "GET"
+path = "/v1/boxes"
+auth = "user"
+
+[[http.routes]]
+id = "create_box"
+method = "POST"
+path = "/v1/boxes"
+auth = "user"
+permission = "seedbox.register_own"
+rate_limit = "user:20/d"
+
+[[http.routes]]
+id = "delete_box"
+method = "DELETE"
+path = "/v1/boxes/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "admin_list"
+method = "GET"
+path = "/v1/admin/boxes"
+auth = "admin"
+permission = "seedbox.review"
+
+[[http.routes]]
+id = "admin_review"
+method = "POST"
+path = "/v1/admin/boxes/{id}/review"
+auth = "admin"
+permission = "seedbox.review"
+
+[[permissions]]
+name = "seedbox.register_own"
+description_term = "seedbox.perm.register_own"
+default_roles = ["user"]
+
+[[permissions]]
+name = "seedbox.review"
+description_term = "seedbox.perm.review"
+default_roles = ["moderator"]
+
+[error_codes]
+"seedbox.range_invalid" = 422
+"seedbox.too_many_ranges" = 409
+"seedbox.not_pending" = 409
+
+[database]
+migrations = "migrations"
+views = ["v_ranges"]
+
+[frontend]
+entry = "index.js"
+slots = ["user.settings.tabs"]
+routes = ["/admin/p/seedbox/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["require_review", "max_ranges_per_user", "approval_days"]
+
+[settings_schema.properties.require_review]
+type = "boolean"
+default = true
+title = "登记需要管理员审核"
+
+[settings_schema.properties.max_ranges_per_user]
+type = "integer"
+minimum = 1
+maximum = 20
+default = 5
+title = "每人最多登记几个 IP 段"
+
+[settings_schema.properties.approval_days]
+type = "integer"
+minimum = 0
+default = 0
+title = "批准后多少天过期（0 = 不过期）"
+
+[terms]
+"seedbox.name" = { zh-CN = "盒子", en = "Seedbox" }
+"seedbox.perm.register_own" = { zh-CN = "登记自己的盒子", en = "Register own seedboxes" }
+"seedbox.perm.review" = { zh-CN = "审核盒子登记", en = "Review seedbox registrations" }

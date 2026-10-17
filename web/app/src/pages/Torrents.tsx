@@ -556,7 +556,7 @@ function fmtDuration(secs: number): string {
 }
 
 interface SwarmDetail extends Swarm {
-  peers: { user_id: number | null; mine: boolean; seeder: boolean; client: string | null; since: string; last_announce: string }[];
+  peers: { user_id: number | null; mine: boolean; seeder: boolean; client: string | null; since: string; last_announce: string; seedbox?: boolean }[];
   mine: { uploaded: number; downloaded: number; seed_secs: number; completed_at: string | null } | null;
 }
 
@@ -615,6 +615,7 @@ function SwarmPanel({ id }: { id: number }) {
                   <td>
                     <span className={`pt-badge ${p.seeder ? 'pt-badge-success' : 'pt-badge-primary'}`}>{p.seeder ? t('ui.torrent.role_seed') : t('ui.torrent.role_leech')}</span>
                     {p.mine && <span className="pt-badge">{t('ui.torrent.me')}</span>}
+                    {p.seedbox && <span className="pt-badge">{t('ui.torrent.seedbox')}</span>}
                   </td>
                   <td>{p.client ?? '-'}</td>
                   <td className="nowrap">{timeAgo(Date.parse(p.since))}</td>

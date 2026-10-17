@@ -598,6 +598,7 @@ mod tests {
             xup: 0,
             xdown: 0,
             out_of_range: false,
+            ip: None,
         }
     }
 

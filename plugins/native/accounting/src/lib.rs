@@ -6,6 +6,7 @@
 
 pub mod ingest;
 pub mod rates;
+pub mod seedbox;
 pub mod signals;
 pub mod snapshot;
 
@@ -47,6 +48,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0005_peer_liveness.sql",
         include_str!("../migrations/0005_peer_liveness.sql"),
     ),
+    ("0006_seedbox.sql", include_str!("../migrations/0006_seedbox.sql")),
 ];
 pub const ACCOUNTING: &str = "ctx.accounting";
 
@@ -98,6 +100,8 @@ pub struct State {
     parts: Mutex<HashMap<u32, ingest::PartCache>>,
     /// (索引, 版本号, 装载时间 ms)
     rates: Mutex<(Arc<RateIndex>, i64, i64)>,
+    /// 盒子网段（装载时间 ms）
+    seedbox: Mutex<(Arc<seedbox::Ranges>, i64)>,
 }
 
 impl State {
@@ -105,6 +109,24 @@ impl State {
         self.cfg
             .get()
             .ok_or_else(|| PluginError::unavailable("accounting is not initialised"))
+    }
+
+    pub fn seedbox_ranges(&self) -> Arc<seedbox::Ranges> {
+        self.seedbox.lock().map(|g| g.0.clone()).unwrap_or_default()
+    }
+
+    /// 每分钟重载一次盒子网段
+    pub async fn refresh_seedbox(&self, ctx: &Ctx) -> PResult<()> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let loaded = self.seedbox.lock().map(|g| g.1).unwrap_or(0);
+        if now - loaded < 60_000 {
+            return Ok(());
+        }
+        let r = seedbox::Ranges::load(ctx).await?;
+        if let Ok(mut g) = self.seedbox.lock() {
+            *g = (Arc::new(r), now);
+        }
+        Ok(())
     }
 
     pub fn rate_index(&self) -> Arc<RateIndex> {
@@ -776,7 +798,7 @@ async fn http_swarm(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
         (r.get::<i64, _>(0), r.get::<i64, _>(1), r.get::<i64, _>(2))
     });
     let peers = sqlx::query(
-        "SELECT user_id, is_seeder, client_prefix, first_seen_at, last_announce_at FROM peers
+        "SELECT user_id, is_seeder, client_prefix, first_seen_at, last_announce_at, is_seedbox FROM peers
           WHERE torrent_id = $1 AND is_active AND last_announce_at > now() - interval '1 hour'
           ORDER BY is_seeder DESC, last_announce_at DESC LIMIT 100",
     )
@@ -792,6 +814,7 @@ async fn http_swarm(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
                 "client": r.get::<Option<String>, _>(2),
                 "since": r.get::<chrono::DateTime<chrono::Utc>, _>(3).to_rfc3339(),
                 "last_announce": r.get::<chrono::DateTime<chrono::Utc>, _>(4).to_rfc3339(),
+                "seedbox": r.get::<bool, _>(5),
             })
         })
         .collect();

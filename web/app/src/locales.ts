@@ -253,6 +253,7 @@ const zh: Record<string, string> = {
   'identity.account_banned': '账号已被封禁',
   'identity.account_pending': '账号尚未通过审核或验证',
   'ui.settings.security_events': '安全记录',
+  'ui.torrent.seedbox': '盒子',
   'ui.settings.ip_history': '登录 IP',
   'ui.settings.time': '时间',
   'ui.settings.hits': '次数',
@@ -337,6 +338,7 @@ const zh: Record<string, string> = {
 const en: Record<string, string> = {
   'ui.nav.settings': 'Settings',
   'ui.settings.security_events': 'Security log',
+  'ui.torrent.seedbox': 'Seedbox',
   'ui.settings.ip_history': 'Sign-in IPs',
   'ui.settings.time': 'Time',
   'ui.settings.hits': 'Hits',

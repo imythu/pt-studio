@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-seedbox"
+description = "PT Studio seedbox registry (WASM): users register box IP ranges, staff review; accounting marks peers from them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

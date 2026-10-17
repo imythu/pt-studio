@@ -19,6 +19,8 @@ redis_global = [
   { role = "acct", prefix = "acct:", mode = "rw" },
   { role = "acct", prefix = "u:", mode = "rw" },
 ]
+# 盒子网段（seedbox 插件；未安装时不授予，按没有盒子处理）
+views = ["seedbox.v_ranges"]
 
 [[workers]]
 name = "ingest"
