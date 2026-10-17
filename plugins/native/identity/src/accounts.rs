@@ -227,8 +227,12 @@ pub async fn register(id: &Identity, ctx: &Ctx, req: RegisterRequest, origin: Or
         .get("initial_class_id")
         .and_then(serde_json::Value::as_i64)
         .unwrap_or(0);
+    // 邮箱验证：HTTP 注册在验证前为待验证（管理员与服务建号不需要）
+    let verify_email =
+        origin == Origin::Http && crate::policy::Policy::load(ctx).await.require_email_verification;
     let status = match attrs.get("initial_status").and_then(serde_json::Value::as_str) {
         Some("pending") => "pending",
+        _ if verify_email => "pending",
         _ => "active",
     };
     let mode = attrs
@@ -300,8 +304,22 @@ pub async fn register(id: &Identity, ctx: &Ctx, req: RegisterRequest, origin: Or
             .bind(keys.passkey_mac(&passkey))
             .execute(&mut *conn)
             .await?;
+        if verify_email {
+            sqlx::query(
+                "INSERT INTO restrictions (user_id, kind, source, reason_code) VALUES ($1, 'pending', 'identity', 'email_unverified')",
+            )
+            .bind(uid)
+            .execute(&mut *conn)
+            .await?;
+        }
         uid
     };
+    if verify_email {
+        crate::challenges::issue(id, ctx, uid, crate::challenges::EMAIL_VERIFY).await?;
+    }
+    if let Some(ip) = ip.as_deref() {
+        crate::risk::ip_log_upsert(ctx, keys, uid, ip, "register").await?;
+    }
     let mut public_attrs = serde_json::Map::new();
     for k in [
         "invite_id",

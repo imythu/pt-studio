@@ -132,6 +132,8 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .auth-form .switch { margin-top: 16px; text-align: center; color: var(--pt-color-muted); }
 .auth-form .brand-sm { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-family: var(--pt-font-display); }
 .notice { padding: 8px 12px; border-radius: var(--pt-radius); background: var(--pt-color-success-soft); color: var(--pt-color-success); font-weight: 550; margin-bottom: 14px; }
+.notice-warn { background: var(--pt-color-gold-soft); color: var(--pt-color-fg); }
+.linklike { background: none; border: 0; padding: 0; color: var(--pt-color-primary); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
 .lost { text-align: center; padding: 48px 0; }
 .lost svg { width: 260px; max-width: 80%; height: auto; }
 .lost h1 { margin: 10px 0 18px; }

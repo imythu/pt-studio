@@ -1,11 +1,12 @@
 //! identity 插件（docs/plugins/identity/）：账号、会话、`ctx.auth`、`ctx.rbac`、`ctx.users`。
 //!
 //! 已实现：注册、密码登录、会话、权限检查、用户摘要、passkey；等级（`set_class`）、等级角色、限制与有效状态（`status`）、
-//! 个人 API / MCP token（`tokens`）；登录限流、设备、IP 记录与安全事件（`risk`）。改名等按 03 详细设计在后续迭代实现。
+//! 个人 API / MCP token（`tokens`）；登录限流、设备、IP 记录与安全事件（`risk`）；邮箱验证与找回密码（`challenges`）。改名等按 03 详细设计在后续迭代实现。
 
 pub mod accounts;
 pub mod api;
 pub mod auth;
+pub mod challenges;
 pub mod crypto;
 mod http;
 mod mcp;
@@ -42,6 +43,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "0005_security.sql",
         include_str!("../migrations/0005_security.sql"),
+    ),
+    (
+        "0006_challenges.sql",
+        include_str!("../migrations/0006_challenges.sql"),
     ),
 ];
 
@@ -225,6 +230,18 @@ impl pt_plugin_api::JsonService for Svc {
                 Ok(
                     serde_json::json!({ "token_id": tid, "token": secret, "expires_at": expires.timestamp_millis() }),
                 )
+            }
+            // ctx.auth.challenge_delivery：作用域 challenges:deliver + 敏感能力 user.email（notify 投递验证 / 找回邮件）
+            "challenge_delivery" => {
+                let cid = a["challenge_id"]
+                    .as_str()
+                    .and_then(|c| uuid::Uuid::parse_str(c).ok())
+                    .ok_or_else(|| PluginError::validation("challenge_id"))?;
+                let idem = a["idempotency_key"]
+                    .as_str()
+                    .filter(|k| !k.is_empty() && k.len() <= 200)
+                    .ok_or_else(|| PluginError::validation("idempotency_key"))?;
+                challenges::delivery(&self.0, ctx, cid, idem).await
             }
             "revoke_token" => {
                 if !ctx.invocation.has_scope("tokens:issue") {

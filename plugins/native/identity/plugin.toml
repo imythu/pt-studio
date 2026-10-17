@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "账号、会话、鉴权（ctx.auth）、权限（ctx.rbac）、用户资料（ctx.users）"
 
 provides = ["ctx.auth@0.1.0", "ctx.rbac@0.1.0", "ctx.users@0.1.0"]
-publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.restriction_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset"]
+publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.restriction_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset", "user.challenge_issued", "user.verified"]
 
 [capabilities]
 kv = true
@@ -268,6 +268,34 @@ auth = "admin"
 permission = "identity.users.read_sensitive"
 rate_limit = "user:60/h"
 
+[[http.routes]]
+id = "resend_verification"
+method = "POST"
+path = "/v1/email-verifications"
+auth = "user"
+rate_limit = "user:3/h"
+
+[[http.routes]]
+id = "confirm_verification"
+method = "POST"
+path = "/v1/email-verifications/confirm"
+auth = "public"
+rate_limit = "ip:30/m"
+
+[[http.routes]]
+id = "request_password_reset"
+method = "POST"
+path = "/v1/password-resets"
+auth = "public"
+rate_limit = "ip:5/h"
+
+[[http.routes]]
+id = "confirm_password_reset"
+method = "POST"
+path = "/v1/password-resets/confirm"
+auth = "public"
+rate_limit = "ip:10/h"
+
 [[cron]]
 name = "ip_retention"
 schedule = "17 3 * * *"
@@ -349,7 +377,12 @@ views = ["v_user_public"]
 
 [settings_schema]
 type = "object"
-x-pt-order = ["login_user_lock_after", "login_user_window_secs", "login_ip_block_after", "login_ip_window_secs", "login_max_delay_secs", "login_alert", "ip_truncate_after_days", "ip_delete_after_days", "ip_show_full_to_owner"]
+x-pt-order = ["require_email_verification", "login_user_lock_after", "login_user_window_secs", "login_ip_block_after", "login_ip_window_secs", "login_max_delay_secs", "login_alert", "ip_truncate_after_days", "ip_delete_after_days", "ip_show_full_to_owner"]
+
+[settings_schema.properties.require_email_verification]
+type = "boolean"
+default = false
+title = "注册后必须验证邮箱（验证前只有访客权限；需先配置 notify 的邮件渠道）"
 
 [settings_schema.properties.login_user_lock_after]
 type = "integer"

@@ -74,6 +74,7 @@ async fn set_settings(v: Value) {
 
 struct Session {
     cookie: String,
+    csrf: String,
 }
 
 impl Session {
@@ -81,6 +82,7 @@ impl Session {
         assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
         Self {
             cookie: r.cookies.join("; "),
+            csrf: r.body["csrf_token"].as_str().unwrap().to_owned(),
         }
     }
     async fn get(&self, app: &Router, ip: &str, uri: &str) -> Resp {
@@ -250,4 +252,159 @@ async fn login_throttle_devices_and_ip_log() {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
     assert_eq!(alerts, 1, "exactly one alert for the one new device");
+}
+
+type Inbox = std::sync::Arc<std::sync::Mutex<Vec<Value>>>;
+
+/// 模拟 HTTP→SMTP 中继：记录请求体
+async fn mock_relay(inbox: Inbox) -> String {
+    let app = axum::Router::new().route(
+        "/send",
+        axum::routing::post(move |axum::Json(b): axum::Json<Value>| {
+            let inbox = inbox.clone();
+            async move {
+                inbox.lock().unwrap().push(b);
+                StatusCode::ACCEPTED
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}/send")
+}
+
+/// 等待发给 `to`、正文含 `path` 的第 `nth` 封邮件，返回 (challenge_id, token)
+async fn mail_link(inbox: &Inbox, to: &str, path: &str, nth: usize) -> (String, String) {
+    for _ in 0..100 {
+        let found = inbox
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m["to"] == to)
+            .filter_map(|m| m["text"].as_str().map(str::to_owned))
+            .filter(|t| t.contains(&format!("https://pt.test{path}?c=")))
+            .nth(nth);
+        if let Some(text) = found {
+            let url = text
+                .split_whitespace()
+                .find(|w| w.starts_with("https://pt.test"))
+                .unwrap()
+                .to_owned();
+            let q = url.split_once('?').unwrap().1;
+            let get = |k: &str| {
+                q.split('&')
+                    .find_map(|kv| kv.strip_prefix(&format!("{k}=")))
+                    .unwrap()
+                    .to_owned()
+            };
+            return (get("c"), get("t"));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    panic!("no mail to {to} with {path}: {:?}", inbox.lock().unwrap());
+}
+
+#[tokio::test]
+async fn email_verification_and_password_reset() {
+    let _guard = common::LOCK.lock().await;
+    reset().await;
+    let inbox: Inbox = std::sync::Arc::default();
+    let relay = mock_relay(inbox.clone()).await;
+    let dir = common::package_wasm_plugins();
+    let mut t = common::config_text();
+    t.push_str(&format!(
+        "\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n\n[grants.notify]\nsensitive = [\"user.email\"]\n\n[plugin.notify]\n\
+         email_provider = \"http_relay\"\nemail_endpoint = \"{relay}\"\nemail_token = \"t\"\nemail_from = \"noreply@pt.test\"\n\
+         site_name = \"PT Test\"\nsite_url = \"https://pt.test\"\nunsubscribe_secret = \"s\"\n",
+        dir.display()
+    ));
+    let kernel = Kernel::start(pt_kernel::config::SiteConfig::parse(&t).unwrap(), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+    set_settings(json!({ "require_email_verification": true })).await;
+
+    // 注册后为待验证：只有访客权限
+    let r = req(
+        &app,
+        "POST",
+        "/api/p/identity/v1/users",
+        "10.0.0.1",
+        &[],
+        Some(json!({ "username": "dave", "email": "Dave@Example.com", "password": "correct horse" })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["user"]["status"], "pending");
+    let dave = Session::of(&login(&app, "10.0.0.1", "dave", "correct horse", None).await);
+    let r = dave.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me").await;
+    assert_eq!(r.body["email_verified"], false);
+    let r = dave.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/tokens").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "pending users only have guest permissions");
+
+    // 验证邮件：链接只在邮件里，通知库不保存
+    let (c, tok) = mail_link(&inbox, "dave@example.com", "/verify-email", 0).await;
+    let links: i64 = sqlx::query_scalar("SELECT count(*) FROM notify.outbox WHERE link IS NOT NULL OR body LIKE '%t=%'")
+        .fetch_one(&mut db().await)
+        .await
+        .unwrap();
+    assert_eq!(links, 0);
+    let confirm = |c: &str, t: &str| {
+        let body = json!({ "challenge_id": c, "token": t });
+        let app = app.clone();
+        async move { req(&app, "POST", "/api/p/identity/v1/email-verifications/confirm", "10.0.0.1", &[], Some(body)).await }
+    };
+    let r = confirm(&c, "wrong-token").await;
+    assert_eq!(r.body["code"], "identity.challenge_invalid", "{:?}", r.body);
+    let r = confirm(&c, &tok).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = confirm(&c, &tok).await;
+    assert_eq!(r.body["code"], "identity.challenge_invalid", "links work once");
+    let r = dave.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me").await;
+    assert_eq!((r.body["email_verified"].clone(), r.body["user"]["status"].clone()), (json!(true), json!("active")));
+    let r = dave.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/tokens").await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // 找回密码：不存在的账号也返回 202；第二次申请使第一封的链接作废
+    let reset_req = |login: &str| {
+        let body = json!({ "login": login });
+        let app = app.clone();
+        async move { req(&app, "POST", "/api/p/identity/v1/password-resets", "10.0.0.5", &[], Some(body)).await }
+    };
+    assert_eq!(reset_req("ghost").await.status, StatusCode::ACCEPTED);
+    assert_eq!(reset_req("dave@example.com").await.status, StatusCode::ACCEPTED);
+    let (c1, t1) = mail_link(&inbox, "dave@example.com", "/reset-password", 0).await;
+    assert_eq!(reset_req("DAVE").await.status, StatusCode::ACCEPTED);
+    let (c2, t2) = mail_link(&inbox, "dave@example.com", "/reset-password", 1).await;
+    let reset = |c: &str, t: &str, pw: &str| {
+        let body = json!({ "challenge_id": c, "token": t, "new_password": pw });
+        let app = app.clone();
+        async move { req(&app, "POST", "/api/p/identity/v1/password-resets/confirm", "10.0.0.5", &[], Some(body)).await }
+    };
+    let r = reset(&c1, &t1, "brand new pass").await;
+    assert_eq!(r.body["code"], "identity.challenge_invalid", "superseded: {:?}", r.body);
+    let r = reset(&c2, &t2, "short").await;
+    assert_eq!(r.body["code"], "identity.password_weak", "{:?}", r.body);
+    let r = reset(&c2, &t2, "brand new pass").await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "a weak password does not consume the link: {:?}", r.body);
+    // 全部会话失效，旧密码不能用，新密码可以
+    let r = dave.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me").await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = login(&app, "10.0.0.1", "dave", "correct horse", None).await;
+    assert_eq!(r.body["code"], "identity.invalid_credentials");
+    let dave = Session::of(&login(&app, "10.0.0.1", "dave", "brand new pass", None).await);
+    let r = dave.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/security-events").await;
+    let kinds: Vec<&str> = r.body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"password_reset") && kinds.contains(&"email_verified"), "{kinds:?}");
+    let h = [("cookie", dave.cookie.as_str()), ("x-csrf-token", dave.csrf.as_str()), ("sec-fetch-site", "same-origin")];
+    let r = req(&app, "POST", "/api/p/identity/v1/email-verifications", "10.0.0.1", &h, Some(json!({}))).await;
+    assert_eq!(r.body["code"], "identity.email_already_verified", "{:?}", r.body);
+    let mails_to_ghost = inbox.lock().unwrap().iter().filter(|m| m["to"].as_str().unwrap_or("").contains("ghost")).count();
+    assert_eq!(mails_to_ghost, 0);
 }

@@ -75,6 +75,15 @@ try {
   await p.getByRole('button', { name: '注册' }).click();
   await p.waitForURL(`${BASE}/login`);
 
+  // 1b. 找回密码入口：申请后总是提示“如果账号存在…”（防枚举）
+  step('forgot password');
+  await p.getByRole('link', { name: '忘记密码？' }).click();
+  await p.waitForURL(`${BASE}/reset-password`);
+  await p.getByLabel('用户名或邮箱').fill('web_bob');
+  await p.getByRole('button', { name: '发送重置邮件' }).click();
+  await p.getByText(/如果账号存在/).waitFor();
+  await p.goto(`${BASE}/login`);
+
   // 2. 登录；用户菜单插槽（invite）
   step('login and user menu slot');
   await login(p, 'web_bob');

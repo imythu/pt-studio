@@ -15,7 +15,7 @@ use serde::Deserialize;
 use crate::{
     Identity, accounts,
     accounts::{Origin, RegisterRequest},
-    auth,
+    auth, challenges,
     policy::Policy,
     rbac, risk, settings, status, tokens,
 };
@@ -73,7 +73,54 @@ pub fn router(id: Arc<Identity>) -> Router {
             get(admin_security_events),
         )
         .route("/v1/admin/ip-lookups", get(admin_ip_lookup))
+        .route("/v1/email-verifications", post(resend_verification))
+        .route("/v1/email-verifications/confirm", post(confirm_email))
+        .route("/v1/password-resets", post(request_reset))
+        .route("/v1/password-resets/confirm", post(confirm_reset))
         .with_state(id)
+}
+
+async fn resend_verification(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Response> {
+    let uid = me_id(&ctx)?;
+    challenges::resend_verification(&id, &ctx, uid).await?;
+    Ok(StatusCode::ACCEPTED.into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct ChallengeBody {
+    challenge_id: String,
+    token: String,
+    #[serde(default)]
+    new_password: Option<String>,
+}
+
+async fn confirm_email(ctx: RequestCtx, Json(b): Json<ChallengeBody>) -> PResult<Response> {
+    challenges::confirm_email(&ctx, &b.challenge_id, &b.token).await?;
+    Ok(Json(json!({ "verified": true })).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct ResetRequest {
+    login: String,
+}
+
+/// 永远 202（防枚举）
+async fn request_reset(
+    State(id): State<Arc<Identity>>,
+    ctx: RequestCtx,
+    Json(b): Json<ResetRequest>,
+) -> PResult<Response> {
+    challenges::request_reset(&id, &ctx, &b.login).await?;
+    Ok(StatusCode::ACCEPTED.into_response())
+}
+
+async fn confirm_reset(ctx: RequestCtx, Json(b): Json<ChallengeBody>) -> PResult<Response> {
+    let pw = b
+        .new_password
+        .as_deref()
+        .ok_or_else(|| PluginError::validation("new_password is required"))?;
+    challenges::confirm_reset(&ctx, &b.challenge_id, &b.token, pw).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 fn me_id(ctx: &RequestCtx) -> PResult<i64> {
@@ -256,7 +303,14 @@ async fn me(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Respons
     let (_, roles) = rbac::effective_roles(&ctx, uid).await?;
     let mut roles: Vec<String> = roles.into_iter().collect();
     roles.sort();
-    Ok(Json(json!({ "user": u, "roles": roles })).into_response())
+    let verified: Option<bool> = {
+        let mut conn = ctx.sql.conn().await?;
+        sqlx::query_scalar("SELECT verified_at IS NOT NULL FROM user_emails WHERE user_id = $1")
+            .bind(uid)
+            .fetch_optional(&mut *conn)
+            .await?
+    };
+    Ok(Json(json!({ "user": u, "roles": roles, "email_verified": verified.unwrap_or(false) })).into_response())
 }
 
 async fn my_permissions(ctx: RequestCtx) -> PResult<Response> {

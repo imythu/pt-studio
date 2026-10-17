@@ -1,5 +1,5 @@
 // 登录 / 注册（identity）。插件经 `auth.*` 插槽向请求写入字段（FormBinding）。
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { api } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
@@ -73,7 +73,8 @@ export function Login() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const registered = (useLocation().state as { registered?: boolean } | null)?.registered;
+  const st = useLocation().state as { registered?: boolean; reset?: boolean } | null;
+  const registered = st?.registered;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -99,6 +100,7 @@ export function Login() {
       }
     >
       {registered && <p className="notice">{t('ui.register.done')}</p>}
+      {st?.reset && <p className="notice">{t('ui.reset.done')}</p>}
       <form onSubmit={submit}>
         <Field label={t('ui.login.username')}>
           <Input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
@@ -114,6 +116,9 @@ export function Login() {
         <Button type="submit" variant="primary" disabled={busy}>
           {t('ui.login.submit')}
         </Button>
+        <p className="small">
+          <Link to="/reset-password">{t('ui.reset.forgot')}</Link>
+        </p>
       </form>
     </AuthShell>
   );
@@ -164,6 +169,114 @@ export function Register() {
           {t('ui.register.submit')}
         </Button>
       </form>
+    </AuthShell>
+  );
+}
+
+/** 邮件链接 `?c=<挑战 ID>&t=<令牌>`：读出后立即从地址栏去掉令牌 */
+function useChallengeParams(): { c: string; t: string } | null {
+  const loc = useLocation();
+  const [p] = useState(() => {
+    const q = new URLSearchParams(loc.search);
+    const c = q.get('c');
+    const t = q.get('t');
+    return c && t ? { c, t } : null;
+  });
+  useEffect(() => {
+    if (p) window.history.replaceState(null, '', loc.pathname);
+  }, [p, loc.pathname]);
+  return p;
+}
+
+export function ResetPassword() {
+  const t = useT();
+  const nav = useNavigate();
+  const challenge = useChallengeParams();
+  const [login, setLogin] = useState('');
+  const [pw, setPw] = useState('');
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (e: FormEvent, f: () => Promise<void>) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await f();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <AuthShell
+      title={t('ui.reset.title')}
+      sub={challenge ? t('ui.reset.sub_new') : t('ui.reset.sub_request')}
+      foot={<Link to="/login">{t('ui.nav.login')}</Link>}
+    >
+      {challenge ? (
+        <form
+          onSubmit={(e) =>
+            run(e, async () => {
+              await api('/api/p/identity/v1/password-resets/confirm', { json: { challenge_id: challenge.c, token: challenge.t, new_password: pw } });
+              nav('/login', { state: { reset: true } });
+            })
+          }
+        >
+          <Field label={t('ui.settings.new_password')}>
+            <Input name="new_password" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={8} />
+          </Field>
+          <ErrorText error={error} />
+          <Button type="submit" variant="primary" disabled={busy}>
+            {t('ui.reset.set')}
+          </Button>
+        </form>
+      ) : sent ? (
+        <p className="notice">{t('ui.reset.sent')}</p>
+      ) : (
+        <form
+          onSubmit={(e) =>
+            run(e, async () => {
+              await api('/api/p/identity/v1/password-resets', { json: { login } });
+              setSent(true);
+            })
+          }
+        >
+          <Field label={t('ui.reset.login')}>
+            <Input name="login" autoComplete="username" value={login} onChange={(e) => setLogin(e.target.value)} required />
+          </Field>
+          <ErrorText error={error} />
+          <Button type="submit" variant="primary" disabled={busy}>
+            {t('ui.reset.send')}
+          </Button>
+        </form>
+      )}
+    </AuthShell>
+  );
+}
+
+export function VerifyEmail() {
+  const t = useT();
+  const s = useSession();
+  const challenge = useChallengeParams();
+  const [state, setState] = useState<'busy' | 'ok' | unknown>(challenge ? 'busy' : null);
+  const started = useRef(false);
+  useEffect(() => {
+    if (!challenge || started.current) return;
+    started.current = true;
+    api('/api/p/identity/v1/email-verifications/confirm', { json: { challenge_id: challenge.c, token: challenge.t } })
+      .then(async () => {
+        setState('ok');
+        await s.refresh();
+      })
+      .catch((e: unknown) => setState(e));
+  }, [challenge, s]);
+  return (
+    <AuthShell title={t('ui.verify.title')} sub="" foot={<Link to="/">{t('ui.nav.home')}</Link>}>
+      {state === 'busy' && <p>…</p>}
+      {state === 'ok' && <p className="notice">{t('ui.verify.done')}</p>}
+      {state !== 'busy' && state !== 'ok' && <ErrorText error={state ?? new Error(t('identity.challenge_invalid'))} />}
     </AuthShell>
   );
 }

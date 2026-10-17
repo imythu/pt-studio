@@ -465,6 +465,9 @@ pub async fn retention(ctx: &Ctx) -> PResult<()> {
         sqlx::query("DELETE FROM devices WHERE last_seen_at < now() - interval '400 days'")
             .execute(&mut *conn)
             .await?;
+        sqlx::query("DELETE FROM challenges WHERE expires_at < now() - interval '7 days'")
+            .execute(&mut *conn)
+            .await?;
     }
     ctx.sql.commit().await
 }

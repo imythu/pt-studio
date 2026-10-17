@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "通知：插件经 ctx.notify 发送；站内通知中心（未读数与已读）与邮件渠道（http_relay / Postmark / SendGrid），按类别与渠道的接收偏好、一键退订（Telegram / Discord 待接入）"
 
 provides = ["ctx.notify@0.1.0"]
-optional_requires = ["ctx.users@^0.1"]
+optional_requires = ["ctx.users@^0.1", "ctx.auth@^0.1"]
 
 [capabilities]
 sql = true
@@ -21,7 +21,15 @@ http_outbound = [
   { config = "email_endpoint", allow_private = true },
 ]
 
-# 账号安全通知：新设备登录提醒（identity 发布，notify 投递）
+[capabilities.scopes]
+"ctx.auth" = ["challenges:deliver"]
+
+# 账号安全邮件（identity 发布，notify 投递）：邮箱验证 / 找回密码、新设备登录提醒
+[[subscriptions]]
+name = "on_challenge"
+event = "user.challenge_issued"
+start = "latest"
+
 [[subscriptions]]
 name = "on_login"
 event = "user.logged_in"

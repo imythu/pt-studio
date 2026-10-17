@@ -6,7 +6,7 @@ import { useT } from '@pt-studio/terms';
 import { AdminHome, AdminPluginRoute } from './pages/Admin';
 import { AdminUser, AdminUsers } from './pages/AdminUsers';
 import { SettingsPage } from './pages/Settings';
-import { Login, Register } from './pages/Auth';
+import { Login, Register, ResetPassword, VerifyEmail } from './pages/Auth';
 import { PluginRoute } from './pages/PluginRoute';
 import { ProfilePage } from './pages/Profile';
 import { GroupPage, Home, TorrentList, TorrentPage, Upload } from './pages/Torrents';
@@ -46,6 +46,8 @@ export const router = createBrowserRouter([
       { index: true, element: page('home', Home) },
       { path: 'login', element: page('login', Login) },
       { path: 'register', element: page('register', Register) },
+      { path: 'reset-password', element: <ResetPassword /> },
+      { path: 'verify-email', element: <VerifyEmail /> },
       { path: 'torrents', element: <RequireLogin>{page('torrents', TorrentList)}</RequireLogin> },
       { path: 'torrents/:id', element: <RequireLogin>{page('torrent', TorrentPage)}</RequireLogin> },
       { path: 'groups/:id', element: <RequireLogin>{page('group', GroupPage)}</RequireLogin> },

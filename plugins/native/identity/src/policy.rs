@@ -21,6 +21,8 @@ pub struct Policy {
     pub ip_delete_after_days: i64,
     /// 用户在自己的安全页能否看到完整 IP（否则只显示截断形式）
     pub ip_show_full_to_owner: bool,
+    /// 注册后需验证邮箱（之前为待验证状态，只有访客权限）；需要已配置邮件渠道
+    pub require_email_verification: bool,
 }
 
 fn int(s: &Value, k: &str, d: i64, lo: i64, hi: i64) -> i64 {
@@ -44,6 +46,7 @@ impl Policy {
             ip_truncate_after_days: truncate,
             ip_delete_after_days: int(s, "ip_delete_after_days", 365, truncate, 3650),
             ip_show_full_to_owner: flag(s, "ip_show_full_to_owner", false),
+            require_email_verification: flag(s, "require_email_verification", false),
         }
     }
 

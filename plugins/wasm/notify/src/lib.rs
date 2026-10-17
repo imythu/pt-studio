@@ -453,7 +453,7 @@ fn finish(id: i64, state: &str, error: Option<&str>) -> R<()> {
 /// 投递一封邮件（延迟任务 `deliver`）：临时失败返回错误，由内核重试
 fn deliver(id: i64) -> R<()> {
     let r = sql::query(
-        "SELECT user_id, category, title, body, link, state FROM outbox WHERE id = $1",
+        "SELECT user_id, category, title, body, link, state, challenge_id::text FROM outbox WHERE id = $1",
         &[SqlValue::Int(id)],
     )?;
     let Some(row) = r.rows.first() else {
@@ -471,23 +471,46 @@ fn deliver(id: i64) -> R<()> {
     let Some(cfg) = email_config() else {
         return finish(id, "skipped", Some("email channel is not configured"));
     };
-    // 投递前再确认偏好（排队期间可能已退订）
-    if !enabled(uid, &category, "email")? {
-        return finish(id, "skipped", Some("unsubscribed"));
-    }
-    let addr = match services::call(
-        "ctx.users",
-        "get_sensitive",
-        &json!({ "id": uid, "field": "email" }).to_string(),
-    ) {
-        Ok(v) => serde_json::from_str::<Value>(&v).unwrap_or(Value::Null),
-        Err(e) if e.code == "kernel.capability_denied" => {
-            return finish(id, "skipped", Some("user.email is not granted to notify"));
+    let (to, link) = if let Some(cid) = text(&row[6]) {
+        // 邮件挑战：收件人与链接由 identity 给出（邮箱可以尚未验证）
+        let r = services::call(
+            "ctx.auth",
+            "challenge_delivery",
+            &json!({ "challenge_id": cid, "idempotency_key": format!("outbox:{id}") }).to_string(),
+        );
+        match r {
+            Ok(v) => {
+                let v: Value = serde_json::from_str(&v).unwrap_or(Value::Null);
+                match (v["to"].as_str(), v["link"].as_str()) {
+                    (Some(to), Some(link)) => (to.to_owned(), Some(link.to_owned())),
+                    _ => return finish(id, "skipped", Some("challenge has no recipient")),
+                }
+            }
+            Err(e) if e.code.starts_with("identity.challenge_") || e.code == "kernel.capability_denied" => {
+                return finish(id, "skipped", Some(&e.code));
+            }
+            Err(e) => return Err(e),
         }
-        Err(e) => return Err(e),
-    };
-    let Some(to) = addr["value"].as_str().filter(|_| addr["verified"] == true) else {
-        return finish(id, "skipped", Some("no verified email address"));
+    } else {
+        // 投递前再确认偏好（排队期间可能已退订）
+        if !enabled(uid, &category, "email")? {
+            return finish(id, "skipped", Some("unsubscribed"));
+        }
+        let addr = match services::call(
+            "ctx.users",
+            "get_sensitive",
+            &json!({ "id": uid, "field": "email" }).to_string(),
+        ) {
+            Ok(v) => serde_json::from_str::<Value>(&v).unwrap_or(Value::Null),
+            Err(e) if e.code == "kernel.capability_denied" => {
+                return finish(id, "skipped", Some("user.email is not granted to notify"));
+            }
+            Err(e) => return Err(e),
+        };
+        let Some(to) = addr["value"].as_str().filter(|_| addr["verified"] == true) else {
+            return finish(id, "skipped", Some("no verified email address"));
+        };
+        (to.to_owned(), text(&row[4]))
     };
     let unsub = (!cfg.unsubscribe_secret.is_empty() && category != "security" && !cfg.site_url.is_empty())
         .then(|| {
@@ -504,10 +527,10 @@ fn deliver(id: i64) -> R<()> {
         });
     let m = email::compose(
         &cfg,
-        to,
+        &to,
         &text(&row[2]).unwrap_or_default(),
         &text(&row[3]).unwrap_or_default(),
-        text(&row[4]).as_deref(),
+        link.as_deref(),
         unsub,
     );
     let req = email::request(&cfg, &m);
@@ -553,6 +576,7 @@ impl on_event::Guest for Notify {
         let p: Value = serde_json::from_str(&evt.payload).unwrap_or(Value::Null);
         match d.subscription.as_str() {
             "on_login" => on_login(&p, &evt.id),
+            "on_challenge" => on_challenge(&p),
             _ => Ok(()),
         }
     }
@@ -580,6 +604,47 @@ fn on_login(p: &Value, event_id: &str) -> R<()> {
         idem: Some(format!("login:{event_id}")),
         channels: CHANNELS.iter().map(|c| (*c).to_owned()).collect(),
     })?;
+    Ok(())
+}
+
+/// 邮箱验证 / 找回密码邮件：只记挑战 ID，投递时取链接（不受每小时上限约束，identity 自己限流）
+fn on_challenge(p: &Value) -> R<()> {
+    let (Some(uid), Some(cid)) = (p["user_id"].as_i64(), p["challenge_id"].as_str()) else {
+        return Ok(());
+    };
+    if email_config().is_none() {
+        return Ok(());
+    }
+    let zh = p["locale"].as_str().unwrap_or("zh-CN").starts_with("zh");
+    let purpose = p["purpose"].as_str().unwrap_or("");
+    let (title, body) = match (purpose, zh) {
+        ("password_reset", true) => ("找回密码", "有人（希望是你）申请重置这个账号的密码。点击下面的链接设置新密码，链接 1 小时内有效、只能使用一次。\n如果不是你本人操作，请忽略这封邮件，密码不会改变。"),
+        ("password_reset", false) => ("Reset your password", "Someone (hopefully you) asked to reset the password for this account. Open the link below to choose a new one; it works once and expires in an hour.\nIf this wasn't you, ignore this email and your password stays the same."),
+        ("email_verify", true) => ("验证邮箱", "请点击下面的链接验证你的邮箱地址，链接 48 小时内有效。"),
+        ("email_verify", false) => ("Verify your email address", "Open the link below to verify your email address. It expires in 48 hours."),
+        _ => return Ok(()),
+    };
+    let r = sql::query(
+        "INSERT INTO outbox (user_id, channel, owner_plugin, template_key, category, title, body, idempotency_key, challenge_id)
+         VALUES ($1, 'email', 'notify', $2, 'security', $3, $4, $5, $6::uuid)
+         ON CONFLICT DO NOTHING RETURNING id",
+        &[
+            SqlValue::Int(uid),
+            SqlValue::Text(format!("notify.challenge.{purpose}")),
+            SqlValue::Text(title.into()),
+            SqlValue::Text(body.into()),
+            SqlValue::Text(format!("challenge:{cid}")),
+            SqlValue::Text(cid.into()),
+        ],
+    )?;
+    if let Some(id) = r.rows.first().and_then(|r| int(&r[0])) {
+        jobs::schedule_once(
+            "deliver",
+            time::now(),
+            &json!({ "outbox_id": id }).to_string(),
+            Some(&format!("outbox:{id}")),
+        )?;
+    }
     Ok(())
 }
 

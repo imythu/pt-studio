@@ -202,6 +202,28 @@ function TabBar() {
   );
 }
 
+/** 邮箱未验证提示：重发验证邮件 */
+function VerifyBanner() {
+  const t = useT();
+  const [state, setState] = useState<'idle' | 'sent' | 'error'>('idle');
+  const resend = () =>
+    api('/api/p/identity/v1/email-verifications', { json: {} })
+      .then(() => setState('sent'))
+      .catch(() => setState('error'));
+  return (
+    <p className="notice notice-warn" role="status">
+      {t('ui.verify.banner')}{' '}
+      {state === 'idle' ? (
+        <button type="button" className="linklike" onClick={resend}>
+          {t('ui.verify.resend')}
+        </button>
+      ) : (
+        t(state === 'sent' ? 'ui.verify.resent' : 'ui.verify.resend_failed')
+      )}
+    </p>
+  );
+}
+
 export function Layout() {
   const t = useT();
   const s = useSession();
@@ -273,6 +295,7 @@ export function Layout() {
         </div>
       </header>
       <main className={`content${bare ? ' content-bare' : ''}`}>
+        {s.me && !s.emailVerified && <VerifyBanner />}
         <Outlet />
       </main>
       <footer className="footer">

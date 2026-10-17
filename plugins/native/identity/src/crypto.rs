@@ -198,6 +198,11 @@ pub fn truncate_ip(ip: &str) -> String {
     }
 }
 
+/// 常数时间比较（长度不同直接返回 false）
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 pub fn sha256(data: &[u8]) -> Vec<u8> {
     Sha256::digest(data).to_vec()
 }

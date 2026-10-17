@@ -76,6 +76,7 @@ JSON 示例：
 |---|---|---|---|
 | `user.registered` | identity | `user:<id>` | `user_id, username, status, inviter_id?, registration_mode, class_id, attributes{invite_id?, initial_class_id?, tags?}` |
 | `user.verified` | identity | `user:<id>` | `user_id, method(email/admin)` |
+| `user.challenge_issued` | identity | `user:<id>` | `user_id, challenge_id, purpose(email_verify/password_reset), expires_at, locale`（不含令牌；投递方调用 `ctx.auth.challenge_delivery`） |
 | `user.logged_in` | identity | `user:<id>` | `user_id, method(password/webauthn/token), two_factor: bool, session_id` |
 | `user.login_failed` | identity | `user:<id>` 或 `global` | `user_id?, username_attempted, reason` |
 | `user.profile_updated` | identity | `user:<id>` | `user_id, fields[]` |
