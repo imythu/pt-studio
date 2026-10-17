@@ -131,7 +131,7 @@
 - [x] M1.3 TOTP 两步验证 + 恢复码 + 登录第二步票据 + 近期重新验证（reauth），按角色强制 2FA
 - [x] M1.4 WebAuthn：作为第二因素与无密码登录（通行密钥）
 - [x] M1.5 人机验证（captcha 插件：Cloudflare Turnstile / hCaptcha / reCAPTCHA v2，注册、登录、找回密码；签到待接入）
-- [ ] M1.6 registration-policy：开放 / 邀请 / 申请 / 关闭、注册时段与名额、邮箱域名黑白名单
+- [x] M1.6 registration-policy：开放 / 邀请 / 申请 / 关闭、注册时段与名额、邮箱域名黑白名单
 
 ### M2 能稳定开站
 

@@ -315,6 +315,15 @@ pub async fn register(id: &Identity, ctx: &Ctx, req: RegisterRequest, origin: Or
             .execute(&mut *conn)
             .await?;
         }
+        // 注册钩子要求审核（如 registration-policy 的开放注册审核）：管理员在后台解除这条限制即通过
+        if attrs.get("initial_status").and_then(serde_json::Value::as_str) == Some("pending") {
+            sqlx::query(
+                "INSERT INTO restrictions (user_id, kind, source, reason_code) VALUES ($1, 'pending', 'identity:review', 'registration_review')",
+            )
+            .bind(uid)
+            .execute(&mut *conn)
+            .await?;
+        }
         uid
     };
     if verify_email {

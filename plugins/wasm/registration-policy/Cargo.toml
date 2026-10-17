@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-registration-policy"
+description = "PT Studio registration policy (WASM): open / invite channels, schedules, limited windows, caps, IP and email-domain gates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

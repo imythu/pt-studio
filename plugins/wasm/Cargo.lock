@@ -345,6 +345,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-registration-policy"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-reports"
 version = "0.1.0"
 dependencies = [

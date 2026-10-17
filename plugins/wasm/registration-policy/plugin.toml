@@ -1,0 +1,167 @@
+id = "registration-policy"
+name = "注册策略"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "注册策略：开放注册开关与每周时段、限时开放（可限名额）、邀请注册开关、全站用户上限、同 IP / 同网段注册上限、邮箱域名黑白名单、开放注册审核"
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public"]
+
+[[hooks]]
+hook = "user.before_register"
+# 在 invite（10）校验邀请码之后
+priority = 20
+timeout_ms = 300
+
+[[subscriptions]]
+name = "on_registered"
+event = "user.registered"
+ordered = true
+
+[[cron]]
+name = "sweep"
+schedule = "*/10 * * * *"
+tx = "manual"
+
+[[http.routes]]
+id = "status"
+method = "GET"
+path = "/v1/status"
+auth = "public"
+rate_limit = "ip:120/m"
+
+[[http.routes]]
+id = "list_windows"
+method = "GET"
+path = "/v1/admin/windows"
+auth = "admin"
+permission = "registration-policy.manage"
+
+[[http.routes]]
+id = "create_window"
+method = "POST"
+path = "/v1/admin/windows"
+auth = "admin"
+permission = "registration-policy.manage"
+rate_limit = "user:60/h"
+
+[[http.routes]]
+id = "cancel_window"
+method = "DELETE"
+path = "/v1/admin/windows/{id}"
+auth = "admin"
+permission = "registration-policy.manage"
+
+[[permissions]]
+name = "registration-policy.manage"
+description_term = "registration-policy.perm.manage"
+default_roles = ["admin"]
+
+[error_codes]
+"registration-policy.closed" = 403
+"registration-policy.invite_required" = 403
+"registration-policy.email_domain_denied" = 422
+"registration-policy.ip_limit_reached" = 429
+"registration-policy.window_overlap" = 409
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["auth.register.form_extra"]
+routes = ["/admin/p/registration-policy/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["open_enabled", "schedule", "open_review", "invite_enabled", "max_users", "per_ip_max", "per_ip_window_hours", "per_prefix_max", "per_prefix_window_hours", "email_domain_deny", "email_domain_allow", "email_allowlist_only", "utc_offset_minutes", "closed_message"]
+
+[settings_schema.properties.open_enabled]
+type = "boolean"
+default = true
+title = "开放注册（关闭后只能邀请注册，或在限时开放窗口内注册）"
+
+[settings_schema.properties.schedule]
+type = "array"
+title = "开放注册的时段（空 = 全天；按站点时区）"
+default = []
+items = { type = "object", required = ["days", "from", "to"], properties = { days = { type = "array", title = "星期（0 = 周日）", items = { type = "integer", minimum = 0, maximum = 6 } }, from = { type = "string", title = "开始（HH:MM）", pattern = "^([01][0-9]|2[0-3]):[0-5][0-9]$" }, to = { type = "string", title = "结束（HH:MM，可跨午夜）", pattern = "^([01][0-9]|2[0-3]):[0-5][0-9]$" } } }
+
+[settings_schema.properties.open_review]
+type = "boolean"
+default = false
+title = "开放注册的新用户需要管理员审核（审核前为待审核状态）"
+
+[settings_schema.properties.invite_enabled]
+type = "boolean"
+default = true
+title = "允许邀请注册"
+
+[settings_schema.properties.max_users]
+type = "integer"
+minimum = 0
+default = 0
+title = "全站用户上限（0 = 不限；邀请注册同样受限）"
+
+[settings_schema.properties.per_ip_max]
+type = "integer"
+minimum = 0
+default = 3
+title = "同一 IP 在时间窗内最多注册几个账号（0 = 不限）"
+
+[settings_schema.properties.per_ip_window_hours]
+type = "integer"
+minimum = 1
+maximum = 8760
+default = 24
+title = "同 IP 限制的时间窗（小时）"
+
+[settings_schema.properties.per_prefix_max]
+type = "integer"
+minimum = 0
+default = 0
+title = "同一网段（IPv4 /24、IPv6 /48）在时间窗内最多注册几个账号（0 = 不限）"
+
+[settings_schema.properties.per_prefix_window_hours]
+type = "integer"
+minimum = 1
+maximum = 8760
+default = 24
+title = "同网段限制的时间窗（小时）"
+
+[settings_schema.properties.email_domain_deny]
+type = "array"
+title = "禁止的邮箱域名（example.com 精确匹配；.example.com 匹配所有子域）"
+default = []
+items = { type = "string", maxLength = 253 }
+
+[settings_schema.properties.email_domain_allow]
+type = "array"
+title = "允许的邮箱域名（只在“仅允许名单内域名”开启时生效）"
+default = []
+items = { type = "string", maxLength = 253 }
+
+[settings_schema.properties.email_allowlist_only]
+type = "boolean"
+default = false
+title = "仅允许名单内的邮箱域名"
+
+[settings_schema.properties.utc_offset_minutes]
+type = "integer"
+minimum = -720
+maximum = 840
+title = "时段使用的时区偏移（分钟；留空按站点时区，未知时区按 UTC）"
+
+[settings_schema.properties.closed_message]
+type = "string"
+maxLength = 500
+title = "注册关闭时显示的说明"
+
+[terms]
+"registration-policy.name" = { zh-CN = "注册策略", en = "Registration policy" }
+"registration-policy.perm.manage" = { zh-CN = "管理注册策略", en = "Manage registration policy" }
