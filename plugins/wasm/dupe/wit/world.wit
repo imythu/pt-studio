@@ -1,0 +1,8 @@
+package pt:dupe-plugin@0.1.0;
+
+world dupe {
+  include pt:plugin/host@1.0.0;
+  export pt:plugin/hooks@1.0.0;
+  export pt:plugin/on-event@1.0.0;
+  export pt:plugin/http-handler@1.0.0;
+}

@@ -6,7 +6,18 @@ use crate::bencode;
 pub fn sample_v1(name: &str, files: &[(&str, u64)], private: bool) -> Vec<u8> {
     let pl: u64 = 16_384;
     let total: u64 = files.iter().map(|f| f.1).sum();
-    let pieces = vec![7u8; usize::try_from(total.div_ceil(pl) * 20).unwrap_or(0)];
+    // piece 哈希随名称与文件列表变化：不同种子的内容指纹不同（相同输入仍得到相同种子）
+    let seed = {
+        use sha2::Digest as _;
+        let mut h = sha2::Sha256::new();
+        h.update(name.as_bytes());
+        for (p, s) in files {
+            h.update(p.as_bytes());
+            h.update(s.to_le_bytes());
+        }
+        h.finalize()
+    };
+    let pieces: Vec<u8> = (0..usize::try_from(total.div_ceil(pl) * 20).unwrap_or(0)).map(|i| seed[i % 32]).collect();
     let mut fl = vec![b'l'];
     for (p, s) in files {
         let mut e = Vec::new();

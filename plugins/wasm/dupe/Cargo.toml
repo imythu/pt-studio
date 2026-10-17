@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-dupe"
+description = "PT Studio dupe and trump rules (WASM): same-content and same-slot checks, trump requests and approvals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

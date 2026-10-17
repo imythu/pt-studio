@@ -1,0 +1,126 @@
+id = "dupe"
+name = "去重与替代"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "去重与替代：拒绝内容相同的重复发布，同作品同规格的种子进入审核队列（或直接拒绝），新种子申请替代旧种子、管理员批准后旧种子下架并通知下载过的用户"
+
+requires = ["ctx.rbac@^0.1", "ctx.torrents@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
+publishes = ["torrent.trumped"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_public", "torrent.v_torrent_fields", "torrent.v_torrent_fingerprint", "torrent.v_torrent_tracker", "accounting.v_snatch", "identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.torrents" = ["write:status"]
+"ctx.notify" = ["send"]
+
+[[hooks]]
+hook = "torrent.before_upload"
+priority = 30
+
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+
+[[subscriptions]]
+name = "on_torrent_deleted"
+event = "torrent.deleted"
+
+[[http.routes]]
+id = "torrent"
+method = "GET"
+path = "/v1/torrents/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "request"
+method = "POST"
+path = "/v1/trumps"
+auth = "user"
+permission = "dupe.request"
+rate_limit = "user:20/m"
+
+[[http.routes]]
+id = "queue"
+method = "GET"
+path = "/v1/admin/queue"
+auth = "admin"
+permission = "dupe.manage"
+
+[[http.routes]]
+id = "decide"
+method = "POST"
+path = "/v1/admin/trumps/{id}/decision"
+auth = "admin"
+permission = "dupe.manage"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "dismiss"
+method = "POST"
+path = "/v1/admin/candidates/{id}/dismiss"
+auth = "admin"
+permission = "dupe.manage"
+rate_limit = "user:120/m"
+
+[[permissions]]
+name = "dupe.request"
+description_term = "dupe.perm.request"
+default_roles = ["user"]
+
+[[permissions]]
+name = "dupe.manage"
+description_term = "dupe.perm.manage"
+default_roles = ["moderator"]
+
+[error_codes]
+"dupe.same_content" = 409
+"dupe.slot_taken" = 409
+"dupe.not_same_work" = 422
+"dupe.not_trumpable" = 422
+"dupe.already_requested" = 409
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.detail.info", "admin.dashboard.widgets"]
+routes = ["/admin/p/dupe/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["content_check", "slot_policy", "slot_fields", "notify_snatchers"]
+
+[settings_schema.properties.content_check]
+type = "boolean"
+default = true
+title = "拒绝与已有种子内容相同的发布（piece 指纹一致，如改了 source 标记重新制种）"
+
+[settings_schema.properties.slot_policy]
+type = "string"
+enum = ["off", "review", "block"]
+default = "review"
+title = "同作品同规格：off 不检查 / review 发布后进入审核队列 / block 直接拒绝"
+
+[settings_schema.properties.slot_fields]
+type = "array"
+items = { type = "string" }
+default = ["resolution", "source", "video_codec", "hdr", "edition"]
+title = "决定“同规格”的字段"
+
+[settings_schema.properties.notify_snatchers]
+type = "boolean"
+default = true
+title = "替代后通知下载完成过旧种子的用户"
+
+[terms]
+"dupe.name" = { zh-CN = "去重与替代", en = "Dupes & trumps" }
+"dupe.perm.request" = { zh-CN = "申请替代", en = "Request trumps" }
+"dupe.perm.manage" = { zh-CN = "处理重复与替代", en = "Handle dupes and trumps" }
