@@ -336,6 +336,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-lottery"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+ "sha2",
+]
+
+[[package]]
 name = "pt-wasm-medals"
 version = "0.1.0"
 dependencies = [

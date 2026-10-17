@@ -141,8 +141,9 @@ JSON 示例：
 | `bonus.hourly_settled` | bonus | `user:<id>` | `user_id, period_start, amount, currency, breakdown{}` |
 | `shop.item_purchased` | shop | `user:<id>` | `order_id, user_id, item_id, kind, qty, price, currency` |
 | `checkin.checked_in` | checkin | `user:<id>` | `user_id, date, streak, reward` |
-| `lottery.ticket_bought` | lottery | `user:<id>` | `round_id, user_id, tickets, cost` |
-| `lottery.round_drawn` | lottery | `global` | `round_id, winners[{user_id, prize}]` |
+| `lottery.ticket_bought` | lottery | `user:<id>` | `round_id, user_id, tickets, cost, first_no, currency` |
+| `lottery.round_drawn` | lottery | `global` | `round_id, winners[{user_id, tier, ticket_no, prize}]`（最多 100 条）、`winners_truncated` |
+| `lottery.round_cancelled` | lottery | `global` | `round_id, reason, refunded_batches` |
 | `medal.granted` | medals | `user:<id>` | `user_id, medal_id, reason` |
 | `medal.revoked` | medals | `user:<id>` | `user_id, medal_id, reason` |
 

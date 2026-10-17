@@ -437,6 +437,26 @@ try {
   await p.getByRole('menuitem', { name: '个人主页' }).click();
   await p.locator('[data-testid=medal-display]', { hasText: '网页元老' }).waitFor();
 
+  // 6k. 抽奖：后台开期 → 用户买票 → 立即开奖 → 浏览器内复算验证
+  step('lottery');
+  await a.goto(`${BASE}/admin/p/lottery/`);
+  await a.locator('input[name=round_title]').fill('网页抽奖');
+  await a.locator('input[name=round_price]').fill('1');
+  await a.locator('input[name=round_min]').fill('1');
+  await a.locator('input[name=round_tiers]').fill('1:50');
+  await a.getByRole('button', { name: '开期' }).click();
+  await a.getByRole('link', { name: '网页抽奖' }).waitFor();
+  await p.goto(`${BASE}/p/lottery/`);
+  await p.getByRole('link', { name: '网页抽奖' }).click();
+  await p.getByRole('button', { name: /^购买/ }).click();
+  await p.getByText(/已购买 1 张/).waitFor();
+  await a.getByRole('button', { name: '立即开奖' }).click();
+  await a.getByText('已开奖').waitFor();
+  await p.reload();
+  await p.getByRole('heading', { name: '中奖名单' }).waitFor();
+  await p.getByRole('button', { name: '在浏览器中复算' }).click();
+  await p.getByText(/验证通过/).waitFor();
+
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);

@@ -1,0 +1,141 @@
+id = "lottery"
+name = "抽奖"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "抽奖：管理员开期，用户用魔力值买票，到期按 commit-reveal 开奖（结果由公开前承诺的种子与全部票据的哈希链决定，可验证），奖池扣除抽水后按奖级派奖；票数不足自动取消并退款。默认关闭"
+
+provides = ["ctx.lottery@0.1.0"]
+requires = ["ctx.ledger@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
+publishes = ["lottery.ticket_bought", "lottery.round_drawn", "lottery.round_cancelled"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.ledger" = ["currency:bonus"]
+"ctx.notify" = ["send"]
+
+[[cron]]
+name = "tick"
+schedule = "* * * * *"
+timeout_secs = 300
+tx = "manual"
+
+[[http.routes]]
+id = "rounds"
+method = "GET"
+path = "/v1/rounds"
+auth = "user"
+
+[[http.routes]]
+id = "round"
+method = "GET"
+path = "/v1/rounds/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "buy"
+method = "POST"
+path = "/v1/rounds/{id}/tickets"
+auth = "user"
+permission = "lottery.use"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "verify"
+method = "GET"
+path = "/v1/rounds/{id}/verify"
+auth = "user"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+
+[[http.routes]]
+id = "admin_rounds"
+method = "GET"
+path = "/v1/admin/rounds"
+auth = "admin"
+permission = "lottery.manage"
+
+[[http.routes]]
+id = "admin_create"
+method = "POST"
+path = "/v1/admin/rounds"
+auth = "admin"
+permission = "lottery.manage"
+
+[[http.routes]]
+id = "admin_cancel"
+method = "POST"
+path = "/v1/admin/rounds/{id}/cancel"
+auth = "admin"
+permission = "lottery.manage"
+
+[[http.routes]]
+id = "admin_draw"
+method = "POST"
+path = "/v1/admin/rounds/{id}/draw"
+auth = "admin"
+permission = "lottery.manage"
+
+[[permissions]]
+name = "lottery.use"
+description_term = "lottery.perm.use"
+default_roles = ["user"]
+
+[[permissions]]
+name = "lottery.manage"
+description_term = "lottery.perm.manage"
+default_roles = ["admin"]
+
+[error_codes]
+"lottery.disabled" = 403
+"lottery.not_eligible" = 403
+"lottery.closed" = 409
+"lottery.limit_reached" = 409
+"lottery.insufficient_funds" = 402
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.main", "home.widgets"]
+routes = ["/p/lottery/*", "/admin/p/lottery/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["enabled", "min_account_days", "max_tickets_per_buy"]
+
+[settings_schema.properties.enabled]
+type = "boolean"
+default = false
+title = "开启抽奖（请确认符合当地法规与站点规则；关闭时不能买票，已开的期次照常开奖）"
+
+[settings_schema.properties.min_account_days]
+type = "integer"
+minimum = 0
+maximum = 365
+default = 7
+title = "注册满多少天才能买票"
+
+[settings_schema.properties.max_tickets_per_buy]
+type = "integer"
+minimum = 1
+maximum = 1000
+default = 100
+title = "单次最多买几张"
+
+[terms]
+"lottery.name" = { zh-CN = "抽奖", en = "Lottery" }
+"lottery.perm.use" = { zh-CN = "购买彩票", en = "Buy lottery tickets" }
+"lottery.perm.manage" = { zh-CN = "管理抽奖", en = "Manage the lottery" }

@@ -80,6 +80,11 @@ async fn web_end_to_end() {
         .execute(&mut db)
         .await
         .unwrap();
+    sqlx::query("INSERT INTO kernel.plugin_settings (plugin_id, settings) VALUES ('lottery', $1)")
+        .bind(json!({ "enabled": true, "min_account_days": 0 }))
+        .execute(&mut db)
+        .await
+        .unwrap();
 
     // 服务端检查：首页带 CSP nonce，清单含插件前端，术语可取，路径穿越被拒
     let r = call(&app, "GET", "/", None, &[]).await;
