@@ -42,6 +42,15 @@ target/release/pt-tracker tracker.toml
 - 真实客户端：`node web/tests/bt-real.mjs`（站点与 tracker 运行中）——两个 transmission-cli 4.1 实例经本 tracker 完成
   32 MiB 传输，sha256 一致，accounting 记到做种者上传与下载者下载。注意 Transmission 4 忽略回环地址上的 peer，
   本机测试时 announce 地址要用局域网 IP（脚本会自动替换）。
+- qBittorrent：`PT_BT_IFACE=eth0 node web/tests/bt-qbittorrent.mjs`——qBittorrent 5.1.0（libtorrent 2.0）与 Transmission 4.1
+  双向各传 16 MiB（Transmission 做种 → qBittorrent 下载、qBittorrent 做种 → Transmission 下载），sha256 一致、两端记账正确、
+  qBittorrent 显示 tracker 工作中。qBittorrent 的 announce 带 `key`、`corrupt`、`redundant`、`no_peer_id=1`、`supportcrypto=1`、
+  `numwant=200` 与 BEP 7 的 `ipv4=`（只接受与连接不同族的自报地址，IPv4 连接上的 `ipv4=` 被忽略）。Deluge 同为 libtorrent
+  内核，请求格式相同（未单独实测）。
+  - 多网卡机器（VPN、透明代理）上 libtorrent 会从每个网卡分别 announce，到不了 tracker 的那一路在 qBittorrent 里显示
+    “timed out”，属于客户端网络环境问题；测试中用 `PT_BT_IFACE` 让 qBittorrent 只绑定一个网卡。
+  - 一端强制加密（如 Transmission `-er`）、另一端只是“允许加密”时，libtorrent 先尝试明文握手、失败后退避重试，
+    首次连接慢约一分钟（实测 70 s → 两端都强制加密后 8 s），与 tracker 无关；站点可建议用户统一开启“强制加密”。
 - 压测：`cargo run --release --bin pt-tracker-bench <redis_url> [并发] [请求数] [用户] [种子]`（会清空该库）。
   4 核开发机上 tracker、Redis 与压测程序同机：约 1.05 万次 announce / 秒，p50 5.7 ms、p99 13 ms，无失败；
   Redis CPU 约 60%。生产环境 tracker 与 Redis 分开部署时会更高；多个 tracker 节点共享 Redis 时，瓶颈是 Redis。
