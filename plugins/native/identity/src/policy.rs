@@ -23,6 +23,8 @@ pub struct Policy {
     pub ip_show_full_to_owner: bool,
     /// 注册后需验证邮箱（之前为待验证状态，只有访客权限）；需要已配置邮件渠道
     pub require_email_verification: bool,
+    /// 该 rank 及以上的内置角色必须两步验证（会话未通过时不享有这些角色）；None = 不强制
+    pub two_factor_required_rank: Option<i16>,
 }
 
 fn int(s: &Value, k: &str, d: i64, lo: i64, hi: i64) -> i64 {
@@ -47,6 +49,12 @@ impl Policy {
             ip_delete_after_days: int(s, "ip_delete_after_days", 365, truncate, 3650),
             ip_show_full_to_owner: flag(s, "ip_show_full_to_owner", false),
             require_email_verification: flag(s, "require_email_verification", false),
+            two_factor_required_rank: s
+                .get("two_factor_required_role")
+                .and_then(Value::as_str)
+                .and_then(|r| crate::rbac::BUILTIN.iter().find(|(n, _)| *n == r))
+                .map(|(_, k)| *k)
+                .filter(|k| *k >= 2),
         }
     }
 

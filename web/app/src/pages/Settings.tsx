@@ -1,7 +1,7 @@
 // 个人设置：资料、安全（改密码、会话）、passkey；插件经 user.settings.tabs 追加标签页。
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { api } from '@pt-studio/sdk';
+import { api, ApiError } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
 import { Badge, Button, Card, Field, Input, Spinner, Table, Tabs, useToast } from '@pt-studio/ui-kit';
@@ -137,6 +137,159 @@ function SecurityLog() {
   );
 }
 
+interface TwoFactorStatus {
+  totp: boolean;
+  recovery_remaining: number;
+  required: boolean;
+}
+
+/**
+ * 需要近期重新验证的操作：服务端返回 identity.reauth_required 时显示密码框，验证后重试原操作。
+ * 返回 [执行器, 重新验证表单]。
+ */
+function useReauth(): [(f: () => Promise<void>) => Promise<void>, React.ReactNode] {
+  const t = useT();
+  const [pending, setPending] = useState<(() => Promise<void>) | null>(null);
+  const [pw, setPw] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const run = async (f: () => Promise<void>) => {
+    try {
+      await f();
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'identity.reauth_required') {
+        setPending(() => f);
+        return;
+      }
+      throw e;
+    }
+  };
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api('/api/p/identity/v1/sessions/current/reauth', { json: { password: pw } });
+      const f = pending;
+      setPending(null);
+      setPw('');
+      if (f) await f();
+    } catch (err) {
+      setError(err);
+    }
+  };
+  const form = pending ? (
+    <form onSubmit={submit} className="reauth">
+      <p className="pt-muted small">{t('ui.reauth.hint')}</p>
+      <Field label={t('ui.settings.current_password')}>
+        <Input name="reauth_password" type="password" autoComplete="current-password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} required />
+      </Field>
+      <ErrorText error={error} />
+      <Button type="submit" variant="primary">
+        {t('ui.reauth.confirm')}
+      </Button>{' '}
+      <Button type="button" onClick={() => setPending(null)}>
+        {t('ui.common.cancel')}
+      </Button>
+    </form>
+  ) : null;
+  return [run, form];
+}
+
+/** 两步验证：TOTP 绑定（二维码由服务端生成）、恢复码、关闭 */
+function TwoFactorCard() {
+  const t = useT();
+  const toast = useToast();
+  const errText = useErrorText();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['my-2fa'], queryFn: () => api<TwoFactorStatus>('/api/p/identity/v1/users/me/two-factor') });
+  const [setup, setSetup] = useState<{ secret: string; qr_svg: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [withReauth, reauthForm] = useReauth();
+  const reload = () => qc.invalidateQueries({ queryKey: ['my-2fa'] });
+  const act = (f: () => Promise<void>) => withReauth(f).catch((e: unknown) => toast(errText(e), 'error'));
+  const begin = () => act(async () => setSetup(await api<{ secret: string; qr_svg: string }>('/api/p/identity/v1/users/me/totp', { json: {} })));
+  const confirm = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await withReauth(async () => {
+        const r = await api<{ recovery_codes: string[] }>('/api/p/identity/v1/users/me/totp/confirm', { json: { code } });
+        setCodes(r.recovery_codes);
+        setSetup(null);
+        setCode('');
+        await reload();
+      });
+    } catch (err) {
+      setError(err);
+    }
+  };
+  const disable = () => {
+    if (!window.confirm(t('ui.two_factor.disable_confirm'))) return;
+    void act(async () => {
+      await api('/api/p/identity/v1/users/me/totp', { method: 'DELETE' });
+      await reload();
+      toast(t('ui.two_factor.disabled'), 'success');
+    });
+  };
+  const regenerate = () =>
+    act(async () => {
+      setCodes((await api<{ recovery_codes: string[] }>('/api/p/identity/v1/users/me/recovery-codes', { json: {} })).recovery_codes);
+      await reload();
+    });
+  const st = q.data;
+  return (
+    <Card title={t('ui.two_factor.title')}>
+      {reauthForm}
+      {codes && (
+        <div className="recovery">
+          <p>{t('ui.two_factor.codes_hint')}</p>
+          <pre className="pt-mono" data-testid="recovery-codes">
+            {codes.join('\n')}
+          </pre>
+          <Button onClick={() => setCodes(null)}>{t('ui.two_factor.codes_saved')}</Button>
+        </div>
+      )}
+      {!st ? (
+        <Spinner />
+      ) : st.totp ? (
+        <>
+          <p>
+            <Badge tone="success">{t('ui.two_factor.on')}</Badge> {t('ui.two_factor.recovery_left', { n: st.recovery_remaining })}
+          </p>
+          <Button onClick={regenerate}>{t('ui.two_factor.regenerate')}</Button>{' '}
+          <Button variant="danger" onClick={disable}>
+            {t('ui.two_factor.disable')}
+          </Button>
+        </>
+      ) : setup ? (
+        <form onSubmit={confirm}>
+          <p>{t('ui.two_factor.scan')}</p>
+          {/* 服务端生成的二维码 SVG（只含 otpauth URI） */}
+          <div className="qr" dangerouslySetInnerHTML={{ __html: setup.qr_svg }} />
+          <p className="small">
+            {t('ui.two_factor.manual')} <code className="pt-mono" data-testid="totp-secret">{setup.secret}</code>
+          </p>
+          <Field label={t('ui.two_factor.code')}>
+            <Input name="totp_code" autoComplete="one-time-code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required maxLength={6} />
+          </Field>
+          <ErrorText error={error} />
+          <Button type="submit" variant="primary">
+            {t('ui.two_factor.enable')}
+          </Button>
+        </form>
+      ) : (
+        <>
+          <p className="pt-muted">{st.required ? t('ui.two_factor.required_hint') : t('ui.two_factor.off_hint')}</p>
+          <Button variant="primary" onClick={begin}>
+            {t('ui.two_factor.setup')}
+          </Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function SecurityTab() {
   const t = useT();
   const toast = useToast();
@@ -210,6 +363,7 @@ function SecurityTab() {
           ]}
         />
       </Card>
+      <TwoFactorCard />
       <SecurityLog />
     </>
   );

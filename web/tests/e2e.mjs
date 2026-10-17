@@ -1,5 +1,6 @@
 // 浏览器端到端（由 crates/server/tests/e2e_web.rs 启动内核后调用）：
 // 插件前端经 import map 加载并渲染到插槽、注册页邀请码插槽、插件页面路由、后台设置保存、CSP 无违规。
+import { createHmac } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 
@@ -52,6 +53,19 @@ async function login(page, user) {
 async function openMenu(page) {
   const btn = page.getByRole('button', { name: '菜单' });
   if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
+}
+
+/** RFC 6238 TOTP（SHA-1、6 位、30 秒），密钥为 base32 */
+function totp(secretB32, offsetSecs = 0) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const ch of secretB32.replace(/=+$/, '')) bits += alphabet.indexOf(ch).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor((Date.now() / 1000 + offsetSecs) / 30)));
+  const h = createHmac('sha1', key).update(counter).digest();
+  const off = h[19] & 0xf;
+  return String((h.readUInt32BE(off) & 0x7fffffff) % 1_000_000).padStart(6, '0');
 }
 
 function step(name) {
@@ -226,6 +240,28 @@ try {
   await p.getByText('passkey 已重置').waitFor();
   const reset = await passkeyText();
   if (reset === shown || !/^[0-9a-f]{32}$/.test(reset)) throw new Error('passkey was not reset');
+
+  // 6c'. 两步验证：扫码绑定 → 恢复码 → 重新登录需要第二步（用恢复码）
+  step('two-factor authentication');
+  await p.getByRole('tab', { name: '安全' }).click();
+  await p.getByRole('button', { name: '开启两步验证' }).click();
+  await p.locator('.qr svg').waitFor();
+  const secret = (await p.getByTestId('totp-secret').innerText()).trim();
+  await p.locator('input[name=totp_code]').fill(totp(secret));
+  await p.getByRole('button', { name: '确认开启' }).click();
+  const recovery = (await p.getByTestId('recovery-codes').innerText()).trim().split(/\s+/);
+  if (recovery.length !== 10) throw new Error(`recovery codes: ${recovery}`);
+  await p.getByRole('button', { name: '我已保存' }).click();
+  await p.getByText('剩余 10 个恢复码').waitFor();
+  await p.context().clearCookies();
+  await p.goto(`${BASE}/login`);
+  await p.getByLabel('用户名').fill('web_bob');
+  await p.getByLabel('密码').fill(PASS);
+  await p.getByRole('button', { name: '登录' }).click();
+  await p.getByLabel('验证码').fill(recovery[0]);
+  await p.getByRole('button', { name: '验证' }).click();
+  await p.waitForURL(`${BASE}/`);
+  await p.getByRole('button', { name: '菜单' }).getByText('web_bob', { exact: true }).waitFor();
 
   // 6d. 后台用户：查找、施加 / 解除限制
   step('admin users');

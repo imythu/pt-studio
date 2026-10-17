@@ -108,9 +108,29 @@ pub async fn effective_roles(ctx: &Ctx, user_id: i64) -> PResult<(String, HashSe
     Ok((status, expand(&roles)))
 }
 
+/// 角色集合中最高的内置角色 rank（没有内置角色为 0）
+pub fn top_rank(roles: &HashSet<String>) -> i16 {
+    roles
+        .iter()
+        .filter_map(|r| BUILTIN.iter().find(|(n, _)| n == r).map(|(_, k)| *k))
+        .max()
+        .unwrap_or(0)
+}
+
 pub async fn permissions_of(ctx: &Ctx, user_id: i64) -> PResult<Vec<String>> {
+    permissions_capped(ctx, user_id, None).await
+}
+
+/// 有效权限；`cap = Some(rank)` 时剔除 rank ≥ cap 的内置角色（未通过 2FA 的会话不享有要求 2FA 的角色）
+pub async fn permissions_capped(ctx: &Ctx, user_id: i64, cap: Option<i16>) -> PResult<Vec<String>> {
     let (_, roles) = effective_roles(ctx, user_id).await?;
-    let roles: Vec<String> = roles.into_iter().collect();
+    let roles: Vec<String> = roles
+        .into_iter()
+        .filter(|r| match (cap, BUILTIN.iter().find(|(n, _)| n == r)) {
+            (Some(c), Some((_, k))) => *k < c,
+            _ => true,
+        })
+        .collect();
     let mut conn = ctx.sql.conn().await?;
     let perms: Vec<String> = if roles.iter().any(|r| r == "sysop") {
         sqlx::query_scalar("SELECT name FROM permissions WHERE NOT orphan ORDER BY name")
@@ -144,12 +164,20 @@ pub async fn check_principal(
     }
     let Some(perm) = permission else { return Ok(true) };
     let uid = i64::try_from(p.user_id).map_err(|_| PluginError::bad_request("bad user id"))?;
-    let perms = permissions_of(ctx, uid).await?;
+    let perms = permissions_capped(ctx, uid, two_factor_cap(ctx, p).await).await?;
     let ok = perms.iter().any(|x| x == perm);
     if !ok {
         tracing::debug!(user = uid, permission = perm, "permission denied");
     }
     Ok(ok)
+}
+
+/// 会话未通过 2FA 且站点要求某角色及以上必须 2FA 时的权限上限
+pub async fn two_factor_cap(ctx: &Ctx, p: &Principal) -> Option<i16> {
+    if p.credential_kind != "session" || p.scopes.iter().any(|s| s == "2fa") {
+        return None;
+    }
+    crate::policy::Policy::load(ctx).await.two_factor_required_rank
 }
 
 /// 授予角色（P1：仅内置角色，且不能授予 sysop）。

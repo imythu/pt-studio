@@ -25,6 +25,9 @@ base64 = "0.22"
 hkdf = "0.12"
 hmac = "0.12"
 unicode-normalization = "0.1"
+sha1 = "0.10"
+data-encoding = "2"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [lints]
 workspace = true

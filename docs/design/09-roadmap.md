@@ -128,7 +128,7 @@
 
 - [x] M1.1 登录限流（Redis 失败计数、用户软锁、IP 封锁、指数延迟）+ IP 记录（`ip_log`，登录 / 会话 IP 变化）+ 用户 IP 历史 + 管理员按 IP / CIDR 查同 IP 账户 + 安全事件表
 - [x] M1.2 邮箱验证（注册后 pending，验证后解除）、重发验证邮件、找回密码（挑战表，邮件经 `ctx.notify` 的 security 类别）
-- [ ] M1.3 TOTP 两步验证 + 恢复码 + 登录第二步票据 + 近期重新验证（reauth），按角色强制 2FA
+- [x] M1.3 TOTP 两步验证 + 恢复码 + 登录第二步票据 + 近期重新验证（reauth），按角色强制 2FA
 - [ ] M1.4 WebAuthn：作为第二因素与无密码登录（通行密钥）
 - [ ] M1.5 人机验证（captcha 插件：Cloudflare Turnstile / hCaptcha / reCAPTCHA v2，挂在注册、登录、找回密码、签到）
 - [ ] M1.6 registration-policy：开放 / 邀请 / 申请 / 关闭、注册时段与名额、邮箱域名黑白名单

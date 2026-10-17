@@ -162,7 +162,7 @@ interface log {
 /// 插件配置：site.toml 静态配置 + 后台可改设置，均已通过插件 JSON Schema 校验
 interface config {
   use types.{json};
-  /// 整份静态配置（JSON 对象）
+  /// 整份静态配置（JSON 对象）；内核另注入只读的 `_site`：name、base_url、timezone、default_locale
   get-static: func() -> json;
   /// 整份运行时设置（JSON 对象），每次调用都返回最新值
   get-settings: func() -> json;

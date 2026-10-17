@@ -509,3 +509,6 @@ html, body { overflow-x: clip; }
   .settings-form .pt-field > .pt-field-label { padding-top: 0; }
   .plugin-toolbar .pt-input { width: 100%; }
 }
+.qr svg { width: 200px; height: 200px; background: #fff; border-radius: var(--pt-radius); }
+.recovery pre { padding: 10px 12px; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); }
+.reauth { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--pt-color-border); }

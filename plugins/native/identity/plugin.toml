@@ -8,7 +8,7 @@ authors = ["PT Studio"]
 description = "账号、会话、鉴权（ctx.auth）、权限（ctx.rbac）、用户资料（ctx.users）"
 
 provides = ["ctx.auth@0.1.0", "ctx.rbac@0.1.0", "ctx.users@0.1.0"]
-publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.restriction_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset", "user.challenge_issued", "user.verified"]
+publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.restriction_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset", "user.challenge_issued", "user.verified", "user.two_factor_changed"]
 
 [capabilities]
 kv = true
@@ -296,6 +296,59 @@ path = "/v1/password-resets/confirm"
 auth = "public"
 rate_limit = "ip:10/h"
 
+[[http.routes]]
+id = "login_2fa"
+method = "POST"
+path = "/v1/sessions/two-factor"
+auth = "public"
+rate_limit = "ip:30/m"
+
+[[http.routes]]
+id = "reauth"
+method = "POST"
+path = "/v1/sessions/current/reauth"
+auth = "user"
+rate_limit = "user:10/m"
+
+[[http.routes]]
+id = "two_factor_status"
+method = "GET"
+path = "/v1/users/me/two-factor"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "totp_begin"
+method = "POST"
+path = "/v1/users/me/totp"
+auth = "user"
+reauth_secs = 600
+rate_limit = "user:10/h"
+
+[[http.routes]]
+id = "totp_confirm"
+method = "POST"
+path = "/v1/users/me/totp/confirm"
+auth = "user"
+reauth_secs = 600
+rate_limit = "user:20/h"
+
+[[http.routes]]
+id = "totp_disable"
+method = "DELETE"
+path = "/v1/users/me/totp"
+auth = "user"
+reauth_secs = 600
+rate_limit = "user:10/h"
+
+[[http.routes]]
+id = "recovery_regenerate"
+method = "POST"
+path = "/v1/users/me/recovery-codes"
+auth = "user"
+reauth_secs = 600
+rate_limit = "user:10/h"
+
 [[cron]]
 name = "ip_retention"
 schedule = "17 3 * * *"
@@ -377,12 +430,18 @@ views = ["v_user_public"]
 
 [settings_schema]
 type = "object"
-x-pt-order = ["require_email_verification", "login_user_lock_after", "login_user_window_secs", "login_ip_block_after", "login_ip_window_secs", "login_max_delay_secs", "login_alert", "ip_truncate_after_days", "ip_delete_after_days", "ip_show_full_to_owner"]
+x-pt-order = ["require_email_verification", "two_factor_required_role", "login_user_lock_after", "login_user_window_secs", "login_ip_block_after", "login_ip_window_secs", "login_max_delay_secs", "login_alert", "ip_truncate_after_days", "ip_delete_after_days", "ip_show_full_to_owner"]
 
 [settings_schema.properties.require_email_verification]
 type = "boolean"
 default = false
 title = "注册后必须验证邮箱（验证前只有访客权限；需先配置 notify 的邮件渠道）"
+
+[settings_schema.properties.two_factor_required_role]
+type = "string"
+enum = ["", "uploader", "moderator", "admin", "sysop"]
+default = ""
+title = "该角色及以上必须开启两步验证（未通过两步验证的会话不享有这些角色的权限；空 = 不强制）"
 
 [settings_schema.properties.login_user_lock_after]
 type = "integer"

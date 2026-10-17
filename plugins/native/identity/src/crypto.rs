@@ -26,6 +26,7 @@ pub struct Keyring {
     login_mac: [u8; 32],
     device_mac: [u8; 32],
     challenge: [u8; 32],
+    totp_enc: [u8; 32],
 }
 
 impl std::fmt::Debug for Keyring {
@@ -63,6 +64,7 @@ impl Keyring {
             login_mac: derive(&raw, "username-mac"),
             device_mac: derive(&raw, "device-mac"),
             challenge: derive(&raw, "challenge-key"),
+            totp_enc: derive(&raw, "totp-enc"),
         })
     }
 
@@ -159,6 +161,21 @@ impl Keyring {
     /// 设备 cookie 的 HMAC（devices.device_mac）
     pub fn device_mac(&self, cookie: &str) -> Vec<u8> {
         Self::mac(&self.device_mac, cookie.as_bytes())
+    }
+    pub fn totp_seal(&self, uid: i64, secret: &[u8], nonce: [u8; 12]) -> PResult<Vec<u8>> {
+        Self::seal(
+            &self.totp_enc,
+            secret,
+            &format!("totp_secrets:secret_enc:{uid}"),
+            nonce,
+        )
+    }
+    pub fn totp_open(&self, uid: i64, blob: &[u8]) -> PResult<Vec<u8>> {
+        Self::open(
+            &self.totp_enc,
+            blob,
+            &format!("totp_secrets:secret_enc:{uid}"),
+        )
     }
     /// 邮件挑战令牌：HMAC(challenge-key, id ‖ nonce) 的 base64url（43 字符）
     pub fn challenge_token(&self, id: &uuid::Uuid, nonce: &[u8]) -> String {

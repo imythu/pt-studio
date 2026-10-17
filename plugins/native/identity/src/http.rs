@@ -17,7 +17,7 @@ use crate::{
     accounts::{Origin, RegisterRequest},
     auth, challenges,
     policy::Policy,
-    rbac, risk, settings, status, tokens,
+    rbac, risk, settings, status, tokens, two_factor,
 };
 
 pub fn router(id: Arc<Identity>) -> Router {
@@ -77,7 +77,70 @@ pub fn router(id: Arc<Identity>) -> Router {
         .route("/v1/email-verifications/confirm", post(confirm_email))
         .route("/v1/password-resets", post(request_reset))
         .route("/v1/password-resets/confirm", post(confirm_reset))
+        .route("/v1/sessions/two-factor", post(login_two_factor))
+        .route("/v1/sessions/current/reauth", post(reauth))
+        .route("/v1/users/me/two-factor", get(two_factor_status))
+        .route("/v1/users/me/totp", post(totp_begin).delete(totp_disable))
+        .route("/v1/users/me/totp/confirm", post(totp_confirm))
+        .route("/v1/users/me/recovery-codes", post(recovery_regenerate))
         .with_state(id)
+}
+
+async fn two_factor_status(ctx: RequestCtx) -> PResult<Response> {
+    let uid = me_id(&ctx)?;
+    Ok(Json(two_factor::status(&ctx, uid).await?).into_response())
+}
+
+fn no_store(v: serde_json::Value) -> Response {
+    let mut resp = Json(v).into_response();
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    resp
+}
+
+async fn totp_begin(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Response> {
+    Ok(no_store(two_factor::begin(&id, &ctx).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct CodeBody {
+    code: String,
+}
+
+async fn totp_confirm(
+    State(id): State<Arc<Identity>>,
+    ctx: RequestCtx,
+    Json(b): Json<CodeBody>,
+) -> PResult<Response> {
+    let codes = two_factor::confirm(&id, &ctx, &b.code).await?;
+    Ok(no_store(json!({ "recovery_codes": codes })))
+}
+
+async fn totp_disable(ctx: RequestCtx) -> PResult<Response> {
+    two_factor::disable(&ctx).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn recovery_regenerate(ctx: RequestCtx) -> PResult<Response> {
+    let codes = two_factor::regenerate(&ctx).await?;
+    Ok(no_store(json!({ "recovery_codes": codes })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ReauthBody {
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
+}
+
+async fn reauth(
+    State(id): State<Arc<Identity>>,
+    ctx: RequestCtx,
+    Json(b): Json<ReauthBody>,
+) -> PResult<Response> {
+    let at = two_factor::reauth(&id, &ctx, b.password.as_deref(), b.code.as_deref()).await?;
+    Ok(Json(json!({ "reauth_at": at })).into_response())
 }
 
 async fn resend_verification(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Response> {
@@ -221,11 +284,23 @@ async fn login(
     Json(b): Json<LoginBody>,
 ) -> PResult<Response> {
     let dev = risk::device_cookie(&headers);
-    let s = auth::login_password(&id, &ctx, &b.username, &b.password, b.remember, dev.as_deref()).await?;
+    match auth::login_password(&id, &ctx, &b.username, &b.password, b.remember, dev.as_deref()).await? {
+        auth::LoginOutcome::Session(s) => Ok(session_response(&id, &s)),
+        auth::LoginOutcome::SecondFactor { ticket, methods } => {
+            let mut resp = Json(json!({ "two_factor_required": true, "ticket": ticket, "methods": methods })).into_response();
+            resp.headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            Ok(resp)
+        }
+    }
+}
+
+/// 登录成功：会话 / CSRF cookie（以及新设备 cookie）
+fn session_response(id: &Identity, s: &auth::NewSession) -> Response {
     let body = json!({
         "session_id": s.session_id,
         "user": { "id": s.user_id, "username": s.username, "class_id": s.class_id, "status": s.status },
-        "two_factor_passed": false,
+        "two_factor_passed": s.second_factor.is_some(),
         "csrf_token": s.csrf,
     });
     let mut resp = (StatusCode::OK, Json(body)).into_response();
@@ -263,7 +338,24 @@ async fn login(
         );
     }
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    Ok(resp)
+    resp
+}
+
+#[derive(Debug, Deserialize)]
+struct SecondStep {
+    ticket: String,
+    code: String,
+}
+
+async fn login_two_factor(
+    State(id): State<Arc<Identity>>,
+    ctx: RequestCtx,
+    headers: HeaderMap,
+    Json(b): Json<SecondStep>,
+) -> PResult<Response> {
+    let dev = risk::device_cookie(&headers);
+    let s = two_factor::login_second_step(&id, &ctx, &b.ticket, &b.code, dev.as_deref()).await?;
+    Ok(session_response(&id, &s))
 }
 
 async fn logout(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Response> {
@@ -315,7 +407,29 @@ async fn me(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Respons
 
 async fn my_permissions(ctx: RequestCtx) -> PResult<Response> {
     let uid = i64::try_from(ctx.require_user()?).map_err(|_| PluginError::bad_request("bad user id"))?;
-    Ok(Json(json!({ "permissions": rbac::permissions_of(&ctx, uid).await? })).into_response())
+    // 与网关同一规则：未通过 2FA 的会话不享有要求 2FA 的角色
+    let sid = ctx
+        .actor()
+        .credential_id
+        .as_deref()
+        .and_then(|c| uuid::Uuid::parse_str(c).ok());
+    let passed: Option<bool> = match sid {
+        Some(sid) => {
+            let mut conn = ctx.sql.conn().await?;
+            sqlx::query_scalar("SELECT two_factor_at IS NOT NULL FROM sessions WHERE id = $1")
+                .bind(sid)
+                .fetch_optional(&mut *conn)
+                .await?
+        }
+        None => None,
+    };
+    let cap = match passed {
+        Some(false) => Policy::load(&ctx).await.two_factor_required_rank,
+        _ => None,
+    };
+    let (_, roles) = rbac::effective_roles(&ctx, uid).await?;
+    let needed = cap.is_some_and(|c| rbac::top_rank(&roles) >= c);
+    Ok(Json(json!({ "permissions": rbac::permissions_capped(&ctx, uid, cap).await?, "two_factor_needed": needed })).into_response())
 }
 
 async fn my_passkey(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Response> {

@@ -408,3 +408,123 @@ async fn email_verification_and_password_reset() {
     let mails_to_ghost = inbox.lock().unwrap().iter().filter(|m| m["to"].as_str().unwrap_or("").contains("ghost")).count();
     assert_eq!(mails_to_ghost, 0);
 }
+
+impl Session {
+    fn headers(&self) -> [(&str, &str); 3] {
+        [("cookie", self.cookie.as_str()), ("x-csrf-token", self.csrf.as_str()), ("sec-fetch-site", "same-origin")]
+    }
+    async fn send(&self, app: &Router, method: &str, uri: &str, body: Value) -> Resp {
+        req(app, method, uri, "10.0.0.1", &self.headers(), Some(body)).await
+    }
+}
+
+fn code_at(secret: &str, offset_secs: i64) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    pt_plugin_identity::two_factor::totp_at(secret, i64::try_from(now).unwrap() + offset_secs).unwrap()
+}
+
+#[tokio::test]
+async fn totp_two_factor_and_reauth() {
+    let _guard = common::LOCK.lock().await;
+    reset().await;
+    let kernel = Kernel::start(common::config(), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+    for name in ["erin", "frank"] {
+        let r = req(&app, "POST", "/api/p/identity/v1/users", "10.0.0.1", &[],
+            Some(json!({ "username": name, "email": format!("{name}@example.com"), "password": "correct horse" }))).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    }
+    let erin = Session::of(&login(&app, "10.0.0.1", "erin", "correct horse", None).await);
+
+    // 绑定：生成密钥与二维码 → 错误码被拒 → 正确码开启并返回 10 个恢复码
+    let r = erin.send(&app, "POST", "/api/p/identity/v1/users/me/totp", json!({})).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let secret = r.body["secret"].as_str().unwrap().to_owned();
+    assert!(r.body["otpauth_uri"].as_str().unwrap().starts_with("otpauth://totp/test:erin?secret="));
+    assert!(r.body["qr_svg"].as_str().unwrap().contains("<svg"));
+    let r = erin.send(&app, "POST", "/api/p/identity/v1/users/me/totp/confirm", json!({ "code": "000000" })).await;
+    assert_eq!(r.body["code"], "identity.two_factor_invalid", "{:?}", r.body);
+    let first_code = code_at(&secret, 0);
+    let r = erin.send(&app, "POST", "/api/p/identity/v1/users/me/totp/confirm", json!({ "code": first_code })).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let recovery: Vec<String> = serde_json::from_value(r.body["recovery_codes"].clone()).unwrap();
+    assert_eq!(recovery.len(), 10);
+    let r = erin.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/two-factor").await;
+    assert_eq!((r.body["totp"].clone(), r.body["recovery_remaining"].clone()), (json!(true), json!(10)));
+
+    // 敏感操作要求近期重新验证（登录后 10 分钟内有效）
+    sqlx::query("UPDATE identity.sessions SET reauth_at = now() - interval '1 hour'")
+        .execute(&mut db().await)
+        .await
+        .unwrap();
+    let r = erin.send(&app, "POST", "/api/p/identity/v1/users/me/recovery-codes", json!({})).await;
+    assert_eq!(r.body["code"], "identity.reauth_required", "{:?}", r.body);
+    let r = erin.send(&app, "POST", "/api/p/identity/v1/sessions/current/reauth", json!({ "password": "wrong" })).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = erin.send(&app, "POST", "/api/p/identity/v1/sessions/current/reauth", json!({ "password": "correct horse" })).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = erin.send(&app, "POST", "/api/p/identity/v1/users/me/recovery-codes", json!({})).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let recovery: Vec<String> = serde_json::from_value(r.body["recovery_codes"].clone()).unwrap();
+
+    // 登录：密码正确只得到票据（没有会话 cookie）
+    let two_step = |ticket: String, code: String| {
+        let app = app.clone();
+        async move {
+            req(&app, "POST", "/api/p/identity/v1/sessions/two-factor", "10.0.0.1", &[],
+                Some(json!({ "ticket": ticket, "code": code }))).await
+        }
+    };
+    let r = login(&app, "10.0.0.1", "erin", "correct horse", None).await;
+    assert_eq!(r.body["two_factor_required"], true, "{:?}", r.body);
+    assert!(cookie_named(&r, "__Host-pt_session").is_none());
+    let ticket = r.body["ticket"].as_str().unwrap().to_owned();
+    // 绑定时用过的码不能重放
+    let r = two_step(ticket.clone(), first_code.clone()).await;
+    assert_eq!(r.body["code"], "identity.two_factor_invalid", "replayed code: {:?}", r.body);
+    // 下一个时间步的码（服务端接受 ±1 步）
+    let next = (1..=2).map(|k| code_at(&secret, 30 * k)).find(|c| *c != first_code).unwrap();
+    let r = two_step(ticket.clone(), next).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["two_factor_passed"], true);
+    let r = two_step(ticket.clone(), recovery[0].clone()).await;
+    assert_eq!(r.body["code"], "identity.ticket_invalid", "tickets work once");
+
+    // 恢复码：可用一次（大小写与连字符无关）
+    let r = login(&app, "10.0.0.1", "erin", "correct horse", None).await;
+    let r = two_step(r.body["ticket"].as_str().unwrap().to_owned(), recovery[1].to_uppercase().replace('-', " ")).await;
+    let erin = Session::of(&r);
+    let r = login(&app, "10.0.0.1", "erin", "correct horse", None).await;
+    let t = r.body["ticket"].as_str().unwrap().to_owned();
+    let r = two_step(t.clone(), recovery[1].clone()).await;
+    assert_eq!(r.body["code"], "identity.two_factor_invalid");
+    // 票据最多尝试 5 次
+    for _ in 0..4 {
+        two_step(t.clone(), "nope-nope0".into()).await;
+    }
+    let r = two_step(t, recovery[2].clone()).await;
+    assert_eq!(r.body["code"], "identity.ticket_invalid", "{:?}", r.body);
+
+    // 强制 2FA：moderator 及以上的会话未通过两步验证时不享有员工权限
+    common::grant_role(1, "moderator").await;
+    common::grant_role(2, "moderator").await;
+    set_settings(json!({ "two_factor_required_role": "moderator" })).await;
+    let frank = Session::of(&login(&app, "10.0.0.1", "frank", "correct horse", None).await);
+    let r = frank.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/permissions").await;
+    assert_eq!(r.body["two_factor_needed"], true, "{:?}", r.body);
+    assert!(!r.body["permissions"].as_array().unwrap().iter().any(|p| p == "identity.users.read"));
+    let r = frank.get(&app, "10.0.0.1", "/api/p/identity/v1/admin/users").await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = erin.get(&app, "10.0.0.1", "/api/p/identity/v1/admin/users").await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = erin.send(&app, "DELETE", "/api/p/identity/v1/users/me/totp", json!({})).await;
+    assert_eq!(r.body["code"], "identity.two_factor_required", "{:?}", r.body);
+    // 不强制时可以关闭
+    set_settings(json!({})).await;
+    let r = erin.send(&app, "DELETE", "/api/p/identity/v1/users/me/totp", json!({})).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    let r = login(&app, "10.0.0.1", "erin", "correct horse", None).await;
+    assert!(r.body["csrf_token"].is_string(), "password-only again: {:?}", r.body);
+}

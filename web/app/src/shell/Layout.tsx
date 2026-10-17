@@ -296,6 +296,11 @@ export function Layout() {
       </header>
       <main className={`content${bare ? ' content-bare' : ''}`}>
         {s.me && !s.emailVerified && <VerifyBanner />}
+        {s.me && s.twoFactorNeeded && (
+          <p className="notice notice-warn" role="status">
+            {t('ui.two_factor.required_banner')} <Link to="/settings">{t('ui.nav.settings')}</Link>
+          </p>
+        )}
         <Outlet />
       </main>
       <footer className="footer">

@@ -382,11 +382,19 @@ impl Kernel {
                         timeout_ms: h.timeout_ms.unwrap_or(point_timeout).min(point_timeout),
                     });
             }
-            let static_config = cfg
+            let mut static_config = cfg
                 .plugin
                 .get(&m.id)
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
+            // 站点信息（只读，保留键 `_site`）：名称、对外地址、时区、默认语言
+            if let Some(obj) = static_config.as_object_mut() {
+                obj.insert(
+                    "_site".into(),
+                    serde_json::json!({ "name": cfg.site.name, "base_url": cfg.site.base_url.trim_end_matches('/'),
+                                        "timezone": cfg.site.timezone, "default_locale": cfg.site.default_locale }),
+                );
+            }
             let outbound = match crate::http_client::OutboundPolicy::parse(
                 &m.capabilities.http_outbound,
                 &static_config,

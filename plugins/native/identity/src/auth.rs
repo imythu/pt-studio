@@ -24,6 +24,15 @@ pub struct NewSession {
     pub max_age_secs: i64,
     /// 新下发的设备 cookie
     pub device_cookie: Option<String>,
+    /// 登录所用的第二因素（totp / recovery / webauthn）
+    pub second_factor: Option<&'static str>,
+}
+
+/// 密码登录的结果：直接建会话，或需要第二因素（票据）
+#[derive(Debug)]
+pub enum LoginOutcome {
+    Session(NewSession),
+    SecondFactor { ticket: String, methods: Vec<&'static str> },
 }
 
 fn invalid() -> PluginError {
@@ -38,7 +47,7 @@ pub async fn login_password(
     password: &str,
     remember: bool,
     device_cookie: Option<&str>,
-) -> PResult<NewSession> {
+) -> PResult<LoginOutcome> {
     let keys = id.keys()?;
     let pol = Policy::load(ctx).await;
     let login = login.trim();
@@ -99,6 +108,15 @@ pub async fn login_password(
         failed(ctx, Some(uid), "status", false).await?;
         return Err(PluginError::new("identity.account_banned", "account is banned"));
     }
+    // 第一因素已通过：清除用户名维度的失败计数
+    risk::throttle_success(ctx, &tk).await;
+    if crate::two_factor::has_totp(ctx, uid).await? {
+        let ticket = crate::two_factor::new_ticket(ctx, uid, remember).await?;
+        return Ok(LoginOutcome::SecondFactor {
+            ticket,
+            methods: vec!["totp", "recovery"],
+        });
+    }
     let s = finish_login(
         id,
         ctx,
@@ -116,8 +134,7 @@ pub async fn login_password(
         device_cookie,
     )
     .await?;
-    risk::throttle_success(ctx, &tk).await;
-    Ok(s)
+    Ok(LoginOutcome::Session(s))
 }
 
 /// 已通过第一因素（及所需的第二因素）的登录对象
@@ -236,6 +253,7 @@ pub async fn finish_login(
         status: u.status,
         max_age_secs: if remember { ABSOLUTE_DAYS * 86400 } else { 0 },
         device_cookie: device.set_cookie,
+        second_factor: None,
     })
 }
 
@@ -302,7 +320,8 @@ pub async fn authenticate(id: &Identity, ctx: &Ctx, cred: Credential) -> PResult
             let mut conn = ctx.sql.conn().await?;
             let row = sqlx::query(
                 "SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, s.revoked_at, s.reauth_at,
-                        s.last_seen_at, s.remember, s.auth_version, u.status, u.auth_version, u.class_id, s.ip_mac
+                        s.last_seen_at, s.remember, s.auth_version, u.status, u.auth_version, u.class_id, s.ip_mac,
+                        s.two_factor_at IS NOT NULL
                    FROM sessions s JOIN users u ON u.id = s.user_id
                   WHERE s.token_hash = $1",
             )
@@ -323,6 +342,7 @@ pub async fn authenticate(id: &Identity, ctx: &Ctx, cred: Credential) -> PResult
             let auth_version: i32 = r.get(10);
             let class_id: i32 = r.get(11);
             let seen_ip_mac: Option<Vec<u8>> = r.get(12);
+            let two_factor: bool = r.get(13);
             let now = Utc::now();
             if revoked.is_some() || now > idle || now > absolute || seen_version != auth_version {
                 return Ok(None);
@@ -366,7 +386,12 @@ pub async fn authenticate(id: &Identity, ctx: &Ctx, cred: Credential) -> PResult
                 user_id: u64::try_from(uid).unwrap_or_default(),
                 credential_id: sid.to_string(),
                 credential_kind: "session".into(),
-                scopes: vec!["*".into()],
+                // "2fa"：本会话通过了两步验证（强制 2FA 的角色只在这样的会话中生效）
+                scopes: if two_factor {
+                    vec!["*".into(), "2fa".into()]
+                } else {
+                    vec!["*".into()]
+                },
                 reauth_at: reauth.map(|t| t.timestamp_millis()),
                 status,
                 class_id: Some(class_id),

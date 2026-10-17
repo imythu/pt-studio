@@ -1,7 +1,7 @@
 // 登录 / 注册（identity）。插件经 `auth.*` 插槽向请求写入字段（FormBinding）。
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { api } from '@pt-studio/sdk';
+import { api, ApiError } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
 import { Button, Field, Input } from '@pt-studio/ui-kit';
@@ -73,6 +73,9 @@ export function Login() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // 两步验证：密码正确后服务端返回票据，再提交 TOTP / 恢复码
+  const [ticket, setTicket] = useState<string | null>(null);
+  const [code, setCode] = useState('');
   const st = useLocation().state as { registered?: boolean; reset?: boolean } | null;
   const registered = st?.registered;
   const submit = async (e: FormEvent) => {
@@ -80,10 +83,24 @@ export function Login() {
     setBusy(true);
     setError(null);
     try {
-      await api('/api/p/identity/v1/sessions', { json: { username, password, remember, ...splitExtra(extra) } });
+      if (ticket) {
+        await api('/api/p/identity/v1/sessions/two-factor', { json: { ticket, code } });
+      } else {
+        const r = await api<{ two_factor_required?: boolean; ticket?: string }>('/api/p/identity/v1/sessions', {
+          json: { username, password, remember, ...splitExtra(extra) },
+        });
+        if (r.two_factor_required && r.ticket) {
+          setTicket(r.ticket);
+          return;
+        }
+      }
       await s.refresh();
       nav('/');
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'identity.ticket_invalid') {
+        setTicket(null);
+        setCode('');
+      }
       setError(err);
     } finally {
       setBusy(false);
@@ -101,25 +118,37 @@ export function Login() {
     >
       {registered && <p className="notice">{t('ui.register.done')}</p>}
       {st?.reset && <p className="notice">{t('ui.reset.done')}</p>}
-      <form onSubmit={submit}>
-        <Field label={t('ui.login.username')}>
-          <Input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-        </Field>
-        <Field label={t('ui.login.password')}>
-          <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        </Field>
-        <Slot name="auth.login.extra" ctx={{ form: binding }} />
-        <label className="pt-check">
-          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> {t('ui.login.remember')}
-        </label>
-        <ErrorText error={error} />
-        <Button type="submit" variant="primary" disabled={busy}>
-          {t('ui.login.submit')}
-        </Button>
-        <p className="small">
-          <Link to="/reset-password">{t('ui.reset.forgot')}</Link>
-        </p>
-      </form>
+      {ticket ? (
+        <form onSubmit={submit}>
+          <Field label={t('ui.two_factor.code')} hint={t('ui.two_factor.code_hint')}>
+            <Input name="code" autoComplete="one-time-code" inputMode="text" autoFocus value={code} onChange={(e) => setCode(e.target.value)} required maxLength={16} />
+          </Field>
+          <ErrorText error={error} />
+          <Button type="submit" variant="primary" disabled={busy}>
+            {t('ui.two_factor.verify')}
+          </Button>
+        </form>
+      ) : (
+        <form onSubmit={submit}>
+          <Field label={t('ui.login.username')}>
+            <Input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+          </Field>
+          <Field label={t('ui.login.password')}>
+            <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </Field>
+          <Slot name="auth.login.extra" ctx={{ form: binding }} />
+          <label className="pt-check">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> {t('ui.login.remember')}
+          </label>
+          <ErrorText error={error} />
+          <Button type="submit" variant="primary" disabled={busy}>
+            {t('ui.login.submit')}
+          </Button>
+          <p className="small">
+            <Link to="/reset-password">{t('ui.reset.forgot')}</Link>
+          </p>
+        </form>
+      )}
     </AuthShell>
   );
 }
