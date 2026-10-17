@@ -7,6 +7,7 @@
 
 pub mod accounting;
 pub mod admission;
+pub mod metrics;
 pub mod protocol;
 pub mod store;
 
@@ -52,6 +53,9 @@ pub struct Config {
     pub max_rate: u64,
     #[serde(default = "d_partitions")]
     pub partitions: u64,
+    /// Prometheus 指标的独立监听地址（如 `127.0.0.1:9465`）；不设置时不提供 `/metrics`
+    #[serde(default)]
+    pub metrics_bind: Option<String>,
 }
 
 fn d_node() -> String {
@@ -107,8 +111,18 @@ fn bencode(body: Vec<u8>) -> Response {
     r
 }
 
-fn fail(msg: &str) -> Response {
-    bencode(protocol::failure(msg))
+/// 失败原因（固定字符串，指标标签）
+#[derive(Clone, Copy)]
+struct Failure(&'static str);
+
+fn fail(msg: &'static str) -> Response {
+    let mut r = bencode(protocol::failure(msg));
+    r.extensions_mut().insert(Failure(msg));
+    r
+}
+
+fn failure_of(r: &Response) -> Option<&'static str> {
+    r.extensions().get::<Failure>().map(|f| f.0)
 }
 
 fn client_ip(app: &App, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
@@ -145,6 +159,20 @@ async fn announce(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     RawQuery(q): RawQuery,
+) -> Response {
+    let started = std::time::Instant::now();
+    let r = announce_inner(app, passkey, peer, headers, q).await;
+    metrics::request("announce", failure_of(&r));
+    metrics::announce_latency(started.elapsed().as_secs_f64());
+    r
+}
+
+async fn announce_inner(
+    app: Arc<App>,
+    passkey: String,
+    peer: SocketAddr,
+    headers: HeaderMap,
+    q: Option<String>,
 ) -> Response {
     let q = protocol::parse_query(q.as_deref().unwrap_or(""));
     // ① 解析
@@ -302,6 +330,7 @@ async fn announce(
                 })
         })
         .collect();
+    metrics::event(event.as_str());
     let compact = protocol::get_str(&q, "compact") != Some("0");
     let no_peer_id = protocol::get_str(&q, "no_peer_id") == Some("1");
     bencode(protocol::announce(&AnnounceReply {
@@ -316,6 +345,12 @@ async fn announce(
 }
 
 async fn scrape(State(app): State<Arc<App>>, Path(passkey): Path<String>, RawQuery(q): RawQuery) -> Response {
+    let r = scrape_inner(app, passkey, q).await;
+    metrics::request("scrape", failure_of(&r));
+    r
+}
+
+async fn scrape_inner(app: Arc<App>, passkey: String, q: Option<String>) -> Response {
     if !passkey_ok(&passkey) {
         return fail("invalid passkey");
     }
@@ -424,6 +459,25 @@ pub async fn start(cfg: Config) -> Result<Router, String> {
     {
         let app = app.clone();
         tokio::spawn(async move { app.admission.follow(follower, last).await });
+    }
+    if let Some(mb) = app.cfg.metrics_bind.clone() {
+        let a = app.clone();
+        match tokio::net::TcpListener::bind(&mb).await {
+            Ok(l) => {
+                tracing::info!(bind = %mb, "metrics listening");
+                let r = Router::new().route(
+                    "/metrics",
+                    get(move || {
+                        let (u, t) = a.admission.counts();
+                        async move { ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], metrics::render(u, t)) }
+                    }),
+                );
+                tokio::spawn(async move {
+                    let _ = axum::serve(l, r).await;
+                });
+            }
+            Err(e) => tracing::error!(bind = %mb, error = %e, "metrics listener not started"),
+        }
     }
     Ok(Router::new()
         .route("/announce/{passkey}", get(announce))

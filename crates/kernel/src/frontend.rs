@@ -26,6 +26,7 @@ use crate::{
 pub const KERNEL_PERMISSIONS: &[(&str, &str)] = &[
     ("kernel.plugins.read", "admin"),
     ("kernel.settings.manage", "admin"),
+    ("kernel.audit.read", "admin"),
 ];
 
 pub fn routes(shared: Arc<Shared>) -> Router {
@@ -36,6 +37,7 @@ pub fn routes(shared: Arc<Shared>) -> Router {
             "/api/kernel/v1/admin/plugins/{id}/settings",
             get(get_settings).put(put_settings),
         )
+        .route("/api/kernel/v1/admin/audit", get(audit_log))
         .with_state(shared)
 }
 
@@ -160,6 +162,58 @@ async fn authorize(
         );
     }
     Ok(principal)
+}
+
+#[derive(Debug, Deserialize)]
+struct AuditQuery {
+    plugin: Option<String>,
+    /// 前缀匹配（如 `identity.` 或 `identity.restriction_apply`）
+    action: Option<String>,
+    target: Option<String>,
+    /// 操作者用户 ID
+    actor: Option<i64>,
+    /// 游标：上一页最后一条的 id
+    before: Option<i64>,
+    limit: Option<i64>,
+}
+
+/// 管理操作日志（kernel.audit_log）：按插件、动作前缀、目标、操作者筛选，按 id 倒序游标分页
+async fn audit_log(
+    State(sh): State<Arc<Shared>>,
+    method: Method,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<AuditQuery>,
+) -> PResult<Response> {
+    authorize(&sh, &headers, &method, "kernel.audit.read").await?;
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    type Row = (i64, chrono::DateTime<chrono::Utc>, Json, String, String, Option<String>, String, Option<String>, Json);
+    let rows: Vec<Row> =
+        sqlx::query_as(
+            "SELECT id, occurred_at, actor, plugin_id, action, target, outcome, request_id, details FROM kernel.audit_log
+              WHERE ($1::text IS NULL OR plugin_id = $1)
+                AND ($2::text IS NULL OR action LIKE replace(replace($2, '%', '\\%'), '_', '\\_') || '%')
+                AND ($3::text IS NULL OR target = $3)
+                AND ($4::bigint IS NULL OR (actor->>'user_id')::bigint = $4)
+                AND ($5::bigint IS NULL OR id < $5)
+              ORDER BY id DESC LIMIT $6",
+        )
+        .bind(q.plugin.as_deref().filter(|s| !s.is_empty()))
+        .bind(q.action.as_deref().filter(|s| !s.is_empty()))
+        .bind(q.target.as_deref().filter(|s| !s.is_empty()))
+        .bind(q.actor)
+        .bind(q.before)
+        .bind(limit)
+        .fetch_all(&sh.pool)
+        .await?;
+    let next = (rows.len() == usize::try_from(limit).unwrap_or(50)).then(|| rows.last().map(|r| r.0)).flatten();
+    let items: Vec<Json> = rows
+        .into_iter()
+        .map(|(id, at, actor, plugin, action, target, outcome, request_id, details)| {
+            json!({ "id": id, "occurred_at": at.timestamp_millis(), "actor": actor, "plugin_id": plugin, "action": action,
+                    "target": target, "outcome": outcome, "request_id": request_id, "details": details })
+        })
+        .collect();
+    Ok(AxJson(json!({ "items": items, "next_before": next })).into_response())
 }
 
 async fn get_settings(

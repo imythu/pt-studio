@@ -14,3 +14,5 @@ max_peer_timeout = 2700
 # max_rate = 1250000000
 # 记账流分区数（与 accounting 一致；acct:_meta 中已有值时以它为准）
 partitions = 64
+# Prometheus 指标（独立端口，只监听内网）
+# metrics_bind = "127.0.0.1:9465"

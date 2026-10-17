@@ -10,6 +10,7 @@ pub mod http_client;
 pub mod kernel;
 pub mod limits;
 pub mod loader;
+pub mod metrics;
 pub mod runtime;
 pub mod scheduler;
 pub mod storage;

@@ -284,6 +284,12 @@ pub async fn fire(
         Err(e) if e.code == "kernel.lock_lost" => ("lock_lost", Some(e)),
         Err(e) => ("failed", Some(e)),
     };
+    crate::metrics::REGISTRY.counter(
+        "kernel",
+        "pt_job_runs_total",
+        1,
+        &[("plugin", plugin), ("job", &decl.name), ("outcome", outcome)],
+    );
     let _ = sqlx::query(
         "UPDATE kernel.cron_run SET finished_at = now(), outcome = $2, error = $3 WHERE run_id = $1",
     )

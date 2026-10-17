@@ -62,7 +62,8 @@ export function AdminHome() {
     <div>
       <h1>{t('ui.admin.title')}</h1>
       <nav className="admin-nav">
-        {s.can('identity.users.read') && <Link to="/admin/users">{t('ui.admin.users')}</Link>} <Slot name="nav.admin" ctx={{ user: s.me }} />
+        {s.can('identity.users.read') && <Link to="/admin/users">{t('ui.admin.users')}</Link>}{' '}
+        {s.can('kernel.audit.read') && <Link to="/admin/audit">{t('ui.audit.title')}</Link>} <Slot name="nav.admin" ctx={{ user: s.me }} />
       </nav>
       <Slot name="admin.dashboard.widgets" ctx={{ user: s.me }} />
       <Card

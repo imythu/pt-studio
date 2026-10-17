@@ -179,6 +179,7 @@ async fn main() -> ExitCode {
         }
         Cmd::Serve => {
             let bind = cfg.http.bind.clone();
+            let metrics_bind = cfg.http.metrics_bind.clone();
             let kernel = match Kernel::start(cfg, pt_server::native_plugins()).await {
                 Ok(k) => k,
                 Err(e) => {
@@ -195,6 +196,17 @@ async fn main() -> ExitCode {
                 }
             };
             tracing::info!(%bind, "listening");
+            if let Some(mb) = metrics_bind {
+                match tokio::net::TcpListener::bind(&mb).await {
+                    Ok(l) => {
+                        tracing::info!(bind = %mb, "metrics listening");
+                        tokio::spawn(async move {
+                            let _ = axum::serve(l, pt_kernel::metrics::router()).await;
+                        });
+                    }
+                    Err(e) => tracing::error!(bind = %mb, error = %e, "metrics listener not started"),
+                }
+            }
             let server = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
                 .with_graceful_shutdown(shutdown_signal());
             if let Err(e) = server.await {

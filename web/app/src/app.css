@@ -512,3 +512,4 @@ html, body { overflow-x: clip; }
 .qr svg { width: 200px; height: 200px; background: #fff; border-radius: var(--pt-radius); }
 .recovery pre { padding: 10px 12px; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); }
 .reauth { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--pt-color-border); }
+.audit-details { max-width: 520px; white-space: pre-wrap; cursor: pointer; margin: 0; }

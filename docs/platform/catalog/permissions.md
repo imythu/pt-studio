@@ -18,6 +18,7 @@
 |---|---|---|---|
 | `kernel.plugins.read` | kernel | 查看插件列表与状态 | admin |
 | `kernel.settings.manage` | kernel | 修改插件运行时设置 | admin |
+| `kernel.audit.read` | kernel | 查看管理操作日志 | admin |
 | `kernel.audit.read` | kernel | 查看审计日志 | admin |
 | `kernel.events.replay` | kernel | 触发事件回放 | sysop |
 | `kernel.jobs.manage` | kernel | 手动运行 / 暂停定时任务 | sysop |

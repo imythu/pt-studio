@@ -230,11 +230,33 @@ server {
 
 ### 备份
 
-- PostgreSQL：`pg_dump -Fc pt > pt-$(date +%F).dump`（每日）；
-- 种子文件：`/var/lib/pt-studio/blob`；
-- 配置：`/etc/pt-studio/`（含密钥，单独加密保存）；
-- Redis：开启 AOF（`appendonly yes`）。Redis 中有记账流（尚未落库的流量）与 tracker 的 swarm；丢失时 swarm 会在客户端下次 announce 时重建，未落库的少量流量会丢失。
+`scripts/backup.sh` 一次备份数据库（`pg_dump` 自定义格式）、本站角色、Redis 快照、blob 目录与配置文件，写入带时间戳的目录并生成 `SHA256SUMS`，默认保留最近 14 份：
+
+```bash
+# 每日 cron（以能读取全部 schema 的身份连接，如 postgres 超级用户）
+sudo -u postgres env PT_ETC=/etc/pt-studio PT_BACKUP_DB_URL=postgres:///pt \
+  /opt/pt-studio/scripts/backup.sh /var/backups/pt-studio
+```
+
+恢复（先停 pt-server 与 pt-tracker；目标库须为空，或设 `PT_RESTORE_FORCE=1` 替换）：
+
+```bash
+sudo -u postgres env PT_RESTORE_DB_URL=postgres:///pt /opt/pt-studio/scripts/restore.sh /var/backups/pt-studio/pt-backup-<时间>
+```
+
+- 备份含密钥（`site.toml` 的 `secret_key` 等）与用户数据：放在受控位置、加密传输。恢复后的站点必须使用备份中的 `secret_key`，否则加密存储的邮箱、passkey、TOTP 密钥无法解密。
+- 角色导出不含密码（`--no-role-passwords`）：恢复到新集群后用 `init-db.sh` 重新设置 `pt_admin` / `pt_gateway` 的密码。
+- Redis 快照只在需要找回尚未入库的流量记录时使用（停 Redis → 替换 dump.rdb → 启动）；tracker 的 swarm 会在客户端下次 announce 时重建。平时开启 AOF（`appendonly yes`）。
 - Meilisearch：可随时由站点重建索引，不需要备份。
+- 演练（建议每季度一次）：把最近的备份恢复到一个新库，`pt-server --config <指向新库的副本> migrate` 能正常完成、各表行数与原库一致即为通过（2026-10-17 在开发站点上演练：202 张表、约 3.8 万行一致）。
+
+### 监控
+
+- `site.toml` 的 `[http] metrics_bind = "127.0.0.1:9464"` 与 `tracker.toml` 的 `metrics_bind = "127.0.0.1:9465"` 打开 Prometheus 指标（独立端口，只监听内网）。
+- 站点：`pt_http_requests_total{plugin,route,status}`、`pt_http_request_duration_seconds`、`pt_hook_invocations_total{hook,plugin,outcome}`、`pt_job_runs_total{plugin,job,outcome}`，以及插件自定义的 `pt_plugin_<id>_*`。
+- tracker：`pt_tracker_requests_total{endpoint,result,reason}`、`pt_tracker_announce_events_total{event}`、`pt_tracker_announce_duration_seconds`、`pt_tracker_admission_cached`。
+- 建议告警：5xx 比例、announce p99、`pt_job_runs_total{outcome!="ok"}` 增长、tracker `reason="tracker busy, retry later"` 增长（Redis 压力）。
+- 管理员在后台“操作日志”查看全部管理操作（权限 `kernel.audit.read`）。
 
 ### 升级
 

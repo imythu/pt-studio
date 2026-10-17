@@ -303,6 +303,19 @@ async fn plugin_mw(
         tracing::error!(plugin = %st.plugin, %request_id, code = %m.0.code, message = %m.0.message, "request failed");
     }
     let code = resp.extensions().get::<ErrorMarker>().map(|m| m.0.code.clone());
+    let status = resp.status().as_u16().to_string();
+    crate::metrics::REGISTRY.counter(
+        "kernel",
+        "pt_http_requests_total",
+        1,
+        &[("plugin", &st.plugin), ("route", &route_tpl), ("status", &status)],
+    );
+    crate::metrics::REGISTRY.observe(
+        "kernel",
+        "pt_http_request_duration_seconds",
+        started.elapsed().as_secs_f64(),
+        &[("plugin", &st.plugin), ("route", &route_tpl)],
+    );
     tracing::info!(target: "access", plugin = %st.plugin, %method, route = %route_tpl, status = resp.status().as_u16(),
         ms = started.elapsed().as_millis() as u64, user = ?user, ip = ip.as_deref().unwrap_or("-"), code = code.as_deref().unwrap_or("-"),
         %request_id);

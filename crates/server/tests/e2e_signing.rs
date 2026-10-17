@@ -45,7 +45,7 @@ async fn signed_packages_only_in_prod() {
     .unwrap();
     let (key, pubkey) = pt_server::keygen(&work.join("site-signing"), true).unwrap();
     pt_server::sign(&pkg, &key).unwrap();
-    pt_server::verify_signature(&pkg, &std::fs::read_to_string(&pubkey).unwrap().lines().nth(1).unwrap().to_owned()).unwrap();
+    pt_server::verify_signature(&pkg, std::fs::read_to_string(&pubkey).unwrap().lines().nth(1).unwrap()).unwrap();
 
     // 签名有效：生产模式加载成功，插件路由可用
     reset().await;

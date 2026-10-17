@@ -14,6 +14,7 @@ mode = "dev"                           # dev：允许未签名插件包、出站
 [http]
 bind = "0.0.0.0:31251"
 web_dir = "web/dist"                   # 前端构建目录（cd web && npm run build）
+# metrics_bind = "127.0.0.1:9464"      # Prometheus 指标（独立端口，只监听内网）
 
 # 限流：站点默认规则与各接口规则叠加。class_multiplier 按用户等级放宽（取不超过用户等级的最大门槛），0 表示不限流
 # [http.rate_limit]

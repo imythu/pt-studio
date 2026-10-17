@@ -11,7 +11,7 @@ use pt_plugin_api::{
     Actor, Credential, Ctx, HookCall, HookDecision, Hooks, HttpRoutes, IndexSchema, InvocationInfo,
     InvocationKind, Json, KernelLink, Lifecycle, OnCron, OnEvent, PResult, PluginError, Principal,
     SearchContributor,
-    host::{Config, HookOutcome, HookRunner, Metrics, Random, Term, Terms, Time},
+    host::{Config, HookOutcome, HookRunner, Random, Term, Terms, Time},
     manifest::Manifest,
     services::{AUTH, AuthService},
 };
@@ -272,7 +272,7 @@ impl Shared {
             random: Arc::new(OsRandom),
             audit: uow.clone(),
             jobs: uow.clone(),
-            metrics: Arc::new(NoopMetrics),
+            metrics: Arc::new(crate::metrics::PluginMetrics { plugin: plugin.to_owned() }),
             hooks,
             link: me,
             authenticated: Arc::new(Mutex::new(vec![])),
@@ -1018,6 +1018,18 @@ impl HookRunner for PipelineRunner {
                     other => other,
                 }
             };
+            let label = match &outcome {
+                Ok(HookDecision::Allow) => "allow",
+                Ok(HookDecision::Modify(_)) => "modify",
+                Ok(HookDecision::Deny { .. }) => "deny",
+                Err(_) => "error",
+            };
+            crate::metrics::REGISTRY.counter(
+                "kernel",
+                "pt_hook_invocations_total",
+                1,
+                &[("hook", hook), ("plugin", &h.plugin), ("outcome", label)],
+            );
             match outcome {
                 Ok(HookDecision::Allow) => {}
                 Ok(HookDecision::Modify(patch)) => json_patch::merge(&mut cur, &patch),
@@ -1145,12 +1157,6 @@ impl Random for OsRandom {
     }
 }
 
-struct NoopMetrics;
-impl Metrics for NoopMetrics {
-    fn counter_add(&self, _name: &str, _v: u64, _labels: &[(&str, &str)]) {}
-    fn gauge_set(&self, _name: &str, _v: f64, _labels: &[(&str, &str)]) {}
-    fn histogram_observe(&self, _name: &str, _v: f64, _labels: &[(&str, &str)]) {}
-}
 
 /// 有效敏感能力 = (sensitive ∪ sensitive_optional) ∩ grants.<id>.sensitive。
 pub fn effective_sensitive(cfg: &SiteConfig, m: &Manifest) -> HashSet<String> {

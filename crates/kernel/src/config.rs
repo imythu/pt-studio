@@ -125,6 +125,9 @@ pub struct HttpSection {
     /// 前端构建目录（`web/dist`）：SPA、`static/`、`plugins/<id>/`；不设置时不提供前端
     #[serde(default)]
     pub web_dir: Option<String>,
+    /// Prometheus 指标的独立监听地址（如 `127.0.0.1:9464`），不设置时不提供 `/metrics`
+    #[serde(default)]
+    pub metrics_bind: Option<String>,
 }
 
 /// `[http.rate_limit]`：全站默认规则，与路由规则叠加
@@ -178,6 +181,7 @@ impl Default for HttpSection {
             request_timeout_ms: default_timeout(),
             trusted_proxies: vec![],
             web_dir: None,
+            metrics_bind: None,
         }
     }
 }

@@ -5,6 +5,7 @@ import { createBrowserRouter, Link } from 'react-router';
 import { useT } from '@pt-studio/terms';
 import { AdminHome, AdminPluginRoute } from './pages/Admin';
 import { AdminUser, AdminUsers } from './pages/AdminUsers';
+import { AdminAudit } from './pages/AdminAudit';
 import { SettingsPage } from './pages/Settings';
 import { Login, Register, ResetPassword, VerifyEmail } from './pages/Auth';
 import { PluginRoute } from './pages/PluginRoute';
@@ -63,6 +64,16 @@ export const router = createBrowserRouter([
           <RequireLogin>
             <RequireStaff>
               <AdminUsers />
+            </RequireStaff>
+          </RequireLogin>
+        ),
+      },
+      {
+        path: 'admin/audit',
+        element: (
+          <RequireLogin>
+            <RequireStaff>
+              <AdminAudit />
             </RequireStaff>
           </RequireLogin>
         ),
