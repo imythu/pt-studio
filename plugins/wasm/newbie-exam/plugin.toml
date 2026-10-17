@@ -1,0 +1,172 @@
+id = "newbie-exam"
+name = "新手考核"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "新手考核：新用户在限期内分阶段完成上传量 / 做种时长 / 分享率等目标，未完成禁止下载或封禁（可补救），通过可得魔力值"
+
+provides = ["ctx.exams@0.1.0"]
+requires = ["ctx.users@^0.1"]
+optional_requires = ["ctx.ledger@^0.1", "ctx.notify@^0.1"]
+publishes = ["exam.assigned", "exam.stage_passed", "exam.passed", "exam.failed", "exam.exempted", "exam.remedied"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public", "accounting.v_user_totals", "torrent.v_uploader_counts"]
+
+[capabilities.scopes]
+"ctx.users" = ["write:status"]
+"ctx.ledger" = ["currency:bonus"]
+"ctx.notify" = ["send"]
+
+[[hooks]]
+hook = "invite.before_issue"
+priority = 30
+
+[[subscriptions]]
+name = "on_registered"
+event = "user.registered"
+
+[[subscriptions]]
+name = "on_traffic_settled"
+event = "traffic.settled"
+
+[[cron]]
+name = "evaluate"
+schedule = "*/20 * * * *"
+timeout_secs = 600
+tx = "manual"
+
+[[cron]]
+name = "evaluate_all"
+schedule = "45 * * * *"
+timeout_secs = 1800
+tx = "manual"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_status"
+method = "GET"
+path = "/v1/admin/users/{id}"
+auth = "admin"
+permission = "newbie-exam.manage"
+
+[[http.routes]]
+id = "admin_assign"
+method = "POST"
+path = "/v1/admin/assign"
+auth = "admin"
+permission = "newbie-exam.manage"
+
+[[http.routes]]
+id = "admin_exempt"
+method = "POST"
+path = "/v1/admin/users/{id}/exempt"
+auth = "admin"
+permission = "newbie-exam.manage"
+
+[[http.routes]]
+id = "admin_extend"
+method = "POST"
+path = "/v1/admin/users/{id}/extend"
+auth = "admin"
+permission = "newbie-exam.manage"
+
+[[permissions]]
+name = "newbie-exam.manage"
+description_term = "newbie-exam.perm.manage"
+default_roles = ["moderator"]
+
+[error_codes]
+"newbie-exam.already_assigned" = 409
+"newbie-exam.not_assigned" = 409
+"newbie-exam.restricted" = 403
+"newbie-exam.definition_invalid" = 422
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["home.widgets", "admin.user.tabs"]
+routes = ["/p/newbie-exam/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["name", "stages", "on_fail", "allow_ban", "remedy_days", "reward_bonus", "auto_assign_modes", "exempt_class_ids", "prewarn_hours", "block_invite_during_exam", "notify"]
+
+[settings_schema.properties.name]
+type = "string"
+maxLength = 60
+default = "新手考核"
+title = "考核名称"
+
+[settings_schema.properties.stages]
+type = "array"
+title = "阶段（天数从分配时算起，严格递增；指标为考核期间的增量，分享率取当前值）"
+default = [{ days = 30, goals = [{ metric = "uploaded_gib", gte = 10 }, { metric = "seed_hours", gte = 72 }] }]
+items = { type = "object", required = ["days", "goals"], properties = { days = { type = "integer", minimum = 1, maximum = 365, title = "截止（天）" }, goals = { type = "array", title = "目标", items = { type = "object", required = ["metric", "gte"], properties = { metric = { type = "string", enum = ["uploaded_gib", "downloaded_gib", "seed_hours", "uploads_count", "bonus", "ratio"], title = "指标" }, gte = { type = "number", minimum = 0, title = "至少" } } } } } }
+
+[settings_schema.properties.on_fail]
+type = "string"
+enum = ["none", "restrict", "ban"]
+default = "restrict"
+title = "未通过时（不处理 / 禁止下载 / 封禁）"
+
+[settings_schema.properties.allow_ban]
+type = "boolean"
+default = false
+title = "允许“封禁”作为未通过的处理"
+
+[settings_schema.properties.remedy_days]
+type = "integer"
+minimum = 0
+default = 7
+title = "禁止下载后多少天内完成全部目标可自动恢复（0 = 不补救）"
+
+[settings_schema.properties.reward_bonus]
+type = "integer"
+minimum = 0
+default = 0
+title = "通过奖励的魔力值"
+
+[settings_schema.properties.auto_assign_modes]
+type = "array"
+title = "自动分配给这些注册方式的新用户（为空则不自动分配）"
+default = []
+items = { type = "string", enum = ["open", "invite", "application", "admin"] }
+
+[settings_schema.properties.exempt_class_ids]
+type = "array"
+title = "免考等级 ID"
+default = []
+items = { type = "integer", minimum = 0 }
+
+[settings_schema.properties.prewarn_hours]
+type = "integer"
+minimum = 0
+default = 48
+title = "阶段截止前多少小时提醒"
+
+[settings_schema.properties.block_invite_during_exam]
+type = "boolean"
+default = true
+title = "考核未通过前不能发邀请"
+
+[settings_schema.properties.notify]
+type = "boolean"
+default = true
+title = "发通知"
+
+[terms]
+"newbie-exam.name" = { zh-CN = "新手考核", en = "Newbie exam" }
+"newbie-exam.perm.manage" = { zh-CN = "管理新手考核", en = "Manage newbie exams" }

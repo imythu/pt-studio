@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-newbie-exam"
+description = "PT Studio newbie exam (WASM): staged goals for new members, restriction on failure, rewards"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

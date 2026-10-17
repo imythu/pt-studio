@@ -139,7 +139,7 @@
 - [x] M2.2 qBittorrent / Deluge 客户端兼容测试（qBittorrent 5.1 双向实测通过；Deluge 同为 libtorrent，未单独实测）
 - [x] M2.3 ratio-policy（按等级的最低分享率、警告期、限制下载）
 - [x] M2.4 seedbox（用户登记 IP 段 + 审核，accounting 标记盒子 peer；ASN 自动识别与 H&R / 魔力值规则接入待做）
-- [ ] M2.5 newbie-exam（新手考核）
+- [x] M2.5 newbie-exam（新手考核）
 - [ ] M2.6 管理操作日志页（审计查询）、Prometheus 指标端点、备份恢复脚本与演练文档
 
 ### M3 内容功能（国内站刚需）
