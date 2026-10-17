@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-ratio-policy"
+description = "PT Studio ratio policy (WASM): required ratio by download tier, warning period, leech restriction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

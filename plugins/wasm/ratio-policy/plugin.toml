@@ -1,0 +1,168 @@
+id = "ratio-policy"
+name = "分享率考核"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "分享率考核：按下载量分档的要求分享率（做种减免）、豁免、警告期、到期禁止下载（可选封禁）、恢复后自动解除"
+
+provides = ["ctx.ratio@0.1.0"]
+requires = ["ctx.users@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
+publishes = ["ratio.warned", "ratio.warning_lifted", "ratio.restricted", "ratio.restriction_lifted"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public", "accounting.v_user_totals", "accounting.v_snatch"]
+
+[capabilities.scopes]
+"ctx.users" = ["write:status"]
+"ctx.notify" = ["send"]
+
+[[hooks]]
+hook = "torrent.before_download"
+priority = 30
+
+[[hooks]]
+hook = "invite.before_issue"
+priority = 30
+
+[[subscriptions]]
+name = "on_traffic_settled"
+event = "traffic.settled"
+
+[[cron]]
+name = "incr_evaluate"
+schedule = "*/15 * * * *"
+timeout_secs = 600
+tx = "manual"
+
+[[cron]]
+name = "daily_evaluate"
+schedule = "30 4 * * *"
+timeout_secs = 1800
+tx = "manual"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_status"
+method = "GET"
+path = "/v1/admin/users/{id}"
+auth = "admin"
+permission = "ratio-policy.warnings.moderate"
+
+[[http.routes]]
+id = "admin_list"
+method = "GET"
+path = "/v1/admin/warned"
+auth = "admin"
+permission = "ratio-policy.warnings.moderate"
+
+[[http.routes]]
+id = "admin_warn"
+method = "POST"
+path = "/v1/admin/users/{id}/warn"
+auth = "admin"
+permission = "ratio-policy.warnings.moderate"
+
+[[http.routes]]
+id = "admin_lift"
+method = "POST"
+path = "/v1/admin/users/{id}/lift"
+auth = "admin"
+permission = "ratio-policy.warnings.moderate"
+
+[[http.routes]]
+id = "admin_exempt"
+method = "POST"
+path = "/v1/admin/users/{id}/exempt"
+auth = "admin"
+permission = "ratio-policy.warnings.moderate"
+
+[[permissions]]
+name = "ratio-policy.warnings.moderate"
+description_term = "ratio-policy.perm.moderate"
+default_roles = ["moderator"]
+
+[error_codes]
+"ratio-policy.download_restricted" = 403
+"ratio-policy.restricted" = 403
+"ratio-policy.not_warned" = 409
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["user.profile.stats", "admin.user.tabs"]
+routes = ["/p/ratio-policy/*", "/admin/p/ratio-policy/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["table", "seeding_reduction", "exempt_below_gib", "grace_days", "exempt_class_ids", "warning_days", "ban_after_days", "block_new_downloads_during_warning", "notify"]
+
+[settings_schema.properties.table]
+type = "array"
+title = "要求分享率（按下载量分档；第一档从 0 开始）"
+default = [{ min_downloaded_gib = 0, required = 0.0 }, { min_downloaded_gib = 5, required = 0.15 }, { min_downloaded_gib = 10, required = 0.2 }, { min_downloaded_gib = 20, required = 0.3 }, { min_downloaded_gib = 30, required = 0.4 }, { min_downloaded_gib = 40, required = 0.5 }, { min_downloaded_gib = 50, required = 0.6 }]
+items = { type = "object", required = ["min_downloaded_gib", "required"], properties = { min_downloaded_gib = { type = "number", minimum = 0, title = "下载量 ≥（GiB）" }, required = { type = "number", minimum = 0, maximum = 10, title = "要求分享率" } } }
+
+[settings_schema.properties.seeding_reduction]
+type = "number"
+minimum = 0
+maximum = 1
+default = 1.0
+title = "做种减免（要求 × (1 − 减免 × 仍在做种的已完成种子比例)；0 = 不减免）"
+
+[settings_schema.properties.exempt_below_gib]
+type = "number"
+minimum = 0
+default = 5
+title = "下载量低于多少 GiB 不考核"
+
+[settings_schema.properties.grace_days]
+type = "integer"
+minimum = 0
+default = 7
+title = "注册后多少天内不考核"
+
+[settings_schema.properties.exempt_class_ids]
+type = "array"
+title = "不考核的等级 ID"
+default = []
+items = { type = "integer", minimum = 0 }
+
+[settings_schema.properties.warning_days]
+type = "integer"
+minimum = 1
+default = 14
+title = "警告期（天），期满仍不达标则禁止下载"
+
+[settings_schema.properties.ban_after_days]
+type = "integer"
+minimum = 0
+default = 0
+title = "禁止下载多少天后仍不达标则封禁（0 = 不封禁）"
+
+[settings_schema.properties.block_new_downloads_during_warning]
+type = "boolean"
+default = false
+title = "警告期内禁止下载新种子（已下载过的不受影响）"
+
+[settings_schema.properties.notify]
+type = "boolean"
+default = true
+title = "警告与限制时发通知"
+
+[terms]
+"ratio-policy.name" = { zh-CN = "分享率考核", en = "Ratio policy" }
+"ratio-policy.perm.moderate" = { zh-CN = "处理分享率警告", en = "Moderate ratio warnings" }
+"ratio-policy.warning" = { zh-CN = "分享率警告", en = "Ratio warning" }

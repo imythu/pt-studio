@@ -1,0 +1,10 @@
+package pt:ratio-policy-plugin@0.1.0;
+
+world ratio-policy {
+  include pt:plugin/host@1.0.0;
+  export pt:plugin/hooks@1.0.0;
+  export pt:plugin/on-event@1.0.0;
+  export pt:plugin/on-cron@1.0.0;
+  export pt:plugin/http-handler@1.0.0;
+  export pt:plugin/service-provider@1.0.0;
+}
