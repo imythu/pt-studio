@@ -388,6 +388,12 @@ try {
   await p.reload();
   await p.getByRole('link', { name: '我的片单' }).click();
   await p.getByRole('link', { name: /Web\.Movie\.2024/ }).waitFor();
+  await p.goto(movieUrl);
+  await p.getByRole('tab', { name: '字幕' }).click();
+  await p.locator('input[name=subtitle_file]').setInputFiles({ name: 'chs.srt', mimeType: 'text/plain', buffer: Buffer.from('1\n00:00:01,000 --> 00:00:02,000\n你好\n') });
+  await p.getByRole('button', { name: '上传', exact: true }).click();
+  await p.getByText('字幕已上传').waitFor();
+  await p.getByText('chs.srt').waitFor();
   await p.goto(`${BASE}/p/top10/`);
   await p.getByRole('heading', { name: '排行榜' }).waitFor();
   await p.getByText('完成数最多').waitFor();

@@ -436,6 +436,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-subtitles"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+ "sha2",
+]
+
+[[package]]
 name = "pt-wasm-top10"
 version = "0.1.0"
 dependencies = [

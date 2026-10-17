@@ -1,0 +1,136 @@
+id = "subtitles"
+name = "字幕区"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "字幕区：为种子上传 SRT / ASS / SSA / VTT / SUP 字幕或 ZIP 字幕包（内容与压缩包检查），下载计数，可选上传奖励"
+
+provides = ["ctx.subtitles@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+optional_requires = ["ctx.ledger@^0.1", "ctx.notify@^0.1"]
+publishes = ["subtitle.uploaded", "subtitle.deleted"]
+
+[capabilities]
+sql = true
+blob = true
+views = ["torrent.v_torrent_public", "identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.ledger" = ["currency:bonus"]
+"ctx.notify" = ["send"]
+
+[[subscriptions]]
+name = "on_torrent_deleted"
+event = "torrent.deleted"
+
+[[http.routes]]
+id = "upload"
+method = "POST"
+path = "/v1/torrents/{id}/subtitles"
+auth = "user"
+permission = "subtitles.upload"
+rate_limit = "user:20/m"
+max_body_kb = 20480
+
+[[http.routes]]
+id = "list"
+method = "GET"
+path = "/v1/torrents/{id}/subtitles"
+auth = "user"
+
+[[http.routes]]
+id = "download"
+method = "GET"
+path = "/v1/subtitles/{id}/download"
+auth = "user"
+permission = "subtitles.download"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "delete"
+method = "DELETE"
+path = "/v1/subtitles/{id}"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_list"
+method = "GET"
+path = "/v1/admin/subtitles"
+auth = "admin"
+permission = "subtitles.moderate"
+
+[[permissions]]
+name = "subtitles.upload"
+description_term = "subtitles.perm.upload"
+default_roles = ["user"]
+
+[[permissions]]
+name = "subtitles.download"
+description_term = "subtitles.perm.download"
+default_roles = ["user"]
+
+[[permissions]]
+name = "subtitles.moderate"
+description_term = "subtitles.perm.moderate"
+default_roles = ["moderator"]
+
+[error_codes]
+"subtitles.too_large" = 413
+"subtitles.invalid_file" = 422
+"subtitles.duplicate" = 409
+"subtitles.limit_reached" = 409
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.detail.tabs"]
+routes = ["/admin/p/subtitles/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["max_size_kb", "max_archive_entries", "max_extracted_mb", "max_per_torrent", "reward_bonus"]
+
+[settings_schema.properties.max_size_kb]
+type = "integer"
+minimum = 16
+maximum = 20480
+default = 5120
+title = "字幕文件最大体积（KiB）"
+
+[settings_schema.properties.max_archive_entries]
+type = "integer"
+minimum = 1
+maximum = 1000
+default = 100
+title = "ZIP 字幕包最多文件数"
+
+[settings_schema.properties.max_extracted_mb]
+type = "integer"
+minimum = 1
+maximum = 500
+default = 50
+title = "ZIP 字幕包解压后最大总量（MiB）"
+
+[settings_schema.properties.max_per_torrent]
+type = "integer"
+minimum = 1
+default = 50
+title = "每个种子最多字幕数"
+
+[settings_schema.properties.reward_bonus]
+type = "integer"
+minimum = 0
+default = 0
+title = "每上传一个字幕奖励的魔力值（0 = 不奖励）"
+
+[terms]
+"subtitles.name" = { zh-CN = "字幕区", en = "Subtitles" }
+"subtitles.perm.upload" = { zh-CN = "上传字幕", en = "Upload subtitles" }
+"subtitles.perm.download" = { zh-CN = "下载字幕", en = "Download subtitles" }
+"subtitles.perm.moderate" = { zh-CN = "管理字幕", en = "Moderate subtitles" }
