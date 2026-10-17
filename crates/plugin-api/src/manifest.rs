@@ -328,6 +328,23 @@ pub struct FrontendDecl {
     pub routes: Vec<String>,
     #[serde(default)]
     pub settings_ui: Option<String>,
+    /// 前端需要的外部来源（并入站点 CSP），如验证码服务的脚本与 iframe
+    #[serde(default)]
+    pub csp: Option<CspDecl>,
+}
+
+/// 只接受 `https://<host>[/path]` 形式的来源；内核校验后并入对应指令
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CspDecl {
+    #[serde(default)]
+    pub script_src: Vec<String>,
+    #[serde(default)]
+    pub frame_src: Vec<String>,
+    #[serde(default)]
+    pub connect_src: Vec<String>,
+    #[serde(default)]
+    pub style_src: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

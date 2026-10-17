@@ -33,6 +33,7 @@ export const SLOT_KINDS = {
   'user.name.decorations': 'list',
   'auth.register.form_extra': 'list',
   'auth.login.extra': 'list',
+  'auth.reset.extra': 'list',
 } as const;
 
 export type SlotName = keyof typeof SLOT_KINDS;

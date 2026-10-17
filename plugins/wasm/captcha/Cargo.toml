@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-captcha"
+description = "PT Studio human verification (WASM): Turnstile / hCaptcha / reCAPTCHA v2 token checks via ctx.captcha"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

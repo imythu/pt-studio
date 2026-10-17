@@ -247,6 +247,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-captcha"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-checkin"
 version = "0.1.0"
 dependencies = [

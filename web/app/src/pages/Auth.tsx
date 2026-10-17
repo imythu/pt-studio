@@ -9,6 +9,7 @@ import { HeroArt, Logo } from '../art';
 import { useManifest } from '../manifest';
 import { ErrorText } from '../errors';
 import { useSession } from '../session';
+import { getAssertion, webauthnSupported } from '../webauthn';
 
 /** 插件写入注册 / 登录请求的绑定：顶层字段（如 `invite_code`）或 `form.<key>` */
 export interface FormBinding {
@@ -75,6 +76,9 @@ export function Login() {
   const [busy, setBusy] = useState(false);
   // 两步验证：密码正确后服务端返回票据，再提交 TOTP / 恢复码
   const [ticket, setTicket] = useState<string | null>(null);
+  const [methods, setMethods] = useState<string[]>([]);
+  // 每次提交失败加 1：验证码等插槽据此重置（令牌只能用一次）
+  const [attempt, setAttempt] = useState(0);
   const [code, setCode] = useState('');
   const st = useLocation().state as { registered?: boolean; reset?: boolean } | null;
   const registered = st?.registered;
@@ -86,11 +90,12 @@ export function Login() {
       if (ticket) {
         await api('/api/p/identity/v1/sessions/two-factor', { json: { ticket, code } });
       } else {
-        const r = await api<{ two_factor_required?: boolean; ticket?: string }>('/api/p/identity/v1/sessions', {
+        const r = await api<{ two_factor_required?: boolean; ticket?: string; methods?: string[] }>('/api/p/identity/v1/sessions', {
           json: { username, password, remember, ...splitExtra(extra) },
         });
         if (r.two_factor_required && r.ticket) {
           setTicket(r.ticket);
+          setMethods(r.methods ?? []);
           return;
         }
       }
@@ -101,6 +106,27 @@ export function Login() {
         setTicket(null);
         setCode('');
       }
+      setAttempt((n) => n + 1);
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  /** 安全密钥：第二步（有票据）或免密码登录 */
+  const withKey = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (ticket) {
+        const o = await api<{ public_key: Record<string, unknown> }>('/api/p/identity/v1/sessions/two-factor/webauthn-options', { json: { ticket } });
+        await api('/api/p/identity/v1/sessions/two-factor', { json: { ticket, assertion: await getAssertion(o.public_key) } });
+      } else {
+        const o = await api<{ ceremony_id: string; public_key: Record<string, unknown> }>('/api/p/identity/v1/webauthn/assertion-options', { json: {} });
+        await api('/api/p/identity/v1/sessions/webauthn', { json: { ceremony_id: o.ceremony_id, assertion: await getAssertion(o.public_key) } });
+      }
+      await s.refresh();
+      nav('/');
+    } catch (err) {
       setError(err);
     } finally {
       setBusy(false);
@@ -127,6 +153,14 @@ export function Login() {
           <Button type="submit" variant="primary" disabled={busy}>
             {t('ui.two_factor.verify')}
           </Button>
+          {methods.includes('webauthn') && webauthnSupported() && (
+            <>
+              {' '}
+              <Button type="button" onClick={withKey} disabled={busy}>
+                {t('ui.webauthn.use_key')}
+              </Button>
+            </>
+          )}
         </form>
       ) : (
         <form onSubmit={submit}>
@@ -136,7 +170,7 @@ export function Login() {
           <Field label={t('ui.login.password')}>
             <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </Field>
-          <Slot name="auth.login.extra" ctx={{ form: binding }} />
+          <Slot name="auth.login.extra" ctx={{ form: binding, attempt }} />
           <label className="pt-check">
             <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> {t('ui.login.remember')}
           </label>
@@ -144,6 +178,14 @@ export function Login() {
           <Button type="submit" variant="primary" disabled={busy}>
             {t('ui.login.submit')}
           </Button>
+          {webauthnSupported() && (
+            <>
+              {' '}
+              <Button type="button" onClick={withKey} disabled={busy}>
+                {t('ui.webauthn.passwordless')}
+              </Button>
+            </>
+          )}
           <p className="small">
             <Link to="/reset-password">{t('ui.reset.forgot')}</Link>
           </p>
@@ -160,6 +202,7 @@ export function Register() {
   const [f, setF] = useState({ username: '', email: '', password: '' });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -169,6 +212,7 @@ export function Register() {
       nav('/login', { state: { registered: true } });
     } catch (err) {
       setError(err);
+      setAttempt((n) => n + 1);
     } finally {
       setBusy(false);
     }
@@ -192,7 +236,7 @@ export function Register() {
         {field('username', t('ui.login.username'), 'text', 'username')}
         {field('email', t('ui.register.email'), 'email', 'email')}
         {field('password', t('ui.login.password'), 'password', 'new-password')}
-        <Slot name="auth.register.form_extra" ctx={{ form: binding }} />
+        <Slot name="auth.register.form_extra" ctx={{ form: binding, attempt }} />
         <ErrorText error={error} />
         <Button type="submit" variant="primary" disabled={busy}>
           {t('ui.register.submit')}
@@ -221,6 +265,8 @@ export function ResetPassword() {
   const t = useT();
   const nav = useNavigate();
   const challenge = useChallengeParams();
+  const [binding, extra] = useBinding();
+  const [attempt, setAttempt] = useState(0);
   const [login, setLogin] = useState('');
   const [pw, setPw] = useState('');
   const [sent, setSent] = useState(false);
@@ -234,6 +280,7 @@ export function ResetPassword() {
       await f();
     } catch (err) {
       setError(err);
+      setAttempt((n) => n + 1);
     } finally {
       setBusy(false);
     }
@@ -267,7 +314,7 @@ export function ResetPassword() {
         <form
           onSubmit={(e) =>
             run(e, async () => {
-              await api('/api/p/identity/v1/password-resets', { json: { login } });
+              await api('/api/p/identity/v1/password-resets', { json: { login, ...splitExtra(extra) } });
               setSent(true);
             })
           }
@@ -275,6 +322,7 @@ export function ResetPassword() {
           <Field label={t('ui.reset.login')}>
             <Input name="login" autoComplete="username" value={login} onChange={(e) => setLogin(e.target.value)} required />
           </Field>
+          <Slot name="auth.reset.extra" ctx={{ form: binding, attempt }} />
           <ErrorText error={error} />
           <Button type="submit" variant="primary" disabled={busy}>
             {t('ui.reset.send')}

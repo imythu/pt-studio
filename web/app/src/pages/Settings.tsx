@@ -7,6 +7,7 @@ import { useT } from '@pt-studio/terms';
 import { Badge, Button, Card, Field, Input, Spinner, Table, Tabs, useToast } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { useManifest } from '../manifest';
+import { createCredential, webauthnSupported } from '../webauthn';
 import { useSession } from '../session';
 
 interface Profile {
@@ -137,10 +138,19 @@ function SecurityLog() {
   );
 }
 
+interface SecurityKey {
+  id: number;
+  name: string;
+  discoverable: boolean;
+  created_at: number;
+  last_used_at: number | null;
+}
+
 interface TwoFactorStatus {
   totp: boolean;
   recovery_remaining: number;
   required: boolean;
+  webauthn: SecurityKey[];
 }
 
 /**
@@ -237,7 +247,54 @@ function TwoFactorCard() {
       setCodes((await api<{ recovery_codes: string[] }>('/api/p/identity/v1/users/me/recovery-codes', { json: {} })).recovery_codes);
       await reload();
     });
+  const [keyName, setKeyName] = useState('');
+  const addKey = (e: FormEvent) => {
+    e.preventDefault();
+    void act(async () => {
+      const o = await api<{ ceremony_id: string; public_key: Record<string, unknown> }>('/api/p/identity/v1/users/me/webauthn/registration-options', { json: {} });
+      const credential = await createCredential(o.public_key);
+      const r = await api<{ recovery_codes: string[] | null }>('/api/p/identity/v1/users/me/webauthn-credentials', {
+        json: { ceremony_id: o.ceremony_id, name: keyName.trim() || 'Security key', credential },
+      });
+      if (r.recovery_codes) setCodes(r.recovery_codes);
+      setKeyName('');
+      await reload();
+      toast(t('ui.webauthn.added'), 'success');
+    });
+  };
+  const removeKey = (k: SecurityKey) => {
+    if (!window.confirm(t('ui.webauthn.remove_confirm', { name: k.name }))) return;
+    void act(async () => {
+      await api(`/api/p/identity/v1/users/me/webauthn-credentials/${k.id}`, { method: 'DELETE' });
+      await reload();
+    });
+  };
   const st = q.data;
+  const keys = st && (
+    <div className="security-keys">
+      <h3>{t('ui.webauthn.title')}</h3>
+      <p className="pt-muted small">{t('ui.webauthn.hint')}</p>
+      <ul>
+        {st.webauthn.map((k) => (
+          <li key={k.id}>
+            {k.name} {k.discoverable && <Badge>{t('ui.webauthn.passwordless_ok')}</Badge>}{' '}
+            <span className="pt-muted small">{k.last_used_at ? new Date(k.last_used_at).toLocaleString() : '—'}</span>{' '}
+            <Button variant="ghost" onClick={() => removeKey(k)}>
+              ✕
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {webauthnSupported() ? (
+        <form className="searchbar" onSubmit={addKey}>
+          <Input name="key_name" placeholder={t('ui.webauthn.name')} value={keyName} maxLength={64} onChange={(e) => setKeyName(e.target.value)} />
+          <Button type="submit">{t('ui.webauthn.add')}</Button>
+        </form>
+      ) : (
+        <p className="pt-muted small">{t('ui.webauthn.unsupported')}</p>
+      )}
+    </div>
+  );
   return (
     <Card title={t('ui.two_factor.title')}>
       {reauthForm}
@@ -261,6 +318,7 @@ function TwoFactorCard() {
           <Button variant="danger" onClick={disable}>
             {t('ui.two_factor.disable')}
           </Button>
+          {keys}
         </>
       ) : setup ? (
         <form onSubmit={confirm}>
@@ -284,6 +342,12 @@ function TwoFactorCard() {
           <Button variant="primary" onClick={begin}>
             {t('ui.two_factor.setup')}
           </Button>
+          {st.webauthn.length > 0 && (
+            <p className="small">
+              {t('ui.two_factor.recovery_left', { n: st.recovery_remaining })} <Button onClick={regenerate}>{t('ui.two_factor.regenerate')}</Button>
+            </p>
+          )}
+          {keys}
         </>
       )}
     </Card>

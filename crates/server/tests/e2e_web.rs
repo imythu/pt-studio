@@ -18,8 +18,12 @@ fn web_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web")
 }
 
-fn config(plugins: &std::path::Path, tmdb: &str) -> SiteConfig {
-    let mut t = common::config_text();
+fn config(plugins: &std::path::Path, tmdb: &str, port: u16) -> SiteConfig {
+    // 浏览器经 http://localhost:<port> 访问：WebAuthn 的来源与 rp_id 按实际地址
+    let mut t = common::config_text().replace(
+        "[plugin.identity]\n",
+        &format!("[plugin.identity]\nwebauthn_origin = \"http://localhost:{port}\"\n"),
+    );
     t.push_str(&format!(
         "\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n",
         plugins.display()
@@ -59,7 +63,9 @@ async fn web_end_to_end() {
     let dir = common::package_wasm_plugins();
     reset().await;
     let tmdb = common::mock_tmdb(std::sync::Arc::default()).await;
-    let kernel = Kernel::start(config(&dir, &tmdb), pt_server::native_plugins())
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let kernel = Kernel::start(config(&dir, &tmdb, port), pt_server::native_plugins())
         .await
         .unwrap_or_else(|e| panic!("{e}"));
     let app = kernel.router();
@@ -200,8 +206,6 @@ async fn web_end_to_end() {
         pt_plugin_torrent::fixtures::sample_v1("Web.Movie", &[("m.mkv", 600 << 20)], true),
     )
     .unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(async move {
         axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
             .await

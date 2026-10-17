@@ -528,3 +528,262 @@ async fn totp_two_factor_and_reauth() {
     let r = login(&app, "10.0.0.1", "erin", "correct horse", None).await;
     assert!(r.body["csrf_token"].is_string(), "password-only again: {:?}", r.body);
 }
+
+/// 软件认证器（ES256）：生成 attestationObject（fmt = none）与断言
+struct SoftKey {
+    sk: p256::ecdsa::SigningKey,
+    cred_id: Vec<u8>,
+    counter: u32,
+    handle: Vec<u8>,
+}
+
+fn b64(b: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
+}
+
+fn b64d(s: &str) -> Vec<u8> {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s).unwrap()
+}
+
+fn sha256(b: &[u8]) -> Vec<u8> {
+    use sha2::Digest;
+    sha2::Sha256::digest(b).to_vec()
+}
+
+fn cbor_bytes(b: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x59];
+    out.extend_from_slice(&u16::try_from(b.len()).unwrap().to_be_bytes());
+    out.extend_from_slice(b);
+    out
+}
+
+fn cbor_text(s: &str) -> Vec<u8> {
+    let mut out = vec![0x60 | u8::try_from(s.len()).unwrap()];
+    out.extend_from_slice(s.as_bytes());
+    out
+}
+
+impl SoftKey {
+    fn new(seed: u8) -> Self {
+        Self {
+            sk: p256::ecdsa::SigningKey::from_slice(&[seed; 32]).unwrap(),
+            cred_id: vec![seed; 16],
+            counter: 0,
+            handle: Vec::new(),
+        }
+    }
+    fn cose(&self) -> Vec<u8> {
+        let pt = self.sk.verifying_key().to_encoded_point(false);
+        let mut k = vec![0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20];
+        k.extend_from_slice(pt.x().unwrap());
+        k.extend_from_slice(&[0x22, 0x58, 0x20]);
+        k.extend_from_slice(pt.y().unwrap());
+        k
+    }
+    fn auth_data(&self, rp_id: &str, flags: u8, attested: bool) -> Vec<u8> {
+        let mut d = sha256(rp_id.as_bytes());
+        d.push(flags | if attested { 0x40 } else { 0 });
+        d.extend_from_slice(&self.counter.to_be_bytes());
+        if attested {
+            d.extend_from_slice(&[0u8; 16]);
+            d.extend_from_slice(&u16::try_from(self.cred_id.len()).unwrap().to_be_bytes());
+            d.extend_from_slice(&self.cred_id);
+            d.extend_from_slice(&self.cose());
+        }
+        d
+    }
+    /// navigator.credentials.create 的结果
+    fn create(&mut self, opts: &Value, origin: &str) -> Value {
+        let pk = &opts["public_key"];
+        self.handle = b64d(pk["user"]["id"].as_str().unwrap());
+        let cd = json!({ "type": "webauthn.create", "challenge": pk["challenge"], "origin": origin }).to_string();
+        let mut att = vec![0xa3];
+        att.extend(cbor_text("fmt"));
+        att.extend(cbor_text("none"));
+        att.extend(cbor_text("attStmt"));
+        att.push(0xa0);
+        att.extend(cbor_text("authData"));
+        att.extend(cbor_bytes(&self.auth_data(pk["rp"]["id"].as_str().unwrap(), 0x05, true)));
+        json!({ "id": b64(&self.cred_id), "rawId": b64(&self.cred_id), "type": "public-key",
+                "response": { "clientDataJSON": b64(cd.as_bytes()), "attestationObject": b64(&att) },
+                "clientExtensionResults": { "credProps": { "rk": true } } })
+    }
+    /// navigator.credentials.get 的结果；`flags`：0x01 UP，0x04 UV
+    fn get(&mut self, opts: &Value, origin: &str, flags: u8, bump: bool) -> Value {
+        use p256::ecdsa::signature::Signer;
+        let pk = &opts["public_key"];
+        if bump {
+            self.counter += 1;
+        }
+        let cd = json!({ "type": "webauthn.get", "challenge": pk["challenge"], "origin": origin }).to_string();
+        let ad = self.auth_data(pk["rpId"].as_str().unwrap(), flags, false);
+        let mut msg = ad.clone();
+        msg.extend_from_slice(&sha256(cd.as_bytes()));
+        let sig: p256::ecdsa::Signature = self.sk.sign(&msg);
+        json!({ "id": b64(&self.cred_id), "rawId": b64(&self.cred_id), "type": "public-key",
+                "response": { "clientDataJSON": b64(cd.as_bytes()), "authenticatorData": b64(&ad),
+                              "signature": b64(sig.to_der().as_bytes()), "userHandle": b64(&self.handle) } })
+    }
+}
+
+#[tokio::test]
+async fn webauthn_second_factor_and_passwordless() {
+    let _guard = common::LOCK.lock().await;
+    reset().await;
+    let kernel = Kernel::start(common::config(), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+    let r = req(&app, "POST", "/api/p/identity/v1/users", "10.0.0.1", &[],
+        Some(json!({ "username": "gina", "email": "gina@example.com", "password": "correct horse" }))).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let gina = Session::of(&login(&app, "10.0.0.1", "gina", "correct horse", None).await);
+    const ORIGIN: &str = "https://pt.test";
+    let post = |path: &'static str, body: Value| {
+        let app = app.clone();
+        async move { req(&app, "POST", path, "10.0.0.1", &[], Some(body)).await }
+    };
+
+    // 登记安全密钥：rp 为站点主机名；第一个第二因素同时给出恢复码
+    let mut key = SoftKey::new(7);
+    let opts = gina.send(&app, "POST", "/api/p/identity/v1/users/me/webauthn/registration-options", json!({})).await;
+    assert_eq!(opts.body["public_key"]["rp"]["id"], "pt.test", "{:?}", opts.body);
+    let cred = key.create(&opts.body, "https://evil.test");
+    let r = gina.send(&app, "POST", "/api/p/identity/v1/users/me/webauthn-credentials",
+        json!({ "ceremony_id": opts.body["ceremony_id"], "name": "YubiKey", "credential": cred })).await;
+    assert_eq!(r.body["code"], "identity.webauthn_invalid", "wrong origin: {:?}", r.body);
+    let opts = gina.send(&app, "POST", "/api/p/identity/v1/users/me/webauthn/registration-options", json!({})).await;
+    let cred = key.create(&opts.body, ORIGIN);
+    let r = gina.send(&app, "POST", "/api/p/identity/v1/users/me/webauthn-credentials",
+        json!({ "ceremony_id": opts.body["ceremony_id"], "name": "YubiKey", "credential": cred.clone() })).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["recovery_codes"].as_array().unwrap().len(), 10);
+    let r = gina.send(&app, "POST", "/api/p/identity/v1/users/me/webauthn-credentials",
+        json!({ "ceremony_id": opts.body["ceremony_id"], "name": "again", "credential": cred })).await;
+    assert_eq!(r.body["code"], "identity.webauthn_invalid", "ceremonies work once: {:?}", r.body);
+    let r = gina.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/two-factor").await;
+    assert_eq!(r.body["webauthn"][0]["name"], "YubiKey", "{:?}", r.body);
+
+    // 第二因素：票据 → 断言选项 → 断言
+    let r = login(&app, "10.0.0.1", "gina", "correct horse", None).await;
+    assert_eq!(r.body["methods"], json!(["webauthn", "recovery"]), "{:?}", r.body);
+    let ticket = r.body["ticket"].as_str().unwrap().to_owned();
+    let o = post("/api/p/identity/v1/sessions/two-factor/webauthn-options", json!({ "ticket": ticket })).await;
+    assert_eq!(o.body["public_key"]["allowCredentials"][0]["id"], b64(&key.cred_id), "{:?}", o.body);
+    let r = post("/api/p/identity/v1/sessions/two-factor", json!({ "ticket": ticket, "assertion": key.get(&o.body, ORIGIN, 0x01, true) })).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["two_factor_passed"], true);
+
+    // 签名计数器没有递增（疑似克隆）→ 拒绝
+    let r = login(&app, "10.0.0.1", "gina", "correct horse", None).await;
+    let ticket = r.body["ticket"].as_str().unwrap().to_owned();
+    let o = post("/api/p/identity/v1/sessions/two-factor/webauthn-options", json!({ "ticket": ticket })).await;
+    let r = post("/api/p/identity/v1/sessions/two-factor", json!({ "ticket": ticket, "assertion": key.get(&o.body, ORIGIN, 0x01, false) })).await;
+    assert_eq!(r.body["code"], "identity.two_factor_invalid", "{:?}", r.body);
+
+    // 免密码登录：要求用户验证（UV）
+    let o = post("/api/p/identity/v1/webauthn/assertion-options", json!({})).await;
+    let r = post("/api/p/identity/v1/sessions/webauthn", json!({ "ceremony_id": o.body["ceremony_id"], "assertion": key.get(&o.body, ORIGIN, 0x01, true) })).await;
+    assert_eq!(r.body["code"], "identity.webauthn_invalid", "UV required: {:?}", r.body);
+    let o = post("/api/p/identity/v1/webauthn/assertion-options", json!({})).await;
+    let r = post("/api/p/identity/v1/sessions/webauthn", json!({ "ceremony_id": o.body["ceremony_id"], "assertion": key.get(&o.body, ORIGIN, 0x05, true) })).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["user"]["username"], "gina");
+    let fresh = Session::of(&r);
+    let r = fresh.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/security-events").await;
+    assert!(r.body["items"].as_array().unwrap().iter().any(|e| e["kind"] == "webauthn_counter_regression"), "{:?}", r.body);
+
+    // 未知凭据（另一把钥匙）
+    let mut other = SoftKey::new(9);
+    other.handle = key.handle.clone();
+    let o = post("/api/p/identity/v1/webauthn/assertion-options", json!({})).await;
+    let r = post("/api/p/identity/v1/sessions/webauthn", json!({ "ceremony_id": o.body["ceremony_id"], "assertion": other.get(&o.body, ORIGIN, 0x05, true) })).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{:?}", r.body);
+
+    // 删除后回到只用密码登录（恢复码随之作废）
+    let id = fresh.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/two-factor").await.body["webauthn"][0]["id"].as_i64().unwrap();
+    let r = fresh.send(&app, "DELETE", &format!("/api/p/identity/v1/users/me/webauthn-credentials/{id}"), json!({})).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    let r = login(&app, "10.0.0.1", "gina", "correct horse", None).await;
+    assert!(r.body["csrf_token"].is_string(), "{:?}", r.body);
+    let r = fresh.get(&app, "10.0.0.1", "/api/p/identity/v1/users/me/two-factor").await;
+    assert_eq!(r.body["recovery_remaining"], 0);
+}
+
+/// 模拟 siteverify：表单中 response=good-token 时成功；记录收到的请求体
+async fn mock_siteverify(log: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> String {
+    let app = axum::Router::new().route(
+        "/siteverify",
+        axum::routing::post(move |body: String| {
+            let log = log.clone();
+            async move {
+                let ok = body.split('&').any(|kv| kv == "response=good-token");
+                log.lock().unwrap().push(body);
+                axum::Json(json!({ "success": ok, "error-codes": if ok { json!([]) } else { json!(["invalid-input-response"]) } }))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}/siteverify")
+}
+
+#[tokio::test]
+async fn captcha_guards_login_register_and_reset() {
+    let _guard = common::LOCK.lock().await;
+    reset().await;
+    let log: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::default();
+    let verify = mock_siteverify(log.clone()).await;
+    let dir = common::package_wasm_plugins();
+    let mut t = common::config_text();
+    t.push_str(&format!(
+        "\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n\n[plugin.captcha]\nprovider = \"turnstile\"\nsite_key = \"site-key\"\n\
+         secret = \"s3cret\"\nverify_url = \"{verify}\"\n",
+        dir.display()
+    ));
+    let kernel = Kernel::start(pt_kernel::config::SiteConfig::parse(&t).unwrap(), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+
+    // 前端配置：不含密钥；默认只验证注册与找回密码
+    let r = req(&app, "GET", "/api/p/captcha/v1/config", "10.0.0.1", &[], None).await;
+    assert_eq!(r.body, json!({ "enabled": true, "provider": "turnstile", "site_key": "site-key", "actions": ["register", "password_reset"] }));
+
+    let register = |token: Option<&str>| {
+        let mut body = json!({ "username": "hank", "email": "hank@example.com", "password": "correct horse" });
+        if let Some(t) = token {
+            body["captcha_token"] = json!(t);
+        }
+        let app = app.clone();
+        async move { req(&app, "POST", "/api/p/identity/v1/users", "10.0.0.7", &[], Some(body)).await }
+    };
+    let r = register(None).await;
+    assert_eq!(r.body["code"], "identity.captcha_failed", "{:?}", r.body);
+    let r = register(Some("bad-token")).await;
+    assert_eq!(r.body["code"], "identity.captcha_failed", "{:?}", r.body);
+    let r = register(Some("good-token")).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let sent = log.lock().unwrap().last().cloned().unwrap();
+    assert!(sent.contains("secret=s3cret") && sent.contains("remoteip=10.0.0.7"), "{sent}");
+
+    // 登录默认不验证；后台开启后需要令牌
+    let r = login(&app, "10.0.0.7", "hank", "correct horse", None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    sqlx::query("INSERT INTO kernel.plugin_settings (plugin_id, settings) VALUES ('captcha', $1)")
+        .bind(json!({ "actions": ["login"] }))
+        .execute(&mut db().await)
+        .await
+        .unwrap();
+    let r = login(&app, "10.0.0.7", "hank", "correct horse", None).await;
+    assert_eq!(r.body["code"], "identity.captcha_failed", "{:?}", r.body);
+    let r = req(&app, "POST", "/api/p/identity/v1/sessions", "10.0.0.7", &[],
+        Some(json!({ "username": "hank", "password": "correct horse", "captcha_token": "good-token" }))).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    // 找回密码不再在列表中：不需要令牌
+    let r = req(&app, "POST", "/api/p/identity/v1/password-resets", "10.0.0.7", &[], Some(json!({ "login": "hank" }))).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+}

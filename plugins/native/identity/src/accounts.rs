@@ -17,6 +17,9 @@ pub struct RegisterRequest {
     pub locale: Option<String>,
     #[serde(default)]
     pub form: serde_json::Value,
+    /// 人机验证令牌（captcha 插件的前端写入）
+    #[serde(default)]
+    pub captcha_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

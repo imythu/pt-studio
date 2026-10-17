@@ -73,3 +73,9 @@ instances = [{ id = "m1", url = "http://127.0.0.1:7700", api_key = "@MEILI_MASTE
 # email_from = "noreply@example.com"
 # site_url = "https://pt.example.com"
 # unsubscribe_secret = "@SECRET"
+
+# 可选：人机验证（captcha 插件；在后台“插件设置”中选择需要验证的操作：登录 / 注册 / 找回密码）
+# [plugin.captcha]
+# provider = "turnstile"        # turnstile / hcaptcha / recaptcha（v2）
+# site_key = "0x4AAAAAAA..."
+# secret = "0x4AAAAAAA..."

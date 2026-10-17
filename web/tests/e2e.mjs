@@ -42,7 +42,7 @@ async function login(page, user) {
   await page.getByLabel('密码').fill(PASS);
   // “保持登录”默认勾选：会话 cookie 带 Max-Age（关闭浏览器后仍有效）
   if (!(await page.getByRole('checkbox', { name: /保持登录/ }).isChecked())) throw new Error('remember me should default to checked');
-  await page.getByRole('button', { name: '登录' }).click();
+  await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.waitForURL(`${BASE}/`);
   await page.getByRole('button', { name: '菜单' }).getByText(user, { exact: true }).waitFor();
   const sid = (await page.context().cookies()).find((c) => c.httpOnly && c.expires > 0);
@@ -257,9 +257,28 @@ try {
   await p.goto(`${BASE}/login`);
   await p.getByLabel('用户名').fill('web_bob');
   await p.getByLabel('密码').fill(PASS);
-  await p.getByRole('button', { name: '登录' }).click();
+  await p.getByRole('button', { name: '登录', exact: true }).click();
   await p.getByLabel('验证码').fill(recovery[0]);
   await p.getByRole('button', { name: '验证' }).click();
+  await p.waitForURL(`${BASE}/`);
+  await p.getByRole('button', { name: '菜单' }).getByText('web_bob', { exact: true }).waitFor();
+
+  // 6c''. 安全密钥（Chromium 虚拟认证器）：添加 → 退出 → 免密码登录
+  step('security key');
+  const cdp = await p.context().newCDPSession(p);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  });
+  await p.goto(`${BASE}/settings`);
+  await p.getByRole('tab', { name: '安全' }).click();
+  await p.locator('input[name=key_name]').fill('Virtual key');
+  await p.getByRole('button', { name: '添加安全密钥' }).click();
+  await p.getByText('安全密钥已添加').waitFor();
+  await p.getByText('可免密码登录').waitFor();
+  await p.context().clearCookies();
+  await p.goto(`${BASE}/login`);
+  await p.getByRole('button', { name: '用安全密钥登录' }).click();
   await p.waitForURL(`${BASE}/`);
   await p.getByRole('button', { name: '菜单' }).getByText('web_bob', { exact: true }).waitFor();
 

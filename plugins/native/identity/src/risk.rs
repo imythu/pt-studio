@@ -170,6 +170,32 @@ pub async fn throttle_success(ctx: &Ctx, k: &ThrottleKeys) {
     }
 }
 
+// ---------------- 人机验证 ----------------
+
+/// 经 `ctx.captcha.verify` 校验人机验证令牌（action：login / register / password_reset）。
+/// 没有安装验证码插件时放行；插件按自己的设置决定该动作是否需要验证。
+pub async fn captcha_check(ctx: &Ctx, action: &str, token: Option<&str>) -> PResult<()> {
+    let mut args = json!({ "action": action, "token": token.unwrap_or("") });
+    if let Some(ip) = &ctx.invocation.client_ip {
+        args["ip"] = json!(ip);
+    }
+    match ctx.call_json("ctx.captcha", "verify", args).await {
+        Ok(v) if v["ok"] == true => Ok(()),
+        Ok(_) => Err(PluginError::new(
+            "identity.captcha_failed",
+            "human verification failed, please try again",
+        )
+        .with_status(400)),
+        Err(e)
+            if (e.code == "kernel.capability_denied" && e.message.contains("did not declare"))
+                || e.message.contains("has no JSON-callable provider") =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 // ---------------- 设备 ----------------
 
 pub const DEVICE_COOKIE: &str = "__Host-pt_dev";

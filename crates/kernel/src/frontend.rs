@@ -279,10 +279,62 @@ fn safe_rel(path: &str) -> Option<PathBuf> {
     Some(p)
 }
 
-fn csp(nonce: &str) -> String {
+/// 插件清单 `[frontend.csp]` 中的外部来源：只接受 `https://` 加主机名（可带路径），其余忽略
+fn valid_source(s: &str) -> bool {
+    s.strip_prefix("https://").is_some_and(|rest| {
+        let host = rest.split('/').next().unwrap_or("");
+        !host.is_empty()
+            && host.split('.').count() >= 2
+            && host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.' || b == b'*')
+            && rest.bytes().all(|b| b.is_ascii_graphic() && !matches!(b, b';' | b',' | b'\'' | b'"'))
+    })
+}
+
+/// 已加载插件声明的 CSP 来源：(script, frame, connect, style)
+#[derive(Debug, Default)]
+pub struct CspExtra {
+    script: Vec<String>,
+    frame: Vec<String>,
+    connect: Vec<String>,
+    style: Vec<String>,
+}
+
+impl CspExtra {
+    pub fn from_plugins<'a>(decls: impl Iterator<Item = &'a pt_plugin_api::manifest::CspDecl>) -> Self {
+        let mut x = Self::default();
+        for d in decls {
+            for (dst, src) in [
+                (&mut x.script, &d.script_src),
+                (&mut x.frame, &d.frame_src),
+                (&mut x.connect, &d.connect_src),
+                (&mut x.style, &d.style_src),
+            ] {
+                for s in src.iter().filter(|s| valid_source(s)) {
+                    if !dst.contains(s) {
+                        dst.push(s.clone());
+                    }
+                }
+            }
+        }
+        x
+    }
+}
+
+fn csp(nonce: &str, x: &CspExtra) -> String {
+    let more = |v: &[String]| v.iter().map(|s| format!(" {s}")).collect::<String>();
+    let frame = if x.frame.is_empty() {
+        String::new()
+    } else {
+        format!(" frame-src{};", more(&x.frame))
+    };
     format!(
-        "default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self'; img-src 'self' data:; connect-src 'self'; \
-         font-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'"
+        "default-src 'self'; script-src 'self' 'nonce-{nonce}'{}; style-src 'self'{}; img-src 'self' data:; connect-src 'self'{};{frame} \
+         font-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'",
+        more(&x.script),
+        more(&x.style),
+        more(&x.connect),
     )
 }
 
@@ -291,7 +343,7 @@ fn security_headers(h: &mut HeaderMap) {
     h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
 }
 
-async fn serve_index(dir: &std::path::Path) -> Response {
+async fn serve_index(dir: &std::path::Path, extra: &CspExtra) -> Response {
     let Ok(html) = tokio::fs::read_to_string(dir.join("index.html")).await else {
         return PluginError::not_found("web frontend is not built").into_response();
     };
@@ -309,7 +361,7 @@ async fn serve_index(dir: &std::path::Path) -> Response {
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    if let Ok(v) = HeaderValue::from_str(&csp(&nonce)) {
+    if let Ok(v) = HeaderValue::from_str(&csp(&nonce, extra)) {
         h.insert(header::CONTENT_SECURITY_POLICY, v);
     }
     security_headers(h);
@@ -392,7 +444,7 @@ pub async fn fallback(sh: Arc<Shared>, method: Method, uri: Uri) -> Response {
     {
         return r;
     }
-    serve_index(&dir).await
+    serve_index(&dir, &sh.csp_extra).await
 }
 
 #[cfg(test)]
@@ -408,6 +460,15 @@ mod tests {
             entry_url("levels", "0.1.0", "./index.js"),
             "/static/plugins/levels/0.1.0/index.js"
         );
-        assert!(csp("n").contains("'nonce-n'"));
+        assert!(csp("n", &CspExtra::default()).contains("'nonce-n'"));
+        let d = pt_plugin_api::manifest::CspDecl {
+            script_src: vec!["https://challenges.cloudflare.com".into(), "http://evil.test".into(), "https://x.test; script-src *".into()],
+            frame_src: vec!["https://challenges.cloudflare.com".into()],
+            ..Default::default()
+        };
+        let c = csp("n", &CspExtra::from_plugins([&d].into_iter()));
+        assert!(c.contains("script-src 'self' 'nonce-n' https://challenges.cloudflare.com;"), "{c}");
+        assert!(c.contains("frame-src https://challenges.cloudflare.com;"), "{c}");
+        assert!(!c.contains("evil") && !c.contains("x.test"), "{c}");
     }
 }

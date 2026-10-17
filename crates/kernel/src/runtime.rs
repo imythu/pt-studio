@@ -98,6 +98,8 @@ pub struct Shared {
     pub error_codes: HashMap<String, u16>,
     /// MCP 工具（清单 `[[mcp.tools]]` 聚合，按名称排序）
     pub mcp_tools: Vec<pt_plugin_api::McpToolDef>,
+    /// 插件前端声明的外部 CSP 来源（并入首页的 Content-Security-Policy）
+    pub csp_extra: crate::frontend::CspExtra,
     pub node_id: String,
     pub events_cfg: Arc<crate::config::EventsSection>,
     pub me: Weak<Shared>,

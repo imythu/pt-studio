@@ -58,6 +58,9 @@ serde_json.workspace = true
 sqlx.workspace = true
 tower.workspace = true
 uuid.workspace = true
+base64 = "0.22"
+p256 = { version = "0.13", features = ["ecdsa"] }
+sha2.workspace = true
 
 [lints]
 workspace = true

@@ -8,6 +8,8 @@ authors = ["PT Studio"]
 description = "账号、会话、鉴权（ctx.auth）、权限（ctx.rbac）、用户资料（ctx.users）"
 
 provides = ["ctx.auth@0.1.0", "ctx.rbac@0.1.0", "ctx.users@0.1.0"]
+# 人机验证（captcha 插件；未安装时不验证）
+optional_requires = ["ctx.captcha@^0.1"]
 publishes = ["user.registered", "user.logged_in", "user.login_failed", "user.logged_out", "user.class_changed", "user.status_changed", "user.restriction_changed", "user.profile_updated", "user.password_changed", "user.passkey_reset", "user.challenge_issued", "user.verified", "user.two_factor_changed"]
 
 [capabilities]
@@ -348,6 +350,51 @@ path = "/v1/users/me/recovery-codes"
 auth = "user"
 reauth_secs = 600
 rate_limit = "user:10/h"
+
+[[http.routes]]
+id = "login_2fa_webauthn_options"
+method = "POST"
+path = "/v1/sessions/two-factor/webauthn-options"
+auth = "public"
+rate_limit = "ip:30/m"
+
+[[http.routes]]
+id = "wa_assert_opts"
+method = "POST"
+path = "/v1/webauthn/assertion-options"
+auth = "public"
+rate_limit = "ip:30/m"
+
+[[http.routes]]
+id = "login_webauthn"
+method = "POST"
+path = "/v1/sessions/webauthn"
+auth = "public"
+rate_limit = "ip:30/m"
+
+[[http.routes]]
+id = "webauthn_registration_options"
+method = "POST"
+path = "/v1/users/me/webauthn/registration-options"
+auth = "user"
+reauth_secs = 600
+rate_limit = "user:20/h"
+
+[[http.routes]]
+id = "webauthn_register"
+method = "POST"
+path = "/v1/users/me/webauthn-credentials"
+auth = "user"
+reauth_secs = 600
+rate_limit = "user:20/h"
+
+[[http.routes]]
+id = "webauthn_remove"
+method = "DELETE"
+path = "/v1/users/me/webauthn-credentials/{cid}"
+auth = "user"
+reauth_secs = 600
+rate_limit = "user:20/h"
 
 [[cron]]
 name = "ip_retention"

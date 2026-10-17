@@ -1,6 +1,6 @@
 //! 两步验证（identity 03 §1.3、§1.4）：TOTP（RFC 6238，SHA-1 / 6 位 / 30 秒，防重放）、恢复码、登录第二步票据、近期重新验证。
 //!
-//! 偏差：强制 2FA 按“最低角色”配置（设计为角色列表），默认不强制。
+//! 偏差：强制 2FA 按“最低角色”配置（设计为角色列表），默认不强制。WebAuthn 在 `webauthn` 模块。
 
 use chrono::Utc;
 use data_encoding::BASE32_NOPAD;
@@ -76,6 +76,21 @@ fn normalize_code(code: &str) -> String {
         .collect()
 }
 
+/// 用户的第二因素（登录票据的可选方式）；没有任何第二因素时为空
+pub async fn methods_of(ctx: &Ctx, uid: i64) -> PResult<Vec<&'static str>> {
+    let mut m = Vec::new();
+    if has_totp(ctx, uid).await? {
+        m.push("totp");
+    }
+    if crate::webauthn::count(ctx, uid).await? > 0 {
+        m.push("webauthn");
+    }
+    if !m.is_empty() {
+        m.push("recovery");
+    }
+    Ok(m)
+}
+
 /// 用户是否开启了 TOTP（已确认）
 pub async fn has_totp(ctx: &Ctx, uid: i64) -> PResult<bool> {
     let mut conn = ctx.sql.conn().await?;
@@ -109,7 +124,8 @@ pub async fn status(ctx: &Ctx, uid: i64) -> PResult<Value> {
         .await?;
         (row.get(0), row.get(1))
     };
-    Ok(json!({ "totp": totp, "recovery_remaining": recovery, "required": required_for(ctx, &pol, uid).await? }))
+    Ok(json!({ "totp": totp, "recovery_remaining": recovery, "webauthn": crate::webauthn::credentials_of(ctx, uid).await?,
+               "required": required_for(ctx, &pol, uid).await? }))
 }
 
 /// 开始绑定 TOTP：生成密钥（覆盖未确认的旧密钥），返回 base32 密钥、otpauth URI 与二维码 SVG
@@ -318,7 +334,7 @@ pub async fn disable(ctx: &Ctx) -> PResult<()> {
         return Err(PluginError::not_found("two-factor authentication is not on"));
     }
     let pol = Policy::load(ctx).await;
-    if required_for(ctx, &pol, uid).await? {
+    if required_for(ctx, &pol, uid).await? && crate::webauthn::count(ctx, uid).await? == 0 {
         return Err(PluginError::new(
             "identity.two_factor_required",
             "your role requires two-factor authentication",
@@ -331,10 +347,13 @@ pub async fn disable(ctx: &Ctx) -> PResult<()> {
             .bind(uid)
             .execute(&mut *conn)
             .await?;
-        sqlx::query("DELETE FROM recovery_codes WHERE user_id = $1")
-            .bind(uid)
-            .execute(&mut *conn)
-            .await?;
+        // 仍有安全密钥时保留恢复码
+        sqlx::query(
+            "DELETE FROM recovery_codes WHERE user_id = $1 AND NOT EXISTS (SELECT 1 FROM webauthn_credentials WHERE user_id = $1)",
+        )
+        .bind(uid)
+        .execute(&mut *conn)
+        .await?;
     }
     changed(ctx, uid, "totp", false).await
 }
@@ -342,12 +361,17 @@ pub async fn disable(ctx: &Ctx) -> PResult<()> {
 /// 重新生成恢复码（需要已开启某种第二因素）
 pub async fn regenerate(ctx: &Ctx) -> PResult<Vec<String>> {
     let uid = uid_of(ctx)?;
-    if !has_totp(ctx, uid).await? {
+    if methods_of(ctx, uid).await?.is_empty() {
         return Err(PluginError::not_found("two-factor authentication is not on"));
     }
     let codes = new_recovery_codes(ctx, uid).await?;
     risk::security_event(ctx, uid, "recovery_codes_regenerated", json!({})).await?;
     Ok(codes)
+}
+
+/// 为用户生成恢复码（第一个安全密钥登记时）
+pub async fn regenerate_for(ctx: &Ctx, uid: i64) -> PResult<Vec<String>> {
+    new_recovery_codes(ctx, uid).await
 }
 
 // ---------------- 登录第二步票据 ----------------
@@ -393,6 +417,21 @@ async fn take_ticket(ctx: &Ctx, ticket: &str) -> PResult<(String, Value)> {
     Ok((key, v))
 }
 
+/// 读取票据而不消费（WebAuthn 选项）
+pub async fn peek_ticket(ctx: &Ctx, ticket: &str) -> PResult<i64> {
+    if !ticket.starts_with("tkt_") || ticket.len() > 64 {
+        return Err(ticket_invalid());
+    }
+    let key = format!("tkt:{}", crypto::b64(&crypto::sha256(ticket.as_bytes())));
+    match ctx.redis.call(RedisCommand::new("GET").arg(&key)).await? {
+        RedisReply::Bulk(b) => serde_json::from_slice::<Value>(&b)
+            .ok()
+            .and_then(|v| v["uid"].as_i64())
+            .ok_or_else(ticket_invalid),
+        _ => Err(ticket_invalid()),
+    }
+}
+
 /// 校验失败：尝试次数 +1，未达上限则写回（保持原过期时间）
 async fn put_back(ctx: &Ctx, key: &str, mut v: Value) -> PResult<()> {
     let attempts = v["attempts"].as_i64().unwrap_or(0) + 1;
@@ -413,17 +452,24 @@ async fn put_back(ctx: &Ctx, key: &str, mut v: Value) -> PResult<()> {
     Ok(())
 }
 
-/// 第二步：TOTP 或恢复码
+/// 第二步：TOTP / 恢复码，或 WebAuthn 断言（`assertion`）
 pub async fn login_second_step(
     id: &Identity,
     ctx: &Ctx,
     ticket: &str,
-    code: &str,
+    code: Option<&str>,
+    assertion: Option<&Value>,
     device_cookie: Option<&str>,
 ) -> PResult<NewSession> {
     let (key, v) = take_ticket(ctx, ticket).await?;
     let uid = v["uid"].as_i64().ok_or_else(ticket_invalid)?;
-    let method = verify_code(id, ctx, uid, code).await?;
+    let method = match (code, assertion) {
+        (Some(c), _) => verify_code(id, ctx, uid, c).await?,
+        (None, Some(a)) => crate::webauthn::verify_second_factor(ctx, uid, ticket, a)
+            .await?
+            .then_some("webauthn"),
+        _ => None,
+    };
     let Some(method) = method else {
         put_back(ctx, &key, v).await?;
         risk::security_event(ctx, uid, "two_factor_failed", risk::client_details(ctx)).await?;

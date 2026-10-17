@@ -458,6 +458,11 @@ impl Kernel {
 
         let events_cfg = Arc::new(cfg.events.clone());
         let node_id = cfg.node_id();
+        let csp_extra = crate::frontend::CspExtra::from_plugins(
+            plugins
+                .values()
+                .filter_map(|rt| rt.manifest.frontend.as_ref().and_then(|f| f.csp.as_ref())),
+        );
         let shared = Arc::new_cyclic(|me| Shared {
             cfg: cfg.clone(),
             pool,
@@ -472,6 +477,7 @@ impl Kernel {
             hook_registry,
             error_codes,
             mcp_tools,
+            csp_extra,
             node_id,
             events_cfg,
             me: me.clone(),

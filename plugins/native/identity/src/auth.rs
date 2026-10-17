@@ -110,12 +110,10 @@ pub async fn login_password(
     }
     // 第一因素已通过：清除用户名维度的失败计数
     risk::throttle_success(ctx, &tk).await;
-    if crate::two_factor::has_totp(ctx, uid).await? {
+    let methods = crate::two_factor::methods_of(ctx, uid).await?;
+    if !methods.is_empty() {
         let ticket = crate::two_factor::new_ticket(ctx, uid, remember).await?;
-        return Ok(LoginOutcome::SecondFactor {
-            ticket,
-            methods: vec!["totp", "recovery"],
-        });
+        return Ok(LoginOutcome::SecondFactor { ticket, methods });
     }
     let s = finish_login(
         id,

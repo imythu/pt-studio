@@ -1,0 +1,55 @@
+id = "captcha"
+name = "人机验证"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "人机验证：Cloudflare Turnstile / hCaptcha / reCAPTCHA v2，经 ctx.captcha.verify 供 identity（登录、注册、找回密码）等插件校验令牌"
+
+provides = ["ctx.captcha@0.1.0"]
+
+[capabilities]
+# 服务商与密钥在 site.toml [plugin.captcha]：provider、site_key、secret（verify_url 仅测试用）
+http_outbound = [
+  "challenges.cloudflare.com",
+  "api.hcaptcha.com",
+  "www.google.com",
+  { config = "verify_url", allow_private = true },
+]
+
+[[http.routes]]
+id = "config"
+method = "GET"
+path = "/v1/config"
+auth = "public"
+rate_limit = "ip:120/m"
+
+[frontend]
+entry = "index.js"
+slots = ["auth.login.extra", "auth.register.form_extra", "auth.reset.extra"]
+settings_ui = "schema"
+
+[frontend.csp]
+script_src = ["https://challenges.cloudflare.com", "https://js.hcaptcha.com", "https://www.google.com/recaptcha/", "https://www.gstatic.com/recaptcha/"]
+frame_src = ["https://challenges.cloudflare.com", "https://newassets.hcaptcha.com", "https://www.google.com/recaptcha/"]
+connect_src = ["https://hcaptcha.com", "https://api.hcaptcha.com"]
+style_src = ["https://newassets.hcaptcha.com"]
+
+[settings_schema]
+type = "object"
+x-pt-order = ["actions", "fail_open"]
+
+[settings_schema.properties.actions]
+type = "array"
+title = "需要人机验证的操作"
+default = ["register", "password_reset"]
+items = { type = "string", enum = ["login", "register", "password_reset"] }
+
+[settings_schema.properties.fail_open]
+type = "boolean"
+default = false
+title = "验证服务不可用时放行（否则拒绝操作）"
+
+[terms]
+"captcha.name" = { zh-CN = "人机验证", en = "Human verification" }

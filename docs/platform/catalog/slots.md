@@ -61,8 +61,9 @@ export default {
 | `admin.user.tabs` | tabs | `{ profile }` | anticheat、accounting、ledger、hnr、invite、seedbox |
 | `admin.torrent.tabs` | tabs | `{ torrent }` | ai-upload-review、moderation、accounting |
 | `user.name.decorations` | list（行内，批量） | `{ user_id, size: "sm" \| "md" }` | medals、levels（评审 R1；列表中每个用户名一个实例，插件须用 `api.batch` 合并请求） |
-| `auth.register.form_extra` | list | `{ form: FormBinding }`（插件把字段写入注册请求的 `form{}` 或顶层 `invite_code`） | invite、registration-policy（验证码、问卷） |
-| `auth.login.extra` | list | `{ form: FormBinding }` | registration-policy（验证码）、identity（WebAuthn 按钮） |
+| `auth.register.form_extra` | list | `{ form: FormBinding, attempt: number }`（插件把字段写入注册请求的 `form{}` 或顶层 `invite_code` / `captcha_token`） | invite、registration-policy（问卷）、captcha |
+| `auth.login.extra` | list | `{ form: FormBinding, attempt: number }`（`attempt` 每次提交失败后加 1，验证码据此重置） | captcha（人机验证） |
+| `auth.reset.extra` | list | `{ form: FormBinding, attempt: number }`（找回密码申请表单） | captcha（人机验证） |
 
 ## 3. 页面路由
 

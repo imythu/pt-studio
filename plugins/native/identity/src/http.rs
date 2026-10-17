@@ -17,7 +17,7 @@ use crate::{
     accounts::{Origin, RegisterRequest},
     auth, challenges,
     policy::Policy,
-    rbac, risk, settings, status, tokens, two_factor,
+    rbac, risk, settings, status, tokens, two_factor, webauthn,
 };
 
 pub fn router(id: Arc<Identity>) -> Router {
@@ -83,6 +83,21 @@ pub fn router(id: Arc<Identity>) -> Router {
         .route("/v1/users/me/totp", post(totp_begin).delete(totp_disable))
         .route("/v1/users/me/totp/confirm", post(totp_confirm))
         .route("/v1/users/me/recovery-codes", post(recovery_regenerate))
+        .route(
+            "/v1/sessions/two-factor/webauthn-options",
+            post(two_factor_webauthn_options),
+        )
+        .route("/v1/webauthn/assertion-options", post(passwordless_options))
+        .route("/v1/sessions/webauthn", post(passwordless_login))
+        .route(
+            "/v1/users/me/webauthn/registration-options",
+            post(webauthn_registration_options),
+        )
+        .route("/v1/users/me/webauthn-credentials", post(webauthn_register))
+        .route(
+            "/v1/users/me/webauthn-credentials/{cid}",
+            delete(webauthn_remove),
+        )
         .with_state(id)
 }
 
@@ -165,6 +180,8 @@ async fn confirm_email(ctx: RequestCtx, Json(b): Json<ChallengeBody>) -> PResult
 #[derive(Debug, Deserialize)]
 struct ResetRequest {
     login: String,
+    #[serde(default)]
+    captcha_token: Option<String>,
 }
 
 /// 永远 202（防枚举）
@@ -173,6 +190,7 @@ async fn request_reset(
     ctx: RequestCtx,
     Json(b): Json<ResetRequest>,
 ) -> PResult<Response> {
+    risk::captcha_check(&ctx, "password_reset", b.captcha_token.as_deref()).await?;
     challenges::request_reset(&id, &ctx, &b.login).await?;
     Ok(StatusCode::ACCEPTED.into_response())
 }
@@ -252,6 +270,9 @@ struct LoginBody {
     /// 缺省为保持登录（与网页登录表单的默认值一致）
     #[serde(default = "yes")]
     remember: bool,
+    /// 人机验证令牌（captcha 插件的前端写入）
+    #[serde(default)]
+    captcha_token: Option<String>,
 }
 
 fn yes() -> bool {
@@ -284,6 +305,7 @@ async fn login(
     Json(b): Json<LoginBody>,
 ) -> PResult<Response> {
     let dev = risk::device_cookie(&headers);
+    risk::captcha_check(&ctx, "login", b.captcha_token.as_deref()).await?;
     match auth::login_password(&id, &ctx, &b.username, &b.password, b.remember, dev.as_deref()).await? {
         auth::LoginOutcome::Session(s) => Ok(session_response(&id, &s)),
         auth::LoginOutcome::SecondFactor { ticket, methods } => {
@@ -344,7 +366,10 @@ fn session_response(id: &Identity, s: &auth::NewSession) -> Response {
 #[derive(Debug, Deserialize)]
 struct SecondStep {
     ticket: String,
-    code: String,
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    assertion: Option<serde_json::Value>,
 }
 
 async fn login_two_factor(
@@ -354,8 +379,67 @@ async fn login_two_factor(
     Json(b): Json<SecondStep>,
 ) -> PResult<Response> {
     let dev = risk::device_cookie(&headers);
-    let s = two_factor::login_second_step(&id, &ctx, &b.ticket, &b.code, dev.as_deref()).await?;
+    let s = two_factor::login_second_step(
+        &id,
+        &ctx,
+        &b.ticket,
+        b.code.as_deref(),
+        b.assertion.as_ref(),
+        dev.as_deref(),
+    )
+    .await?;
     Ok(session_response(&id, &s))
+}
+
+#[derive(Debug, Deserialize)]
+struct TicketBody {
+    ticket: String,
+}
+
+async fn two_factor_webauthn_options(ctx: RequestCtx, Json(b): Json<TicketBody>) -> PResult<Response> {
+    Ok(no_store(webauthn::ticket_options(&ctx, &b.ticket).await?))
+}
+
+async fn passwordless_options(ctx: RequestCtx) -> PResult<Response> {
+    Ok(no_store(webauthn::passwordless_options(&ctx).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct PasswordlessBody {
+    ceremony_id: String,
+    assertion: serde_json::Value,
+}
+
+async fn passwordless_login(
+    State(id): State<Arc<Identity>>,
+    ctx: RequestCtx,
+    headers: HeaderMap,
+    Json(b): Json<PasswordlessBody>,
+) -> PResult<Response> {
+    let dev = risk::device_cookie(&headers);
+    let s = webauthn::passwordless_login(&id, &ctx, &b.ceremony_id, &b.assertion, dev.as_deref()).await?;
+    Ok(session_response(&id, &s))
+}
+
+async fn webauthn_registration_options(ctx: RequestCtx) -> PResult<Response> {
+    Ok(no_store(webauthn::registration_options(&ctx).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct NewCredential {
+    ceremony_id: String,
+    name: String,
+    credential: serde_json::Value,
+}
+
+async fn webauthn_register(ctx: RequestCtx, Json(b): Json<NewCredential>) -> PResult<Response> {
+    let r = webauthn::register(&ctx, &b.ceremony_id, &b.name, &b.credential).await?;
+    Ok((StatusCode::CREATED, no_store(r)).into_response())
+}
+
+async fn webauthn_remove(ctx: RequestCtx, Path(cid): Path<i64>) -> PResult<Response> {
+    webauthn::remove(&ctx, cid).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn logout(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Response> {
@@ -378,6 +462,7 @@ async fn register(
     ctx: RequestCtx,
     Json(req): Json<RegisterRequest>,
 ) -> PResult<Response> {
+    risk::captcha_check(&ctx, "register", req.captcha_token.as_deref()).await?;
     let uid = accounts::register(&id, &ctx, req, Origin::Http).await?;
     let u = id
         .summary(&ctx, uid)

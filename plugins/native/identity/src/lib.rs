@@ -1,11 +1,12 @@
 //! identity 插件（docs/plugins/identity/）：账号、会话、`ctx.auth`、`ctx.rbac`、`ctx.users`。
 //!
 //! 已实现：注册、密码登录、会话、权限检查、用户摘要、passkey；等级（`set_class`）、等级角色、限制与有效状态（`status`）、
-//! 个人 API / MCP token（`tokens`）；登录限流、设备、IP 记录与安全事件（`risk`）；邮箱验证与找回密码（`challenges`）；两步验证与重新验证（`two_factor`）。改名等按 03 详细设计在后续迭代实现。
+//! 个人 API / MCP token（`tokens`）；登录限流、设备、IP 记录与安全事件（`risk`）；邮箱验证与找回密码（`challenges`）；两步验证与重新验证（`two_factor`）、安全密钥与免密码登录（`webauthn`）。改名等按 03 详细设计在后续迭代实现。
 
 pub mod accounts;
 pub mod api;
 pub mod auth;
+mod cbor;
 pub mod challenges;
 pub mod crypto;
 mod http;
@@ -17,6 +18,7 @@ mod settings;
 pub mod status;
 pub mod tokens;
 pub mod two_factor;
+pub mod webauthn;
 
 use std::sync::{Arc, OnceLock};
 
@@ -52,6 +54,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "0007_two_factor.sql",
         include_str!("../migrations/0007_two_factor.sql"),
+    ),
+    (
+        "0008_webauthn.sql",
+        include_str!("../migrations/0008_webauthn.sql"),
     ),
 ];
 
