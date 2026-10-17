@@ -19,7 +19,7 @@ use axum::{
     routing::{get, post},
 };
 use pt_plugin_api::{
-    Ctx, HttpRoutes, Lifecycle, NativePlugin, NewEvent, PResult, PluginError, RequestCtx,
+    Ctx, HttpRoutes, JobInvocation, Lifecycle, NativePlugin, NewEvent, OnCron, PResult, PluginError, RequestCtx,
     host::HookOutcome,
     json,
     services::{RBAC, RbacService},
@@ -38,6 +38,7 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0003_review_view.sql",
         include_str!("../migrations/0003_review_view.sql"),
     ),
+    ("0004_sticky.sql", include_str!("../migrations/0004_sticky.sql")),
 ];
 
 /// 静态配置（`site.toml [plugin.torrent]`，03 §4；运行时设置在后台接入前同样取自这里）。
@@ -220,13 +221,15 @@ struct Row0 {
     anonymous: bool,
     status: String,
     created_at: chrono::DateTime<chrono::Utc>,
+    sticky_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 async fn load(ctx: &Ctx, id: i64) -> PResult<Option<Row0>> {
     let mut c = ctx.sql.conn().await?;
     let r = sqlx::query(
         "SELECT id, group_id, type_id, title, subtitle, description, fields, size, file_count, meta_version,
-                info_hash_v1, info_hash_v2, file_version, blob_key, uploader_id, is_anonymous, status, created_at
+                info_hash_v1, info_hash_v2, file_version, blob_key, uploader_id, is_anonymous, status, created_at,
+                CASE WHEN sticky_until > now() THEN sticky_until END
            FROM torrents WHERE id = $1",
     )
     .bind(id)
@@ -251,6 +254,7 @@ async fn load(ctx: &Ctx, id: i64) -> PResult<Option<Row0>> {
         anonymous: r.get(15),
         status: r.get(16),
         created_at: r.get(17),
+        sticky_until: r.get(18),
     }))
 }
 
@@ -821,6 +825,7 @@ async fn http_get(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
         "info_hash_v1": t.ih_v1.as_ref().map(hex::encode), "info_hash_v2": t.ih_v2.as_ref().map(hex::encode),
         "meta_version": t.meta_version, "file_version": t.file_version, "description": t.description, "fields": t.fields,
         "created_at": t.created_at.to_rfc3339(), "can_download": can_download(&ctx, &t),
+        "sticky_until": t.sticky_until.map(|x| x.to_rfc3339()),
     }))
     .into_response())
 }
@@ -1141,6 +1146,51 @@ async fn set_status(ctx: &Ctx, id: i64, to: &str, reason: Option<String>, by: Op
     Ok(true)
 }
 
+#[derive(Debug, Deserialize)]
+struct StickyBody {
+    sticky: bool,
+    /// 置顶天数；缺省或 0 为永久
+    #[serde(default)]
+    days: Option<i32>,
+}
+
+/// 置顶 / 取消置顶（`torrent.update`）：写 sticky_until，发布 `torrent.updated`（fields = ["sticky"]）重建索引
+async fn http_sticky(ctx: RequestCtx, Path(id): Path<i64>, Json(b): Json<StickyBody>) -> PResult<Response> {
+    let days = b.days.unwrap_or(0);
+    if !(0..=3650).contains(&days) {
+        return Err(PluginError::validation("days must be between 0 and 3650"));
+    }
+    let mut c = ctx.sql.conn().await?;
+    let until: Option<Option<chrono::DateTime<chrono::Utc>>> = sqlx::query_scalar(
+        "UPDATE torrents SET sticky_until = CASE WHEN NOT $2 THEN NULL
+                    WHEN $3 = 0 THEN timestamptz '9999-12-31 00:00:00+00' ELSE now() + make_interval(days => $3) END,
+                updated_at = now()
+          WHERE id = $1 AND deleted_at IS NULL RETURNING sticky_until",
+    )
+    .bind(id)
+    .bind(b.sticky)
+    .bind(days)
+    .fetch_optional(&mut *c)
+    .await?;
+    let until = until.ok_or_else(|| PluginError::not_found("torrent not found"))?;
+    drop(c);
+    ctx.events
+        .publish(NewEvent::v1(
+            "torrent.updated",
+            format!("torrent:{id}"),
+            json!({ "torrent_id": id, "fields": ["sticky"] }),
+        ))
+        .await?;
+    ctx.audit
+        .write(pt_plugin_api::AuditEntry {
+            action: "torrent.sticky".into(),
+            target: format!("torrent:{id}"),
+            details: json!({ "sticky": b.sticky, "days": days }),
+        })
+        .await?;
+    Ok(Json(json!({ "sticky_until": until.map(|x| x.to_rfc3339()) })).into_response())
+}
+
 async fn http_set_status(
     ctx: RequestCtx,
     Path(id): Path<i64>,
@@ -1377,6 +1427,7 @@ impl HttpRoutes for Routes {
             .route("/v1/groups/{id}", get(http_group))
             .route("/v1/torrents/{id}", get(http_get).patch(http_update))
             .route("/v1/admin/torrents/{id}/status", post(http_set_status))
+            .route("/v1/admin/torrents/{id}/sticky", post(http_sticky))
             .route("/v1/admin/torrents/{id}", axum::routing::delete(http_delete))
             .route("/v1/torrents/{id}/files", get(http_files))
             .route("/v1/torrents/{id}/download", get(http_download))
@@ -1422,12 +1473,42 @@ impl pt_plugin_api::McpTool for Tools {
     }
 }
 
+/// 到期的置顶清除，并为每个种子发布 `torrent.updated` 重建索引
+struct Unsticky;
+
+#[async_trait]
+impl OnCron for Unsticky {
+    async fn run(&self, ctx: &Ctx, job: JobInvocation) -> PResult<()> {
+        if job.name != "unsticky" {
+            return Err(PluginError::not_found("unknown job"));
+        }
+        let mut c = ctx.sql.conn().await?;
+        let ids: Vec<i64> = sqlx::query_scalar(
+            "UPDATE torrents SET sticky_until = NULL WHERE sticky_until <= now() RETURNING id",
+        )
+        .fetch_all(&mut *c)
+        .await?;
+        drop(c);
+        for id in ids {
+            ctx.events
+                .publish(NewEvent::v1(
+                    "torrent.updated",
+                    format!("torrent:{id}"),
+                    json!({ "torrent_id": id, "fields": ["sticky"] }),
+                ))
+                .await?;
+        }
+        Ok(())
+    }
+}
+
 pub fn plugin() -> NativePlugin {
     let t = Arc::new(Torrent::default());
     NativePlugin {
         manifest: MANIFEST,
         migrations: MIGRATIONS,
         lifecycle: Some(t.clone()),
+        on_cron: Some(Arc::new(Unsticky)),
         http: Some(Arc::new(Routes(t.clone()))),
         search_contributor: Some(Arc::new(search::Contributor)),
         mcp_tool: Some(Arc::new(Tools)),

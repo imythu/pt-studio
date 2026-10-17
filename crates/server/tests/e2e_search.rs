@@ -153,6 +153,26 @@ async fn search_end_to_end() {
     })
     .await;
 
+    // 置顶：默认“最新”排序（sticky 降序、created_at 降序）把最早的 t1 排在最前；取消后恢复
+    let newest = json!({ "index": "torrents", "sort": [{ "field": "sticky", "descending": true }, { "field": "created_at", "descending": true }] });
+    // 搜索有限流：每 500 ms 查一次；返回首个命中的 (id, sticky)
+    let first = || {
+        let (app, newest) = (app.clone(), newest.clone());
+        let mut h = alice.headers();
+        h.push(("content-type", "application/json".into()));
+        async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            let b = call(&app, "POST", "/api/p/search-meilisearch/v1/search", Some(newest), &hv(&h)).await.body;
+            (b["hits"][0]["id"].as_i64(), b["hits"][0]["document"]["sticky"].as_i64())
+        }
+    };
+    let r = call(&app, "POST", &format!("/api/p/torrent/v1/admin/torrents/{t1}/sticky"), Some(json!({ "sticky": true, "days": 1 })), &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    wait_for("sticky reindex", || async { first().await == (Some(t1), Some(1)) }).await;
+    let r = call(&app, "POST", &format!("/api/p/torrent/v1/admin/torrents/{t1}/sticky"), Some(json!({ "sticky": false })), &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    wait_for("unsticky reindex", || async { first().await.1 == Some(0) }).await;
+
     // 关键词 + 高亮 + 发布名字段
     let r = search(
         &app,

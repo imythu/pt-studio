@@ -1,0 +1,158 @@
+id = "bookmarks"
+name = "收藏与合集"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "收藏（私有）与合集（用户整理的种子列表，可公开浏览）"
+
+provides = ["ctx.bookmarks@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+publishes = ["collection.created"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_public", "identity.v_user_public"]
+
+[[subscriptions]]
+name = "on_torrent_deleted"
+event = "torrent.deleted"
+
+[[http.routes]]
+id = "bookmark_add"
+method = "PUT"
+path = "/v1/bookmarks/{id}"
+auth = "user"
+permission = "bookmarks.use"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "bookmark_remove"
+method = "DELETE"
+path = "/v1/bookmarks/{id}"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "bookmarks"
+method = "GET"
+path = "/v1/bookmarks"
+auth = "user"
+
+[[http.routes]]
+id = "torrent"
+method = "GET"
+path = "/v1/torrents/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "collections"
+method = "GET"
+path = "/v1/collections"
+auth = "user"
+
+[[http.routes]]
+id = "collection_create"
+method = "POST"
+path = "/v1/collections"
+auth = "user"
+permission = "bookmarks.collections.create"
+rate_limit = "user:20/m"
+
+[[http.routes]]
+id = "collection"
+method = "GET"
+path = "/v1/collections/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "collection_update"
+method = "PATCH"
+path = "/v1/collections/{id}"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "collection_delete"
+method = "DELETE"
+path = "/v1/collections/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "item_add"
+method = "POST"
+path = "/v1/collections/{id}/items"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "item_remove"
+method = "DELETE"
+path = "/v1/collections/{id}/items/{tid}"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "reorder"
+method = "PUT"
+path = "/v1/collections/{id}/order"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[permissions]]
+name = "bookmarks.use"
+description_term = "bookmarks.perm.use"
+default_roles = ["user"]
+
+[[permissions]]
+name = "bookmarks.collections.create"
+description_term = "bookmarks.perm.create"
+default_roles = ["user"]
+
+[[permissions]]
+name = "bookmarks.collections.manage"
+description_term = "bookmarks.perm.manage"
+default_roles = ["moderator"]
+
+[error_codes]
+"bookmarks.limit_reached" = 409
+"bookmarks.collection_full" = 409
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.detail.actions", "torrent.detail.sidebar", "nav.user_menu", "nav.main"]
+routes = ["/p/bookmarks/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["max_bookmarks", "max_collections_per_user", "max_items_per_collection"]
+
+[settings_schema.properties.max_bookmarks]
+type = "integer"
+minimum = 1
+default = 5000
+title = "每人最多收藏数"
+
+[settings_schema.properties.max_collections_per_user]
+type = "integer"
+minimum = 1
+default = 50
+title = "每人最多合集数"
+
+[settings_schema.properties.max_items_per_collection]
+type = "integer"
+minimum = 1
+maximum = 1000
+default = 500
+title = "每个合集最多种子数"
+
+[terms]
+"bookmarks.name" = { zh-CN = "收藏与合集", en = "Bookmarks & collections" }
+"bookmarks.perm.use" = { zh-CN = "收藏种子", en = "Bookmark torrents" }
+"bookmarks.perm.create" = { zh-CN = "创建合集", en = "Create collections" }
+"bookmarks.perm.manage" = { zh-CN = "管理任意合集", en = "Manage any collection" }

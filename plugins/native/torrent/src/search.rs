@@ -41,6 +41,8 @@ impl SearchContributor for Contributor {
                 field("file_count", "int", false, true, true, 0),
                 field("uploader_id", "int", false, true, false, 0),
                 field("status", "string", false, true, false, 0),
+                // 1 = 置顶中（列表默认排序在前；到期由 unsticky 任务重建索引）
+                field("sticky", "int", false, true, true, 0),
             ],
             synonyms: vec![],
         }]
@@ -59,7 +61,7 @@ impl SearchContributor for Contributor {
         let mut c = ctx.sql.conn().await?;
         let rows = sqlx::query(
             "SELECT id, group_id, type_id, category_id, title, subtitle, size, file_count, uploader_id, is_anonymous,
-                    status, extract(epoch FROM created_at)::bigint AS created
+                    status, extract(epoch FROM created_at)::bigint AS created, coalesce(sticky_until > now(), false) AS sticky
                FROM torrents WHERE id = ANY($1) AND deleted_at IS NULL",
         )
         .bind(&ids)
@@ -90,6 +92,7 @@ impl SearchContributor for Contributor {
                 "vis_level": vis,
                 "vis_min_class": 0,
                 "created_at": r.get::<i64, _>("created"),
+                "sticky": i32::from(r.get::<bool, _>("sticky")),
             });
             if let (Some(u), Some(m)) = (uploader, d.as_object_mut()) {
                 m.insert("vis_owner_id".into(), json!(u));

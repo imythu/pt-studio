@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-bookmarks"
+description = "PT Studio bookmarks and collections (WASM): private bookmarks, curated public collections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

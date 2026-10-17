@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-top10"
+description = "PT Studio top 10 boards (WASM): most snatched, active and seeded torrents, top uploaders and seeders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

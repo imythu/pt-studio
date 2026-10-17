@@ -1,0 +1,75 @@
+id = "top10"
+name = "排行榜"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "排行榜：完成数最多 / 最活跃 / 做种最多的种子，上传量 / 做种时长 / 发布数最多的用户（可退出）；每小时更新"
+
+requires = ["ctx.rbac@^0.1"]
+
+[capabilities]
+sql = true
+views = ["torrent.v_torrent_public", "identity.v_user_public", "accounting.v_snatch", "accounting.v_torrent_peers", "accounting.v_user_totals", "accounting.v_user_daily"]
+
+[[cron]]
+name = "refresh"
+schedule = "7 * * * *"
+timeout_secs = 600
+catch_up = "once"
+tx = "manual"
+
+[[http.routes]]
+id = "boards"
+method = "GET"
+path = "/v1/boards"
+auth = "user"
+permission = "top10.view"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+
+[[http.routes]]
+id = "opt_out"
+method = "PUT"
+path = "/v1/me"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[permissions]]
+name = "top10.view"
+description_term = "top10.perm.view"
+default_roles = ["user"]
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.main"]
+routes = ["/p/top10/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["size", "user_boards"]
+
+[settings_schema.properties.size]
+type = "integer"
+minimum = 1
+maximum = 100
+default = 10
+title = "每个榜单显示的名次数"
+
+[settings_schema.properties.user_boards]
+type = "boolean"
+default = true
+title = "显示用户榜（上传量、做种时长、发布数）"
+
+[terms]
+"top10.name" = { zh-CN = "排行榜", en = "Top 10" }
+"top10.perm.view" = { zh-CN = "查看排行榜", en = "View top 10" }

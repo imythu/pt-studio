@@ -149,6 +149,7 @@ try {
   await p.getByText(/检测到（text）/).waitFor();
   await p.getByRole('button', { name: '发布' }).click();
   await p.waitForURL(/\/torrents\/\d+$/);
+  const movieUrl = p.url();
   await p.getByRole('heading', { name: '资源信息', exact: true }).waitFor();
   await p.locator('.mediainfo-summary').getByText('HEVC', { exact: true }).waitFor();
   await p.getByText('查看完整报告').click();
@@ -356,6 +357,33 @@ try {
   await p.locator('textarea[name=post_body]').fill('自己顶一下');
   await p.getByRole('button', { name: '发表' }).click();
   await p.getByText('自己顶一下').waitFor();
+
+  // 6h. 置顶（列表排序见 e2e_search，本测试未接 Meilisearch）、收藏、合集、排行榜
+  step('sticky, bookmarks, collections, top10');
+  await a.goto(movieUrl);
+  await a.locator('select[name=sticky_days]').selectOption('3');
+  await a.getByRole('button', { name: '置顶', exact: true }).click();
+  await a.getByText(/置顶至/).waitFor();
+  await p.goto(movieUrl);
+  await p.getByRole('button', { name: '☆ 收藏' }).click();
+  await p.getByRole('button', { name: '★ 取消收藏' }).waitFor();
+  await p.getByText('1 人收藏').waitFor();
+  await p.goto(`${BASE}/p/bookmarks/`);
+  await p.getByRole('link', { name: /Web\.Movie\.2024/ }).waitFor();
+  await p.goto(`${BASE}/p/bookmarks/collections`);
+  await p.locator('input[name=collection_title]').fill('我的片单');
+  await p.getByRole('button', { name: '创建' }).click();
+  await p.waitForURL(/\/p\/bookmarks\/collections\/\d+$/);
+  await p.goto(movieUrl);
+  await p.locator('select[name=add_to_collection]').selectOption({ label: '我的片单' });
+  await p.getByText('已加入合集').waitFor();
+  await p.reload();
+  await p.getByRole('link', { name: '我的片单' }).click();
+  await p.getByRole('link', { name: /Web\.Movie\.2024/ }).waitFor();
+  await p.goto(`${BASE}/p/top10/`);
+  await p.getByRole('heading', { name: '排行榜' }).waitFor();
+  await p.getByText('完成数最多').waitFor();
+  await p.getByText('不在用户榜中显示我').waitFor();
 
   // 7. 普通用户进不了后台
   step('non-staff admin access');

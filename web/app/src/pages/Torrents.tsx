@@ -45,7 +45,11 @@ interface SchemaView {
 
 const SORTS: Record<string, { field: string; descending: boolean }[]> = {
   relevance: [],
-  newest: [{ field: 'created_at', descending: true }],
+  // 置顶的排在最前
+  newest: [
+    { field: 'sticky', descending: true },
+    { field: 'created_at', descending: true },
+  ],
   largest: [{ field: 'size', descending: true }],
 };
 
@@ -270,6 +274,7 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
             </Link>
             {zhName(r) && <div className="t-zh">{zhName(r)}</div>}
             <div className="t-tags">
+              {r.sticky === 1 && <span className="pt-badge pt-badge-primary">{t('ui.torrent.sticky')}</span>}
               {tags.map((x, i) => (
                 <span key={x} className={`pt-badge${i === 0 ? ' tag-res' : ''}`}>
                   {x}
@@ -428,6 +433,7 @@ export function TorrentList() {
 
 interface TorrentDetail {
   id: number;
+  sticky_until?: string | null;
   title: string;
   subtitle: string | null;
   type_id: string;
@@ -453,6 +459,7 @@ function ManageTorrent({ d }: { d: TorrentDetail }) {
   const nav = useNavigate();
   const [edit, setEdit] = useState<{ title: string; subtitle: string; description: string } | null>(null);
   const [status, setStatus] = useState({ to: d.status, reason: '' });
+  const [stickyDays, setStickyDays] = useState('7');
   const owner = s.me?.id === d.uploader.id;
   const canEdit = owner || s.can('torrent.update');
   if (!canEdit && !s.can('torrent.delete')) return null;
@@ -514,6 +521,22 @@ function ManageTorrent({ d }: { d: TorrentDetail }) {
           <Input placeholder={t('ui.admin.reason')} value={status.reason} maxLength={500} onChange={(e) => setStatus({ ...status, reason: e.target.value })} />
           <Button type="submit">{t('ui.torrent.set_status')}</Button>
         </form>
+      )}
+      {s.can('torrent.update') && (
+        <p className="pt-stack">
+          {d.sticky_until && <span className="pt-muted small">{t('ui.torrent.sticky_until', { at: d.sticky_until.startsWith('9999') ? t('ui.torrent.sticky_forever') : new Date(d.sticky_until).toLocaleString() })}</span>}
+          <select className="pt-input" name="sticky_days" value={stickyDays} onChange={(e) => setStickyDays(e.target.value)}>
+            {['1', '3', '7', '30', '0'].map((x) => (
+              <option key={x} value={x}>
+                {x === '0' ? t('ui.torrent.sticky_forever') : t('ui.torrent.sticky_days', { n: x })}
+              </option>
+            ))}
+          </select>
+          <Button onClick={() => void act(() => api(`/api/p/torrent/v1/admin/torrents/${d.id}/sticky`, { json: { sticky: true, days: Number(stickyDays) } }))}>
+            {t('ui.torrent.make_sticky')}
+          </Button>
+          {d.sticky_until && <Button onClick={() => void act(() => api(`/api/p/torrent/v1/admin/torrents/${d.id}/sticky`, { json: { sticky: false } }))}>{t('ui.torrent.unsticky')}</Button>}
+        </p>
       )}
       {s.can('torrent.delete') && (
         <Button

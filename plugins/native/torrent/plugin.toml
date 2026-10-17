@@ -28,6 +28,11 @@ input_schema = "schemas/hooks/torrent.before_upload.json"
 name = "torrent.before_download"
 input_schema = "schemas/hooks/torrent.before_download.json"
 
+[[cron]]
+name = "unsticky"
+schedule = "*/5 * * * *"
+timeout_secs = 120
+
 [[http.routes]]
 id = "list_types"
 method = "GET"
@@ -90,6 +95,14 @@ permission = "torrent.update"
 rate_limit = "user:120/m"
 
 [[http.routes]]
+id = "admin_sticky"
+method = "POST"
+path = "/v1/admin/torrents/{id}/sticky"
+auth = "admin"
+permission = "torrent.update"
+rate_limit = "user:120/m"
+
+[[http.routes]]
 id = "admin_delete"
 method = "DELETE"
 path = "/v1/admin/torrents/{id}"
@@ -135,6 +148,7 @@ views = ["v_torrent_public", "v_torrent_tracker", "v_torrent_fields", "v_torrent
 
 [terms]
 "torrent.field.type_id" = { zh-CN = "类型", en = "Type" }
+"torrent.field.sticky" = { zh-CN = "置顶", en = "Sticky" }
 "torrent.status.approved" = { zh-CN = "已发布", en = "Approved" }
 "torrent.status.pending" = { zh-CN = "待审核", en = "Pending" }
 "torrent.status.candidate" = { zh-CN = "候选", en = "Candidate" }

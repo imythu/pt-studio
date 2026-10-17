@@ -247,6 +247,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-bookmarks"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-captcha"
 version = "0.1.0"
 dependencies = [
@@ -415,6 +422,13 @@ dependencies = [
 
 [[package]]
 name = "pt-wasm-seedbox"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
+name = "pt-wasm-top10"
 version = "0.1.0"
 dependencies = [
  "pt-plugin-sdk",
