@@ -23,6 +23,9 @@ pub struct Keyring {
     email_enc: [u8; 32],
     email_mac: [u8; 32],
     ip_mac: [u8; 32],
+    login_mac: [u8; 32],
+    device_mac: [u8; 32],
+    challenge: [u8; 32],
 }
 
 impl std::fmt::Debug for Keyring {
@@ -57,6 +60,9 @@ impl Keyring {
             email_enc: derive(&raw, "email-enc"),
             email_mac: derive(&raw, "email-mac"),
             ip_mac: derive(&raw, "ip-mac"),
+            login_mac: derive(&raw, "username-mac"),
+            device_mac: derive(&raw, "device-mac"),
+            challenge: derive(&raw, "challenge-key"),
         })
     }
 
@@ -146,6 +152,20 @@ impl Keyring {
     pub fn ip_mac(&self, ip: &str) -> Vec<u8> {
         Self::mac(&self.ip_mac, ip.as_bytes())
     }
+    /// 登录限流键（规范化的用户名或邮箱）
+    pub fn login_mac(&self, login: &str) -> Vec<u8> {
+        Self::mac(&self.login_mac, login.as_bytes())
+    }
+    /// 设备 cookie 的 HMAC（devices.device_mac）
+    pub fn device_mac(&self, cookie: &str) -> Vec<u8> {
+        Self::mac(&self.device_mac, cookie.as_bytes())
+    }
+    /// 邮件挑战令牌：HMAC(challenge-key, id ‖ nonce) 的 base64url（43 字符）
+    pub fn challenge_token(&self, id: &uuid::Uuid, nonce: &[u8]) -> String {
+        let mut data = id.as_bytes().to_vec();
+        data.extend_from_slice(nonce);
+        b64(&Self::mac(&self.challenge, &data))
+    }
     /// IPv4 /24、IPv6 /48 前缀的 HMAC（钩子输入 ip_prefix_hmac）
     pub fn ip_prefix_mac(&self, ip: &str) -> Vec<u8> {
         let prefix = match ip.parse::<std::net::IpAddr>() {
@@ -160,6 +180,21 @@ impl Keyring {
             Err(_) => ip.to_owned(),
         };
         Self::mac(&self.ip_mac, prefix.as_bytes())
+    }
+}
+
+/// IPv4 /24、IPv6 /48 的截断形式（安全事件、本人可见的 IP）
+pub fn truncate_ip(ip: &str) -> String {
+    match ip.split('/').next().unwrap_or(ip).parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(v4)) => {
+            let o = v4.octets();
+            format!("{}.{}.{}.0/24", o[0], o[1], o[2])
+        }
+        Ok(std::net::IpAddr::V6(v6)) => {
+            let s = v6.segments();
+            format!("{:x}:{:x}:{:x}::/48", s[0], s[1], s[2])
+        }
+        Err(_) => String::new(),
     }
 }
 
@@ -219,6 +254,8 @@ mod tests {
         assert_ne!(k.passkey_mac("x"), k.email_mac("x"));
         assert_eq!(k.ip_prefix_mac("1.2.3.4"), k.ip_prefix_mac("1.2.3.200"));
         assert!(Keyring::from_secret("short").is_err());
+        assert_eq!(truncate_ip("1.2.3.4"), "1.2.3.0/24");
+        assert_eq!(truncate_ip("2001:db8:1:2::5"), "2001:db8:1::/48");
         Ok(())
     }
 

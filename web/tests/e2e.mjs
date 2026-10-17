@@ -90,7 +90,7 @@ try {
   // 等级说明页（levels 插件路由）：全部等级与升级条件
   await p.getByRole('link', { name: '等级' }).click();
   await p.waitForURL(`${BASE}/p/levels/`);
-  await p.getByRole('columnheader', { name: '升级条件' }).waitFor();
+  await p.getByRole('columnheader', { name: '保级条件' }).waitFor();
   await p.getByText('养老族', { exact: true }).waitFor();
 
   // 4. 种子详情：hnr / promotion 插槽、下载链接

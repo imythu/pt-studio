@@ -1,7 +1,7 @@
 //! identity 插件（docs/plugins/identity/）：账号、会话、`ctx.auth`、`ctx.rbac`、`ctx.users`。
 //!
-//! 本版本实现 P1 子集：注册、密码登录、会话、权限检查、用户摘要、passkey。
-//! 另有等级（`set_class`）、等级角色、限制与有效状态（`status`）、个人 API / MCP token（`tokens`）。2FA、feed key、改名等按 03 详细设计在后续迭代实现。
+//! 已实现：注册、密码登录、会话、权限检查、用户摘要、passkey；等级（`set_class`）、等级角色、限制与有效状态（`status`）、
+//! 个人 API / MCP token（`tokens`）；登录限流、设备、IP 记录与安全事件（`risk`）。改名等按 03 详细设计在后续迭代实现。
 
 pub mod accounts;
 pub mod api;
@@ -9,7 +9,9 @@ pub mod auth;
 pub mod crypto;
 mod http;
 mod mcp;
+pub mod policy;
 pub mod rbac;
+pub mod risk;
 mod settings;
 pub mod status;
 pub mod tokens;
@@ -37,6 +39,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0003_restrictions.sql"),
     ),
     ("0004_tokens.sql", include_str!("../migrations/0004_tokens.sql")),
+    (
+        "0005_security.sql",
+        include_str!("../migrations/0005_security.sql"),
+    ),
 ];
 
 #[derive(Debug, Default)]
@@ -137,7 +143,7 @@ struct Svc(Arc<Identity>);
 #[async_trait]
 impl AuthService for Svc {
     async fn authenticate(&self, ctx: &Ctx, credential: Credential) -> PResult<Option<Principal>> {
-        auth::authenticate(ctx, credential).await
+        auth::authenticate(&self.0, ctx, credential).await
     }
 }
 
@@ -406,6 +412,7 @@ impl pt_plugin_api::OnCron for Cron {
     async fn run(&self, ctx: &Ctx, job: pt_plugin_api::JobInvocation) -> PResult<()> {
         match job.name.as_str() {
             "restriction_sweep" => status::sweep(ctx).await.map(|_| ()),
+            "ip_retention" => risk::retention(ctx).await,
             other => Err(PluginError::not_found(format!("unknown job `{other}`"))),
         }
     }

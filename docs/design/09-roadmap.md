@@ -119,3 +119,44 @@
 
 见 §2、§3（tracker / 记账 / Meilisearch 压测、SQL 隔离逃逸测试、MCP 客户端兼容性、LLM 评测集等）。
 
+
+## 5. 开站计划（2026-10-17）
+
+依据：对照 NexusPHP（1.9 / 1.10）、UNIT3D、Gazelle 系与国内 PT 站的常见功能做的差距调查。**周边工具对接**（IYUU 辅种接口、给 MoviePilot / PT-depiler 等工具用的长期 token 接口、IRC 播报、上游适配）**暂不做**。按下列顺序逐项实现，每项完成后在此打勾并更新 dev/README §4。
+
+### M1 账号安全（identity 为主）
+
+- [x] M1.1 登录限流（Redis 失败计数、用户软锁、IP 封锁、指数延迟）+ IP 记录（`ip_log`，登录 / 会话 IP 变化）+ 用户 IP 历史 + 管理员按 IP / CIDR 查同 IP 账户 + 安全事件表
+- [ ] M1.2 邮箱验证（注册后 pending，验证后解除）、重发验证邮件、找回密码（挑战表，邮件经 `ctx.notify` 的 security 类别）
+- [ ] M1.3 TOTP 两步验证 + 恢复码 + 登录第二步票据 + 近期重新验证（reauth），按角色强制 2FA
+- [ ] M1.4 WebAuthn：作为第二因素与无密码登录（通行密钥）
+- [ ] M1.5 人机验证（captcha 插件：Cloudflare Turnstile / hCaptcha / reCAPTCHA v2，挂在注册、登录、找回密码、签到）
+- [ ] M1.6 registration-policy：开放 / 邀请 / 申请 / 关闭、注册时段与名额、邮箱域名黑白名单
+
+### M2 能稳定开站
+
+- [ ] M2.1 插件包签名（minisign；`plugin keygen` / `package --sign`；`kernel.mode = "prod"` 校验）
+- [ ] M2.2 qBittorrent / Deluge 客户端兼容测试（announce 参数、compact、IPv6、key、事件）
+- [ ] M2.3 ratio-policy（按等级的最低分享率、警告期、限制下载）
+- [ ] M2.4 seedbox（按 IP 段 / ASN 识别盒子，供 H&R 与反作弊）
+- [ ] M2.5 newbie-exam（新手考核）
+- [ ] M2.6 管理操作日志页（审计查询）、Prometheus 指标端点、备份恢复脚本与演练文档
+
+### M3 内容功能（国内站刚需）
+
+- [ ] M3.1 种子认领（claims：认领、保种考核、认领奖励）
+- [ ] M3.2 forum（版块、主题、回复、种子讨论帖、公告）
+- [ ] M3.3 metadata-douban / PT-Gen 兼容简介生成
+- [ ] M3.4 mediainfo（MediaInfo / BDInfo 解析，上传校验）
+- [ ] M3.5 收藏、置顶、排行榜（top10）、合集
+- [ ] M3.6 图片上传（附件 / 图床，blob 存储）
+- [ ] M3.7 subtitles（字幕区）
+- [ ] M3.8 去重与替代（trump）规则
+
+### M4 运营玩法与管理
+
+- [ ] M4.1 shop（魔力值商城：上传量、邀请、改名卡、免费令牌、个人促销）
+- [ ] M4.2 medals（勋章与头衔）、lottery（抽奖）
+- [ ] M4.3 工单 / 联系管理组、群发公告
+- [ ] M4.4 捐赠 / VIP 到期、魔力值流水页
+- [ ] M4.5 各插件的管理页面、Markdown 编辑器、移动端适配

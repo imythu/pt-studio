@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
@@ -15,7 +15,9 @@ use serde::Deserialize;
 use crate::{
     Identity, accounts,
     accounts::{Origin, RegisterRequest},
-    auth, rbac, settings, status, tokens,
+    auth,
+    policy::Policy,
+    rbac, risk, settings, status, tokens,
 };
 
 pub fn router(id: Arc<Identity>) -> Router {
@@ -62,7 +64,75 @@ pub fn router(id: Arc<Identity>) -> Router {
             "/v1/admin/users/{id}/restrictions/{rid}",
             delete(lift_restriction),
         )
+        .route("/v1/users/me/security-events", get(my_security_events))
+        .route("/v1/users/me/ip-history", get(my_ip_history))
+        .route("/v1/admin/users/{id}/ip-history", get(admin_ip_history))
+        .route("/v1/admin/users/{id}/shared-ips", get(admin_shared_ips))
+        .route(
+            "/v1/admin/users/{id}/security-events",
+            get(admin_security_events),
+        )
+        .route("/v1/admin/ip-lookups", get(admin_ip_lookup))
         .with_state(id)
+}
+
+fn me_id(ctx: &RequestCtx) -> PResult<i64> {
+    i64::try_from(ctx.require_user()?).map_err(|_| PluginError::bad_request("bad user id"))
+}
+
+async fn my_security_events(ctx: RequestCtx) -> PResult<Response> {
+    let uid = me_id(&ctx)?;
+    Ok(Json(json!({ "items": risk::security_events_of(&ctx, uid, 50).await? })).into_response())
+}
+
+async fn my_ip_history(ctx: RequestCtx) -> PResult<Response> {
+    let uid = me_id(&ctx)?;
+    let full = Policy::load(&ctx).await.ip_show_full_to_owner;
+    Ok(Json(json!({ "items": risk::ip_history(&ctx, uid, full, 100).await? })).into_response())
+}
+
+async fn audit_sensitive(ctx: &RequestCtx, target: String, details: serde_json::Value) -> PResult<()> {
+    ctx.audit
+        .write(pt_plugin_api::AuditEntry {
+            action: "identity.sensitive_read".into(),
+            target,
+            details,
+        })
+        .await
+}
+
+async fn admin_ip_history(ctx: RequestCtx, Path(uid): Path<i64>) -> PResult<Response> {
+    audit_sensitive(&ctx, format!("user:{uid}"), json!({ "field": "ip_history" })).await?;
+    Ok(Json(json!({ "items": risk::ip_history(&ctx, uid, true, 500).await? })).into_response())
+}
+
+async fn admin_shared_ips(ctx: RequestCtx, Path(uid): Path<i64>) -> PResult<Response> {
+    audit_sensitive(&ctx, format!("user:{uid}"), json!({ "field": "shared_ips" })).await?;
+    Ok(Json(json!({ "items": risk::shared_ip_users(&ctx, uid).await? })).into_response())
+}
+
+async fn admin_security_events(ctx: RequestCtx, Path(uid): Path<i64>) -> PResult<Response> {
+    Ok(Json(json!({ "items": risk::security_events_of(&ctx, uid, 200).await? })).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct IpLookup {
+    ip: String,
+}
+
+async fn admin_ip_lookup(
+    State(id): State<Arc<Identity>>,
+    ctx: RequestCtx,
+    axum::extract::Query(q): axum::extract::Query<IpLookup>,
+) -> PResult<Response> {
+    let items = risk::users_by_ip(&ctx, id.keys()?, &q.ip).await?;
+    audit_sensitive(
+        &ctx,
+        "ip".into(),
+        json!({ "field": "ip_lookup", "query": crate::crypto::truncate_ip(&q.ip), "results": items.len() }),
+    )
+    .await?;
+    Ok(Json(json!({ "items": items })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,9 +170,11 @@ fn cookie(name: &str, value: &str, max_age: i64, http_only: bool, insecure: bool
 async fn login(
     State(id): State<Arc<Identity>>,
     ctx: RequestCtx,
+    headers: HeaderMap,
     Json(b): Json<LoginBody>,
 ) -> PResult<Response> {
-    let s = auth::login_password(&id, &ctx, &b.username, &b.password, b.remember).await?;
+    let dev = risk::device_cookie(&headers);
+    let s = auth::login_password(&id, &ctx, &b.username, &b.password, b.remember, dev.as_deref()).await?;
     let body = json!({
         "session_id": s.session_id,
         "user": { "id": s.user_id, "username": s.username, "class_id": s.class_id, "status": s.status },
@@ -131,6 +203,18 @@ async fn login(
             id.insecure_cookies(),
         ),
     );
+    if let Some(d) = &s.device_cookie {
+        h.append(
+            header::SET_COOKIE,
+            cookie(
+                risk::DEVICE_COOKIE,
+                d,
+                risk::DEVICE_MAX_AGE,
+                true,
+                id.insecure_cookies(),
+            ),
+        );
+    }
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(resp)
 }

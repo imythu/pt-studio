@@ -86,6 +86,57 @@ function ProfileTab() {
   );
 }
 
+interface SecurityEvent {
+  id: number;
+  kind: string;
+  details: { ip_prefix?: string; ua?: string; method?: string; new_device?: boolean };
+  created_at: number;
+}
+
+interface IpRecord {
+  ip: string;
+  source: string;
+  hits: number;
+  last_seen_at: number;
+}
+
+/** 本人的安全事件与 IP 记录（IP 默认只显示网段） */
+function SecurityLog() {
+  const t = useT();
+  const events = useQuery({ queryKey: ['my-security-events'], queryFn: () => api<{ items: SecurityEvent[] }>('/api/p/identity/v1/users/me/security-events') });
+  const ips = useQuery({ queryKey: ['my-ip-history'], queryFn: () => api<{ items: IpRecord[] }>('/api/p/identity/v1/users/me/ip-history') });
+  return (
+    <>
+      <Card title={t('ui.settings.security_events')}>
+        <Table
+          rows={events.data?.items ?? []}
+          rowKey={(e) => e.id}
+          empty="—"
+          columns={[
+            { key: 'k', header: t('ui.admin.kind'), render: (e) => <>{t(`ui.security.${e.kind}`)} {e.details.new_device && <Badge tone="danger">{t('ui.security.new_device')}</Badge>}</> },
+            { key: 'ip', header: 'IP', render: (e) => e.details.ip_prefix ?? '—' },
+            { key: 'ua', header: t('ui.settings.device'), render: (e) => <span className="small">{e.details.ua ?? '—'}</span> },
+            { key: 't', header: t('ui.settings.time'), render: (e) => new Date(e.created_at).toLocaleString() },
+          ]}
+        />
+      </Card>
+      <Card title={t('ui.settings.ip_history')}>
+        <Table
+          rows={ips.data?.items ?? []}
+          rowKey={(r) => `${r.ip}-${r.source}-${r.last_seen_at}`}
+          empty="—"
+          columns={[
+            { key: 'ip', header: 'IP', render: (r) => <code className="pt-mono">{r.ip}</code> },
+            { key: 's', header: t('ui.admin.source'), render: (r) => t(`ui.security.source.${r.source}`) },
+            { key: 'h', header: t('ui.settings.hits'), render: (r) => r.hits },
+            { key: 't', header: t('ui.settings.last_seen'), render: (r) => new Date(r.last_seen_at).toLocaleString() },
+          ]}
+        />
+      </Card>
+    </>
+  );
+}
+
 function SecurityTab() {
   const t = useT();
   const toast = useToast();
@@ -159,6 +210,7 @@ function SecurityTab() {
           ]}
         />
       </Card>
+      <SecurityLog />
     </>
   );
 }

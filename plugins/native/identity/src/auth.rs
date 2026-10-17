@@ -1,10 +1,10 @@
-//! 登录、会话与鉴权（identity 03 §1.3）。P1 子集：密码登录、会话 cookie；2FA、token、设备在后续迭代。
+//! 登录、会话与鉴权（identity 03 §1.3）：密码登录、限流与设备（risk）、会话 cookie。
 
 use chrono::{DateTime, Duration, Utc};
 use pt_plugin_api::{Credential, Ctx, NewEvent, PResult, PluginError, Principal, host::HookOutcome, json};
 use sqlx::Row;
 
-use crate::{Identity, accounts, crypto};
+use crate::{Identity, accounts, crypto, policy::Policy, risk};
 
 /// “保持登录”会话：30 天不访问才过期（每次访问顺延），最长 365 天后需要重新登录
 pub const IDLE_DAYS: i64 = 30;
@@ -22,22 +22,27 @@ pub struct NewSession {
     pub class_id: i32,
     pub status: String,
     pub max_age_secs: i64,
+    /// 新下发的设备 cookie
+    pub device_cookie: Option<String>,
 }
 
 fn invalid() -> PluginError {
     PluginError::new("identity.invalid_credentials", "invalid username or password")
 }
 
-/// 密码登录（无 2FA 时直接完成）。
+/// 密码登录（无 2FA 时直接完成）。`device_cookie`：请求带来的设备 cookie（`__Host-pt_dev`）。
 pub async fn login_password(
     id: &Identity,
     ctx: &Ctx,
     login: &str,
     password: &str,
     remember: bool,
+    device_cookie: Option<&str>,
 ) -> PResult<NewSession> {
     let keys = id.keys()?;
+    let pol = Policy::load(ctx).await;
     let login = login.trim();
+    let tk = risk::ThrottleKeys::new(keys, login, ctx.invocation.client_ip.as_deref());
     // 用户名或邮箱
     let row = {
         let mut conn = ctx.sql.conn().await?;
@@ -62,16 +67,21 @@ pub async fn login_password(
             .await?
         }
     };
+    let known = match &row {
+        Some(r) => risk::device_known(ctx, keys, r.get(0), device_cookie).await?,
+        None => false,
+    };
+    risk::throttle_check(ctx, &pol, &tk, known).await?;
     let Some(row) = row else {
         let _ = crypto::verify_password(crypto::DUMMY_PHC.into(), password.into()).await;
-        failed(ctx, None, "password").await?;
+        let locked = risk::throttle_fail(ctx, &pol, &tk).await;
+        failed(ctx, None, "password", locked).await?;
         return Err(invalid());
     };
     let uid: i64 = row.get(0);
     let username: String = row.get(1);
     let class_id: i32 = row.get(2);
     let status: String = row.get(3);
-    let auth_version: i32 = row.get(4);
     let phc: Option<String> = row.get(5);
     let ok = match phc {
         Some(phc) => crypto::verify_password(phc, password.into()).await,
@@ -81,16 +91,61 @@ pub async fn login_password(
         }
     };
     if !ok {
-        failed(ctx, Some(uid), "password").await?;
+        let locked = risk::throttle_fail(ctx, &pol, &tk).await;
+        failed(ctx, Some(uid), "password", locked).await?;
         return Err(invalid());
     }
     if status == "banned" || status == "deleted" {
-        failed(ctx, Some(uid), "status").await?;
+        failed(ctx, Some(uid), "status", false).await?;
         return Err(PluginError::new("identity.account_banned", "account is banned"));
     }
+    let s = finish_login(
+        id,
+        ctx,
+        &pol,
+        LoginTarget {
+            uid,
+            username,
+            class_id,
+            status,
+            auth_version: row.get(4),
+        },
+        "password",
+        false,
+        remember,
+        device_cookie,
+    )
+    .await?;
+    risk::throttle_success(ctx, &tk).await;
+    Ok(s)
+}
 
-    let mut input = json!({ "version": 1, "actor": ctx.invocation.actor, "user_id": uid, "username": username,
-                            "method": "password", "new_device": false, "risk_flags": [] });
+/// 已通过第一因素（及所需的第二因素）的登录对象
+pub struct LoginTarget {
+    pub uid: i64,
+    pub username: String,
+    pub class_id: i32,
+    pub status: String,
+    pub auth_version: i32,
+}
+
+/// 登录收尾（03 §1.3 finish_login）：登录钩子、建会话、登记设备与 IP、安全事件、新设备提醒。
+#[allow(clippy::too_many_arguments)]
+pub async fn finish_login(
+    id: &Identity,
+    ctx: &Ctx,
+    pol: &Policy,
+    u: LoginTarget,
+    method: &str,
+    two_factor: bool,
+    remember: bool,
+    device_cookie: Option<&str>,
+) -> PResult<NewSession> {
+    let keys = id.keys()?;
+    let uid = u.uid;
+    let known = risk::device_known(ctx, keys, uid, device_cookie).await?;
+    let mut input = json!({ "version": 1, "actor": ctx.invocation.actor, "user_id": uid, "username": u.username,
+                            "method": method, "new_device": !known, "risk_flags": [] });
     if let Some(ip) = &ctx.invocation.client_ip {
         input["ip"] = json!(ip);
         input["ip_hmac"] = json!(hex::encode(keys.ip_mac(ip)));
@@ -102,12 +157,13 @@ pub async fn login_password(
         ..
     } = ctx.hooks.run("user.before_login", input).await?
     {
-        failed(ctx, Some(uid), "hook").await?;
+        failed(ctx, Some(uid), "hook", false).await?;
         let mut e = PluginError::new(code, message);
         e.details = details;
         return Err(e);
     }
 
+    let device = risk::upsert_device(ctx, keys, uid, device_cookie).await?;
     let sid = uuid::Uuid::now_v7();
     let token = crypto::b64(&ctx.random.bytes(32));
     let csrf = crypto::b64(&ctx.random.bytes(32));
@@ -122,20 +178,29 @@ pub async fn login_password(
         .user_agent
         .as_ref()
         .map(|u| u.chars().take(128).collect());
+    let ip = ctx
+        .invocation
+        .client_ip
+        .clone()
+        .filter(|ip| ip.parse::<std::net::IpAddr>().is_ok());
     {
         let mut conn = ctx.sql.conn().await?;
         sqlx::query(
-            "INSERT INTO sessions (id, user_id, token_hash, remember, method, reauth_at, ua_summary, ip_mac, auth_version,
-                                   idle_expires_at, absolute_expires_at)
-             VALUES ($1,$2,$3,$4,'password',now(),$5,$6,$7,$8,$9)",
+            "INSERT INTO sessions (id, user_id, token_hash, remember, method, two_factor_at, reauth_at, ua_summary, ip_mac,
+                                   last_ip, device_id, auth_version, idle_expires_at, absolute_expires_at)
+             VALUES ($1,$2,$3,$4,$5,CASE WHEN $6 THEN now() END,now(),$7,$8,$9::inet,$10,$11,$12,$13)",
         )
         .bind(sid)
         .bind(uid)
         .bind(crypto::sha256(token.as_bytes()))
         .bind(remember)
+        .bind(method)
+        .bind(two_factor)
         .bind(ua)
-        .bind(ctx.invocation.client_ip.as_ref().map(|ip| keys.ip_mac(ip)))
-        .bind(auth_version)
+        .bind(ip.as_ref().map(|ip| keys.ip_mac(ip)))
+        .bind(ip.as_deref())
+        .bind(device.id)
+        .bind(u.auth_version)
         .bind(now + idle)
         .bind(now + Duration::days(ABSOLUTE_DAYS))
         .execute(&mut *conn)
@@ -145,11 +210,20 @@ pub async fn login_password(
             .execute(&mut *conn)
             .await?;
     }
+    if let Some(ip) = &ip {
+        risk::ip_log_upsert(ctx, keys, uid, ip, "login").await?;
+    }
+    let mut details = risk::client_details(ctx);
+    details["method"] = json!(method);
+    details["new_device"] = json!(device.new_device);
+    risk::security_event(ctx, uid, "login", details.clone()).await?;
     ctx.events
         .publish(NewEvent::v1(
             "user.logged_in",
             format!("user:{uid}"),
-            json!({ "user_id": uid, "method": "password", "two_factor": false, "session_id": sid, "new_device": false }),
+            json!({ "user_id": uid, "method": method, "two_factor": two_factor, "session_id": sid,
+                    "new_device": device.new_device, "alert": device.new_device && pol.login_alert,
+                    "ua": details["ua"], "at": now.to_rfc3339() }),
         ))
         .await?;
     Ok(NewSession {
@@ -157,15 +231,16 @@ pub async fn login_password(
         token,
         csrf,
         user_id: uid,
-        username,
-        class_id,
-        status,
+        username: u.username,
+        class_id: u.class_id,
+        status: u.status,
         max_age_secs: if remember { ABSOLUTE_DAYS * 86400 } else { 0 },
+        device_cookie: device.set_cookie,
     })
 }
 
-async fn failed(ctx: &Ctx, uid: Option<i64>, stage: &str) -> PResult<()> {
-    // 失败事件不含用户名与 IP；限流在后续迭代接入 Redis（03 §1.9）
+async fn failed(ctx: &Ctx, uid: Option<i64>, stage: &str, locked: bool) -> PResult<()> {
+    // 失败事件不含用户名与 IP
     ctx.events
         .publish(NewEvent::v1(
             "user.login_failed",
@@ -173,6 +248,18 @@ async fn failed(ctx: &Ctx, uid: Option<i64>, stage: &str) -> PResult<()> {
             json!({ "user_id": uid, "stage": stage }),
         ))
         .await?;
+    if locked {
+        if let Some(u) = uid {
+            risk::security_event(ctx, u, "login_locked", risk::client_details(ctx)).await?;
+        }
+        ctx.events
+            .publish(NewEvent::v1(
+                "user.login_failed",
+                uid.map_or_else(|| "global".to_owned(), |u| format!("user:{u}")),
+                json!({ "user_id": uid, "stage": "throttled" }),
+            ))
+            .await?;
+    }
     // 失败也要提交事件：登录 handler 返回错误会回滚工作单元，因此在此提前提交
     ctx.sql.commit().await
 }
@@ -206,7 +293,7 @@ pub async fn logout(ctx: &Ctx) -> PResult<()> {
 }
 
 /// `ctx.auth.authenticate`
-pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Principal>> {
+pub async fn authenticate(id: &Identity, ctx: &Ctx, cred: Credential) -> PResult<Option<Principal>> {
     match cred {
         Credential::Session(token) => {
             if token.is_empty() || token.len() > 128 {
@@ -215,7 +302,7 @@ pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Princip
             let mut conn = ctx.sql.conn().await?;
             let row = sqlx::query(
                 "SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, s.revoked_at, s.reauth_at,
-                        s.last_seen_at, s.remember, s.auth_version, u.status, u.auth_version, u.class_id
+                        s.last_seen_at, s.remember, s.auth_version, u.status, u.auth_version, u.class_id, s.ip_mac
                    FROM sessions s JOIN users u ON u.id = s.user_id
                   WHERE s.token_hash = $1",
             )
@@ -235,6 +322,7 @@ pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Princip
             let status: String = r.get(9);
             let auth_version: i32 = r.get(10);
             let class_id: i32 = r.get(11);
+            let seen_ip_mac: Option<Vec<u8>> = r.get(12);
             let now = Utc::now();
             if revoked.is_some() || now > idle || now > absolute || seen_version != auth_version {
                 return Ok(None);
@@ -253,6 +341,26 @@ pub async fn authenticate(ctx: &Ctx, cred: Credential) -> PResult<Option<Princip
                     .bind(now + idle)
                     .execute(&mut *conn)
                     .await?;
+            }
+            // 会话 IP 变化：更新会话并记入 IP 历史
+            if let Some(ip) = ctx
+                .invocation
+                .client_ip
+                .as_deref()
+                .filter(|ip| ip.parse::<std::net::IpAddr>().is_ok())
+            {
+                let keys = id.keys()?;
+                let mac = keys.ip_mac(ip);
+                if seen_ip_mac.as_deref() != Some(mac.as_slice()) {
+                    sqlx::query("UPDATE sessions SET ip_mac = $2, last_ip = $3::inet WHERE id = $1")
+                        .bind(sid)
+                        .bind(&mac)
+                        .bind(ip)
+                        .execute(&mut *conn)
+                        .await?;
+                    drop(conn);
+                    risk::ip_log_upsert(ctx, keys, uid, ip, "session").await?;
+                }
             }
             Ok(Some(Principal {
                 user_id: u64::try_from(uid).unwrap_or_default(),

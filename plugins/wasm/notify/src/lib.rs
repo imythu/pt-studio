@@ -13,7 +13,7 @@ pub mod email;
 
 pt_plugin_sdk::world!("notify");
 
-use exports::pt::plugin::{http_handler, on_cron, service_provider};
+use exports::pt::plugin::{http_handler, on_cron, on_event, service_provider};
 use pt_plugin_sdk::{
     config, http_client, invocation, jobs, services,
     sql::{self, SqlValue},
@@ -108,6 +108,8 @@ fn set_pref(uid: i64, category: &str, channel: &str, on: bool) -> R<()> {
 }
 
 struct Send<'a> {
+    /// 模板键所属插件；None = 服务调用方
+    owner: Option<String>,
     users: Vec<i64>,
     key: &'a str,
     category: &'a str,
@@ -121,7 +123,7 @@ struct Send<'a> {
 
 /// 发送；返回 (已投递, 跳过)
 fn send(s: Send<'_>) -> R<(u32, u32)> {
-    let owner = invocation::current().caller_plugin;
+    let owner = s.owner.clone().unwrap_or_else(|| invocation::current().caller_plugin);
     if !s.key.starts_with(&format!("{owner}.")) {
         return Err(err(
             "notify.template_not_owned",
@@ -271,6 +273,7 @@ impl service_provider::Guest for Notify {
             None => CHANNELS.iter().map(|c| (*c).to_owned()).collect(),
         };
         let (sent, skipped) = send(Send {
+            owner: None,
             users,
             key: a["template_key"].as_str().unwrap_or(""),
             category: a["category"].as_str().unwrap_or("system"),
@@ -541,6 +544,43 @@ fn deliver(id: i64) -> R<()> {
         },
         Err(e) => Err(PluginError { retryable: true, ..e }),
     }
+}
+
+// ---------------- 账号安全事件（identity 发布，notify 投递） ----------------
+
+impl on_event::Guest for Notify {
+    fn handle(evt: on_event::EventEnvelope, d: on_event::DeliveryInfo) -> R<()> {
+        let p: Value = serde_json::from_str(&evt.payload).unwrap_or(Value::Null);
+        match d.subscription.as_str() {
+            "on_login" => on_login(&p, &evt.id),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// 新设备登录提醒：identity 在 `user.logged_in` 中标记 `alert = true`（新设备且站点开启提醒）
+fn on_login(p: &Value, event_id: &str) -> R<()> {
+    let Some(uid) = p["user_id"].as_i64().filter(|_| p["alert"] == true) else {
+        return Ok(());
+    };
+    let ua = p["ua"].as_str().unwrap_or("-");
+    let at = p["at"].as_str().unwrap_or("");
+    send(Send {
+        owner: Some("notify".into()),
+        users: vec![uid],
+        key: "notify.login_alert",
+        category: "security",
+        args: &json!({ "ua": ua, "at": at }),
+        title: "新设备登录提醒 / New sign-in to your account".into(),
+        body: format!(
+            "你的账号刚刚在一台新设备上登录（{ua}）。如果不是你本人操作，请立即修改密码并在设置中撤销该会话。\n\
+             Your account was just signed in from a new device ({ua}). If this wasn't you, change your password and revoke the session in settings."
+        ),
+        link: Some("/settings".into()),
+        idem: Some(format!("login:{event_id}")),
+        channels: CHANNELS.iter().map(|c| (*c).to_owned()).collect(),
+    })?;
+    Ok(())
 }
 
 impl on_cron::Guest for Notify {

@@ -39,9 +39,11 @@ export function AdminUsers() {
     getNextPageParam: (last) => last.next_cursor,
   });
   const rows = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const sensitive = useSession().can('identity.users.read_sensitive');
   return (
     <div>
       <h1>{t('ui.admin.users')}</h1>
+      {sensitive && <IpLookup />}
       <form
         className="searchbar"
         onSubmit={(e) => {
@@ -87,6 +89,104 @@ interface Detail {
   granted_roles: { role: string; granted_by: string }[];
   sessions: number;
   restrictions: { id: number; kind: string; source: string; reason_code: string; until: number | null; lifted_at: number | null }[];
+}
+
+interface IpRow {
+  ip: string;
+  source: string;
+  hits: number;
+  last_seen_at: number;
+}
+
+interface IpUser {
+  user_id: number;
+  username: string;
+  status: string;
+  last_seen_at: number;
+  shared_ips?: number;
+  hits?: number;
+}
+
+function UserLinks({ rows, extra }: { rows: IpUser[]; extra: (u: IpUser) => string | number }) {
+  return (
+    <ul>
+      {rows.map((u) => (
+        <li key={u.user_id}>
+          <Link to={`/admin/users/${u.user_id}`}>{u.username}</Link> <Badge tone={u.status === 'active' ? 'muted' : 'danger'}>{u.status}</Badge>{' '}
+          <span className="pt-muted small">{extra(u)}</span>
+        </li>
+      ))}
+      {rows.length === 0 && <li className="pt-muted">—</li>}
+    </ul>
+  );
+}
+
+/** IP 历史与同 IP 账户：敏感数据，点击后加载（服务端记审计） */
+function UserIps({ id }: { id: number }) {
+  const t = useT();
+  const toast = useToast();
+  const errText = useErrorText();
+  const [data, setData] = useState<{ ips: IpRow[]; shared: IpUser[] } | null>(null);
+  const load = async () => {
+    try {
+      const [ips, shared] = await Promise.all([
+        api<{ items: IpRow[] }>(`/api/p/identity/v1/admin/users/${id}/ip-history`),
+        api<{ items: IpUser[] }>(`/api/p/identity/v1/admin/users/${id}/shared-ips`),
+      ]);
+      setData({ ips: ips.items, shared: shared.items });
+    } catch (e) {
+      toast(errText(e), 'error');
+    }
+  };
+  return (
+    <Card title={t('ui.admin.ip_and_accounts')} actions={data ? null : <Button onClick={load}>{t('ui.admin.load_sensitive')}</Button>}>
+      {data ? (
+        <>
+          <Table
+            rows={data.ips}
+            rowKey={(r) => `${r.ip}-${r.source}-${r.last_seen_at}`}
+            empty="—"
+            columns={[
+              { key: 'ip', header: 'IP', render: (r) => <code className="pt-mono">{r.ip}</code> },
+              { key: 's', header: t('ui.admin.source'), render: (r) => t(`ui.security.source.${r.source}`) },
+              { key: 'h', header: t('ui.settings.hits'), render: (r) => r.hits },
+              { key: 't', header: t('ui.settings.last_seen'), render: (r) => new Date(r.last_seen_at).toLocaleString() },
+            ]}
+          />
+          <h3>{t('ui.admin.shared_ip_users')}</h3>
+          <UserLinks rows={data.shared} extra={(u) => t('ui.admin.shared_ips_n', { n: u.shared_ips ?? 0 })} />
+        </>
+      ) : (
+        <p className="pt-muted small">{t('ui.admin.sensitive_hint')}</p>
+      )}
+    </Card>
+  );
+}
+
+/** 按 IP / CIDR 查账户 */
+export function IpLookup() {
+  const t = useT();
+  const toast = useToast();
+  const errText = useErrorText();
+  const [ip, setIp] = useState('');
+  const [rows, setRows] = useState<IpUser[] | null>(null);
+  const search = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      setRows((await api<{ items: IpUser[] }>(`/api/p/identity/v1/admin/ip-lookups?ip=${encodeURIComponent(ip.trim())}`)).items);
+    } catch (err) {
+      toast(errText(err), 'error');
+    }
+  };
+  return (
+    <Card title={t('ui.admin.ip_lookup')}>
+      <form className="searchbar" onSubmit={search}>
+        <Input name="ip" placeholder="203.0.113.7 / 203.0.113.0/24" value={ip} onChange={(e) => setIp(e.target.value)} required />
+        <Button type="submit">{t('ui.admin.ip_lookup_go')}</Button>
+      </form>
+      {rows && <UserLinks rows={rows} extra={(u) => new Date(u.last_seen_at).toLocaleString()} />}
+    </Card>
+  );
 }
 
 export function AdminUser() {
@@ -207,6 +307,7 @@ export function AdminUser() {
           </Button>
         </form>
       </Card>
+      {s.can('identity.users.read_sensitive') && <UserIps id={d.id} />}
       <Slot name="admin.user.tabs" ctx={{ profile: d, user: s.me }} />
     </div>
   );

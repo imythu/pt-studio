@@ -223,6 +223,57 @@ auth = "admin"
 permission = "identity.roles.assign"
 rate_limit = "user:60/h"
 
+[[http.routes]]
+id = "my_security_events"
+method = "GET"
+path = "/v1/users/me/security-events"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "my_ip_history"
+method = "GET"
+path = "/v1/users/me/ip-history"
+auth = "user"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_ip_history"
+method = "GET"
+path = "/v1/admin/users/{id}/ip-history"
+auth = "admin"
+permission = "identity.users.read_sensitive"
+rate_limit = "user:120/h"
+
+[[http.routes]]
+id = "admin_shared_ips"
+method = "GET"
+path = "/v1/admin/users/{id}/shared-ips"
+auth = "admin"
+permission = "identity.users.read_sensitive"
+rate_limit = "user:120/h"
+
+[[http.routes]]
+id = "admin_security_events"
+method = "GET"
+path = "/v1/admin/users/{id}/security-events"
+auth = "admin"
+permission = "identity.users.read"
+
+[[http.routes]]
+id = "admin_ip_lookup"
+method = "GET"
+path = "/v1/admin/ip-lookups"
+auth = "admin"
+permission = "identity.users.read_sensitive"
+rate_limit = "user:60/h"
+
+[[cron]]
+name = "ip_retention"
+schedule = "17 3 * * *"
+timeout_secs = 600
+tx = "manual"
+
 [[cron]]
 name = "restriction_sweep"
 schedule = "* * * * *"
@@ -295,6 +346,69 @@ input_schema = { type = "object", additionalProperties = false, required = ["use
 [database]
 migrations = "migrations"
 views = ["v_user_public"]
+
+[settings_schema]
+type = "object"
+x-pt-order = ["login_user_lock_after", "login_user_window_secs", "login_ip_block_after", "login_ip_window_secs", "login_max_delay_secs", "login_alert", "ip_truncate_after_days", "ip_delete_after_days", "ip_show_full_to_owner"]
+
+[settings_schema.properties.login_user_lock_after]
+type = "integer"
+minimum = 3
+maximum = 100
+default = 10
+title = "同一账号连续登录失败多少次后临时锁定（已登录过的设备不受影响）"
+
+[settings_schema.properties.login_user_window_secs]
+type = "integer"
+minimum = 60
+maximum = 86400
+default = 900
+title = "账号失败计数与锁定时长（秒）"
+
+[settings_schema.properties.login_ip_block_after]
+type = "integer"
+minimum = 5
+maximum = 10000
+default = 50
+title = "同一 IP 登录失败多少次后封锁该 IP 的登录"
+
+[settings_schema.properties.login_ip_window_secs]
+type = "integer"
+minimum = 60
+maximum = 86400
+default = 3600
+title = "IP 失败计数与封锁时长（秒）"
+
+[settings_schema.properties.login_max_delay_secs]
+type = "integer"
+minimum = 0
+maximum = 300
+default = 30
+title = "连续失败的最长等待（秒，第 3 次失败起按 1、2、4… 秒递增）"
+
+[settings_schema.properties.login_alert]
+type = "boolean"
+default = true
+title = "新设备登录时发送安全通知"
+
+[settings_schema.properties.ip_truncate_after_days]
+type = "integer"
+minimum = 1
+maximum = 3650
+default = 90
+title = "IP 记录多少天后截断为 /24（IPv6 /48）"
+
+[settings_schema.properties.ip_delete_after_days]
+type = "integer"
+minimum = 1
+maximum = 3650
+default = 365
+title = "IP 记录与安全事件保留天数"
+
+[settings_schema.properties.ip_show_full_to_owner]
+type = "boolean"
+default = false
+title = "用户在自己的安全页可以看到完整 IP（否则只显示网段）"
 
 [terms]
 "identity.role.guest" = { zh-CN = "访客", en = "Guest" }
