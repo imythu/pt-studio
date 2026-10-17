@@ -48,6 +48,17 @@ enum PluginCmd {
     Check {
         /// 包目录（`<id>/` 下含 plugin.toml、plugin.wasm）
         dir: std::path::PathBuf,
+        /// 同时校验签名：minisign 公钥（`RW…` 或 .pub 文件）
+        #[arg(long)]
+        key: Option<String>,
+    },
+    /// 生成插件签名密钥对（minisign 格式）：<out>.key 与 <out>.pub。
+    /// 私钥默认以环境变量 PT_PLUGIN_KEY_PASSWORD 的口令加密；--unencrypted 生成不加密的私钥（CI 用，务必妥善保管）
+    Keygen {
+        #[arg(long, default_value = "plugin-signing")]
+        out: std::path::PathBuf,
+        #[arg(long)]
+        unencrypted: bool,
     },
     /// 组装插件包：<out>/<id>/{plugin.toml, plugin.wasm, migrations/, checksums.txt}，并检查
     Package {
@@ -60,17 +71,31 @@ enum PluginCmd {
         /// 输出目录（站点配置 plugins.dir 指向它即可加载）
         #[arg(long, default_value = "dist")]
         out: std::path::PathBuf,
+        /// 用该 minisign 私钥签名（加密的私钥从环境变量 PT_PLUGIN_KEY_PASSWORD 读口令）
+        #[arg(long)]
+        sign: Option<std::path::PathBuf>,
     },
 }
 
 fn plugin_cmd(cmd: PluginCmd) -> ExitCode {
     let r = match cmd {
-        PluginCmd::Check { dir } => {
-            pt_server::check(&dir).map(|m| format!("ok: {} {} ({})", m.id, m.version, m.api))
-        }
-        PluginCmd::Package { src, wasm, out } => {
-            pt_server::package(&src, &wasm, &out).map(|d| format!("ok: packaged {}", d.display()))
-        }
+        PluginCmd::Check { dir, key } => pt_server::check(&dir).and_then(|m| {
+            if let Some(k) = key {
+                pt_server::verify_signature(&dir, &k)?;
+                Ok(format!("ok: {} {} ({}), signature valid", m.id, m.version, m.api))
+            } else {
+                Ok(format!("ok: {} {} ({})", m.id, m.version, m.api))
+            }
+        }),
+        PluginCmd::Keygen { out, unencrypted } => pt_server::keygen(&out, unencrypted)
+            .map(|(k, p)| format!("ok: wrote {} and {} (add the public key to plugins.trusted_keys)", k.display(), p.display())),
+        PluginCmd::Package { src, wasm, out, sign } => pt_server::package(&src, &wasm, &out).and_then(|d| match sign {
+            Some(key) => {
+                pt_server::sign(&d, &key)?;
+                Ok(format!("ok: packaged and signed {}", d.display()))
+            }
+            None => Ok(format!("ok: packaged {}", d.display())),
+        }),
     };
     match r {
         Ok(msg) => {

@@ -6,6 +6,7 @@
 
 pub mod bindings;
 pub mod host;
+pub mod signing;
 
 use std::{
     collections::HashMap,
@@ -608,6 +609,7 @@ pub fn load_dir(
     rt: &Arc<WasmRuntime>,
     dir: &Path,
     allow_unsigned: bool,
+    keys: &signing::TrustedKeys,
 ) -> (Vec<NativePlugin>, Vec<LoadFailure>) {
     let mut out = Vec::new();
     let mut errs = Vec::new();
@@ -628,7 +630,7 @@ pub fn load_dir(
         if name.starts_with('.') {
             continue;
         }
-        match load_one(rt, &d, &name, allow_unsigned) {
+        match load_one(rt, &d, &name, allow_unsigned, keys) {
             Ok(p) => out.push(p),
             Err(e) => errs.push(e),
         }
@@ -649,7 +651,7 @@ pub fn check_package(dir: &Path) -> Result<Manifest, LoadFailure> {
         message,
     };
     let rt = WasmRuntime::new().map_err(|e| fail("E-LOAD-WORLD", e.to_string()))?;
-    let p = load_one(&rt, dir, &name, true)?;
+    let p = load_one(&rt, dir, &name, true, &signing::TrustedKeys::default())?;
     let m = Manifest::parse(p.manifest).map_err(|e| fail("E-LOAD-MANIFEST", e.message))?;
     if !pt_plugin_api::api_supported(&m.api) {
         return Err(fail("E-LOAD-API", format!("unsupported api `{}`", m.api)));
@@ -685,6 +687,7 @@ fn load_one(
     d: &Path,
     name: &str,
     allow_unsigned: bool,
+    keys: &signing::TrustedKeys,
 ) -> Result<NativePlugin, LoadFailure> {
     let fail = |code: &'static str, message: String| LoadFailure {
         plugin: name.to_owned(),
@@ -706,11 +709,16 @@ fn load_one(
             "packages in plugins.dir must declare kind = \"wasm\"".into(),
         ));
     }
-    if !d.join("plugin.sig").exists() && !allow_unsigned {
-        // 包签名（minisign）校验尚未实现：生产模式下拒绝未签名包
+    // 包签名（minisign）：有签名就校验（开发模式下没有配置公钥时跳过）；没有签名只在 allow_unsigned 时接受
+    if d.join("plugin.sig").exists() {
+        if !(keys.is_empty() && allow_unsigned) {
+            signing::verify_package(d, keys).map_err(|e| fail("E-LOAD-SIGNATURE", e))?;
+        }
+    } else if !allow_unsigned {
         return Err(fail(
             "E-LOAD-SIGNATURE",
-            "package is not signed (set plugins.allow_unsigned = true in dev mode)".into(),
+            "package is not signed (sign it with `pt-server plugin package --sign`, or set plugins.allow_unsigned = true in dev mode)"
+                .into(),
         ));
     }
     let bytes = std::fs::read(d.join("plugin.wasm"))

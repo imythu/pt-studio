@@ -98,3 +98,63 @@ pub fn check(dir: &std::path::Path) -> anyhow::Result<pt_plugin_api::manifest::M
     pt_kernel::wasm::check_package(dir)
         .map_err(|e| anyhow::anyhow!("error[{}] {}: {}", e.code, e.plugin, e.message))
 }
+
+fn key_password() -> Option<String> {
+    std::env::var("PT_PLUGIN_KEY_PASSWORD").ok().filter(|p| !p.is_empty())
+}
+
+/// 生成 minisign 密钥对：`<out>.key`（私钥）与 `<out>.pub`（公钥）
+pub fn keygen(out: &std::path::Path, unencrypted: bool) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let kp = if unencrypted {
+        minisign::KeyPair::generate_unencrypted_keypair()
+    } else {
+        let pw = key_password()
+            .ok_or_else(|| anyhow::anyhow!("set PT_PLUGIN_KEY_PASSWORD (or pass --unencrypted)"))?;
+        minisign::KeyPair::generate_encrypted_keypair(Some(pw))
+    }
+    .map_err(|e| anyhow::anyhow!("keygen: {e}"))?;
+    let key = out.with_extension("key");
+    let pubf = out.with_extension("pub");
+    if key.exists() {
+        anyhow::bail!("{} already exists", key.display());
+    }
+    let sk_box = kp
+        .sk
+        .to_box(Some("pt-studio plugin signing key"))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pk_box = kp.pk.to_box().map_err(|e| anyhow::anyhow!("{e}"))?;
+    std::fs::write(&key, sk_box.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))?;
+    }
+    std::fs::write(&pubf, pk_box.to_string())?;
+    Ok((key, pubf))
+}
+
+/// 签名包目录（写 `plugin.sig`）
+pub fn sign(dir: &std::path::Path, key: &std::path::Path) -> anyhow::Result<()> {
+    let text = std::fs::read_to_string(key)?;
+    let sk_box = minisign::SecretKeyBox::from_string(&text).map_err(|e| anyhow::anyhow!("{}: {e}", key.display()))?;
+    // 不加密的私钥直接使用；加密的从环境变量取口令（不交互提示）
+    let sk = match sk_box.clone().into_unencrypted_secret_key() {
+        Ok(sk) => sk,
+        Err(_) => {
+            let pw = key_password()
+                .ok_or_else(|| anyhow::anyhow!("{} is encrypted: set PT_PLUGIN_KEY_PASSWORD", key.display()))?;
+            sk_box
+                .into_secret_key(Some(pw))
+                .map_err(|e| anyhow::anyhow!("{}: {e}", key.display()))?
+        }
+    };
+    let m = pt_plugin_api::manifest::Manifest::parse(&std::fs::read_to_string(dir.join("plugin.toml"))?)
+        .map_err(|e| anyhow::anyhow!("plugin.toml: {}", e.message))?;
+    pt_kernel::wasm::signing::sign_package(dir, &sk, &m.id, &m.version.to_string()).map_err(|e| anyhow::anyhow!(e))
+}
+
+/// 用公钥校验包签名
+pub fn verify_signature(dir: &std::path::Path, key: &str) -> anyhow::Result<()> {
+    let keys = pt_kernel::wasm::signing::TrustedKeys::parse(&[key.to_owned()]).map_err(|e| anyhow::anyhow!(e))?;
+    pt_kernel::wasm::signing::verify_package(dir, &keys).map_err(|e| anyhow::anyhow!("error[E-LOAD-SIGNATURE] {e}"))
+}

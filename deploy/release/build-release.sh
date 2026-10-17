@@ -4,6 +4,10 @@
 #   deploy/release/build-release.sh            # 构建全部（release）并打包
 #   PT_SKIP_BUILD=1 deploy/release/build-release.sh   # 只打包已有的 release 产物
 #
+# 插件签名（可选）：PT_PLUGIN_SIGNING_KEY 为 minisign 私钥文件内容（加密的私钥另设 PT_PLUGIN_KEY_PASSWORD），
+# PT_PLUGIN_SIGNING_PUBKEY 为对应公钥文件内容；设置后全部插件包签名，公钥放进 config/plugin-signing.pub，
+# init-config.sh 生成的配置为生产模式（kernel.mode = "prod"）。未设置时插件包不签名、配置为开发模式。
+#
 # 包内容见 deploy/release/DEPLOY.md §1。二进制只依赖 glibc ≥ 2.34（Debian 12+、Ubuntu 22.04+、RHEL / Rocky 9+）。
 set -euo pipefail
 shopt -s extglob
@@ -29,6 +33,16 @@ fi
 
 say "staging $STAGE"
 rm -rf "$STAGE" && mkdir -p "$STAGE"/{bin,plugins,config,sql,systemd,scripts,licenses,source}
+SIGN=()
+if [ -n "${PT_PLUGIN_SIGNING_KEY:-}" ]; then
+  : "${PT_PLUGIN_SIGNING_PUBKEY:?set PT_PLUGIN_SIGNING_PUBKEY together with PT_PLUGIN_SIGNING_KEY}"
+  KEYFILE="$(mktemp)"
+  trap 'rm -f "$KEYFILE"' EXIT
+  printf '%s\n' "$PT_PLUGIN_SIGNING_KEY" > "$KEYFILE"
+  printf '%s\n' "$PT_PLUGIN_SIGNING_PUBKEY" > "$STAGE/config/plugin-signing.pub"
+  SIGN=(--sign "$KEYFILE")
+  say "plugin packages will be signed"
+fi
 install -m 755 "$ROOT/target/release/pt-server" "$STAGE/bin/"
 install -m 755 "$ROOT/crates/pt-tracker/target/release/pt-tracker" "$STAGE/bin/"
 strip "$STAGE/bin/pt-server" "$STAGE/bin/pt-tracker" 2>/dev/null || true
@@ -37,7 +51,7 @@ for dir in "$ROOT"/plugins/wasm/*/; do
   [ -f "$dir/plugin.toml" ] || continue
   case "$id" in x-*) continue ;; esac
   "$STAGE/bin/pt-server" plugin package --src "$dir" \
-    --wasm "$ROOT/plugins/wasm/target/wasm32-wasip2/release/pt_wasm_${id//-/_}.wasm" --out "$STAGE/plugins" >/dev/null
+    --wasm "$ROOT/plugins/wasm/target/wasm32-wasip2/release/pt_wasm_${id//-/_}.wasm" --out "$STAGE/plugins" "${SIGN[@]}" >/dev/null
 done
 cp -r "$ROOT/web/dist" "$STAGE/web"
 cp "$ROOT/deploy/site.example.toml" "$STAGE/config/"
@@ -61,7 +75,9 @@ tar -C "$ROOT/crates" --exclude=target -czf "$STAGE/source/pt-tracker-$VERSION-s
 say "checking the staged package"
 "$STAGE/bin/pt-server" --version
 "$STAGE/bin/pt-tracker" --version
-for p in "$STAGE"/plugins/*/; do "$STAGE/bin/pt-server" plugin check "$p" >/dev/null; done
+CHECK=()
+[ -f "$STAGE/config/plugin-signing.pub" ] && CHECK=(--key "$STAGE/config/plugin-signing.pub")
+for p in "$STAGE"/plugins/*/; do "$STAGE/bin/pt-server" plugin check "$p" "${CHECK[@]}" >/dev/null; done
 echo "  $(ls "$STAGE/plugins" | wc -l) plugin packages ok"
 
 tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME"

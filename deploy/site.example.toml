@@ -9,7 +9,7 @@ default_locale = "zh-CN"
 locales = ["zh-CN", "en"]
 
 [kernel]
-mode = "dev"                           # dev：允许未签名插件包、出站 HTTP 可用 http；生产用 "prod"
+mode = "dev"                           # dev：允许未签名插件包、出站 HTTP 可用 http；生产用 "prod"（插件包须签名）
 
 [http]
 bind = "0.0.0.0:31251"
@@ -35,7 +35,8 @@ dir = "data/blob"                      # 种子文件等对象存储（本地目
 
 [plugins]
 dir = "dist/plugins"                   # WASM 插件包目录（pt-server plugin package 的输出）
-allow_unsigned = true                  # 插件包签名尚未实现，必须为 true
+allow_unsigned = true                  # 只在 dev 模式有效；生产模式改为 false 并配置 trusted_keys
+# trusted_keys = ["/etc/pt-studio/plugin-signing.pub"]   # minisign 公钥（文件路径或 RW… 一行）；pt-server plugin keygen 生成
 
 # 敏感数据授权：identity 需要邮箱与 IP；notify 的邮件渠道需要邮箱
 [grants.identity]

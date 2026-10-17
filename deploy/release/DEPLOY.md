@@ -165,7 +165,11 @@ tracker（`/etc/pt-studio/tracker.toml`）：
 
 tracker 无状态（swarm 存在 Redis），可以在多台机器上运行多个实例共享同一个 Redis，前面用任意负载均衡。
 
-关于 `kernel.mode = "dev"`：插件包签名尚未实现，加载未签名的 WASM 插件包只允许在 dev 模式下进行（`plugins.allow_unsigned = true`）。dev 模式另外只放宽两点：后台可设置钩子超时倍数、插件出站请求允许 `http://`（其他仍要求 https）。鉴权、权限、CSRF、限流、SQL 隔离在两种模式下相同。
+关于 `kernel.mode`：WASM 插件包以 minisign 签名（`plugin.sig` 签 `checksums.txt`）。发布包带 `config/plugin-signing.pub` 时插件已签名，`init-config.sh` 生成生产模式配置（`kernel.mode = "prod"`、`plugins.trusted_keys` 指向该公钥），加载时校验签名与每个文件的哈希，包内多出、缺少或被改动的文件都会拒绝加载。没有公钥的发布包（未配置签名密钥的构建）只能在 dev 模式下加载（`plugins.allow_unsigned = true`）。
+
+自己构建或修改插件后重新签名：`pt-server plugin keygen --out mysite`（私钥口令取自环境变量 `PT_PLUGIN_KEY_PASSWORD`；`--unencrypted` 生成不加密私钥）生成 `mysite.key` / `mysite.pub`，`pt-server plugin package … --sign mysite.key` 打包并签名，把 `mysite.pub` 加入 `plugins.trusted_keys`（可配置多个公钥）。`pt-server plugin check <包目录> --key mysite.pub` 校验签名。签名文件与官方 `minisign -V -p mysite.pub -m checksums.txt -x plugin.sig` 兼容。
+
+dev 模式另外只放宽两点：后台可设置钩子超时倍数、插件出站请求允许 `http://`（其他仍要求 https）。鉴权、权限、CSRF、限流、SQL 隔离在两种模式下相同。
 
 ### 小内存部署（≤ 1 GB）
 
@@ -249,7 +253,7 @@ systemctl start pt-server pt-tracker    # 启动前自动迁移
 |---|---|
 | `pt-server` 启动失败，`E-CONFIG` | 配置文件语法或字段错误，按提示修改 `site.toml` |
 | `E-LOAD-…` / `E-CATALOG` | 插件加载失败：`pt-server … check` 查看详细原因；确认 `plugins.dir` 指向包内的 `plugins/` |
-| `E-LOAD-SIGNATURE` | 未签名的插件包需要 `kernel.mode = "dev"` 与 `plugins.allow_unsigned = true`（§4） |
+| `E-LOAD-SIGNATURE` | 包未签名（生产模式拒绝；开发模式需 `plugins.allow_unsigned = true`）、签名不是受信公钥签的、或文件与 `checksums.txt` 不一致（§4） |
 | 数据库连接 / 权限错误 | 确认执行过 `init-db.sh`，`site.toml` 中两个连接串的密码正确；PostgreSQL 版本 ≥ 16 |
 | Redis 报 `unknown command 'HEXPIRE'` | Redis 版本低于 7.4，升级 Redis |
 | 种子列表为空、搜索报错 | Meilisearch 未运行或 `api_key` 不对；`curl http://127.0.0.1:7700/health` |

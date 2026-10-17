@@ -85,10 +85,17 @@ fn enabled_specs(cfg: &SiteConfig, natives: Vec<NativePlugin>) -> Result<Vec<Plu
                 "plugins.allow_unsigned is only accepted in kernel.mode = \"dev\"",
             ));
         }
+        let keys = match crate::wasm::signing::TrustedKeys::parse(&cfg.plugins.trusted_keys) {
+            Ok(k) => k,
+            Err(e) => {
+                errors.push(LoadError::new("E-LOAD-SIGNATURE", "*", e));
+                crate::wasm::signing::TrustedKeys::default()
+            }
+        };
         match crate::wasm::WasmRuntime::new() {
             Ok(rt) => {
                 let (ok, failed) =
-                    crate::wasm::load_dir(&rt, std::path::Path::new(dir), cfg.plugins.allow_unsigned);
+                    crate::wasm::load_dir(&rt, std::path::Path::new(dir), cfg.plugins.allow_unsigned, &keys);
                 wasm = ok;
                 errors.extend(
                     failed

@@ -70,7 +70,7 @@
 
 ### 4.2 平台与内核
 
-- **插件包签名（优先，生产部署前必须完成）**：minisign 签 `checksums.txt`，站点配置信任公钥，加载时校验签名与文件哈希；`pt-server plugin keygen` / `package --sign`。完成后生产环境可用 `kernel.mode = "prod"`。
+- ~~插件包签名~~（2026-10-17 已完成，见 §5 M2.1）：minisign 签 `checksums.txt`，站点配置信任公钥，加载时校验签名与文件哈希；`pt-server plugin keygen` / `package --sign`。完成后生产环境可用 `kernel.mode = "prod"`。
 - 钩子输入按 schema 运行时校验；插件包内分发前端（目前前端需放进站点的 web 目录）。
 - OpenAPI 聚合与 TS SDK 生成、CORS、client-errors 上报、术语版本头。
 - SQL 语句检查（pg_query）、插件配额（KV / Redis / blob）、S3 对象存储后端、分区维护任务化。
@@ -135,7 +135,7 @@
 
 ### M2 能稳定开站
 
-- [ ] M2.1 插件包签名（minisign；`plugin keygen` / `package --sign`；`kernel.mode = "prod"` 校验）
+- [x] M2.1 插件包签名（minisign；`plugin keygen` / `package --sign`；`kernel.mode = "prod"` 校验）
 - [ ] M2.2 qBittorrent / Deluge 客户端兼容测试（announce 参数、compact、IPv6、key、事件）
 - [ ] M2.3 ratio-policy（按等级的最低分享率、警告期、限制下载）
 - [ ] M2.4 seedbox（按 IP 段 / ASN 识别盒子，供 H&R 与反作弊）

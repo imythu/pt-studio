@@ -248,6 +248,9 @@ pub struct PluginsSection {
     pub disabled: Vec<String>,
     #[serde(default)]
     pub allow_unsigned: bool,
+    /// 受信任的插件签名公钥（minisign：`RW…` 一行 base64，或 .pub 文件路径）
+    #[serde(default)]
+    pub trusted_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

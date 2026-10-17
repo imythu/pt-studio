@@ -37,6 +37,12 @@ jobs:
             crates/pt-tracker -> target
 
       - name: Build release package
+        # 插件签名：仓库 secret PT_PLUGIN_SIGNING_KEY（minisign 私钥文件内容，可选 PT_PLUGIN_KEY_PASSWORD）
+        # 与 variable PT_PLUGIN_SIGNING_PUBKEY（公钥文件内容）；未配置时插件包不签名
+        env:
+          PT_PLUGIN_SIGNING_KEY: ${{ secrets.PT_PLUGIN_SIGNING_KEY }}
+          PT_PLUGIN_KEY_PASSWORD: ${{ secrets.PT_PLUGIN_KEY_PASSWORD }}
+          PT_PLUGIN_SIGNING_PUBKEY: ${{ vars.PT_PLUGIN_SIGNING_PUBKEY }}
         run: deploy/release/build-release.sh
 
       - uses: actions/upload-artifact@v4
