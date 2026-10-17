@@ -32,7 +32,7 @@ export default {
 |---|---|---|---|
 | `app.head` | list | `{}` | 主题、统计脚本（受 CSP 限制） |
 | `nav.main` | list | `{ user? }` | forum、requests、shop、lottery、checkin |
-| `nav.user_menu` | list | `{ user }` | bonus、messages、invite、seedbox |
+| `nav.user_menu` | list | `{ user }` | bonus、messages、invite、seedbox、shop |
 | `nav.admin` | list | `{ user }` | 各插件后台入口 |
 | `home.announcements` | list | `{ user? }` | forum、promotion（全站活动横幅） |
 | `home.widgets` | list | `{ user? }` | checkin、lottery、requests、ai-assistant |

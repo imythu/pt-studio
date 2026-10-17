@@ -399,6 +399,21 @@ try {
   await p.getByText('完成数最多').waitFor();
   await p.getByText('不在用户榜中显示我').waitFor();
 
+  // 6i. 商城：后台新建商品 → 用户购买（发种奖励的魔力值够买 1 魔力值的商品）
+  step('shop');
+  await a.goto(`${BASE}/admin/p/shop/`);
+  await a.locator('input[name=item_title]').fill('1 GiB 体验包');
+  await a.locator('input[name=item_price]').fill('1');
+  await a.locator('input[name=item_params]').fill('{"bytes": 1073741824}');
+  await a.getByRole('button', { name: '保存' }).click();
+  await a.getByText('1 GiB 体验包').waitFor();
+  await p.goto(`${BASE}/p/shop/`);
+  await p.getByRole('heading', { name: '魔力值商城' }).waitFor();
+  await p.getByText(/我的魔力值/).waitFor();
+  await p.locator('.pt-card', { hasText: '1 GiB 体验包' }).getByRole('button', { name: '购买' }).click();
+  await p.getByText('购买成功').waitFor();
+  await p.getByText('1 GiB 体验包 × 1').waitFor();
+
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);

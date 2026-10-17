@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-shop"
+description = "PT Studio bonus shop (WASM): items priced in bonus points, purchases settled through ledger holds"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

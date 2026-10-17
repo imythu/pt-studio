@@ -443,6 +443,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-shop"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-subtitles"
 version = "0.1.0"
 dependencies = [

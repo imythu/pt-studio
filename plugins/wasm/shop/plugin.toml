@@ -1,0 +1,102 @@
+id = "shop"
+name = "魔力值商城"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "魔力值商城：用魔力值兑换上传量、邀请名额、促销卡、消除 H&R；先冻结后发放、失败自动退回"
+
+requires = ["ctx.ledger@^0.1"]
+optional_requires = ["ctx.accounting@^0.1", "ctx.invites@^0.1", "ctx.promotions@^0.1", "ctx.hnr@^0.1"]
+publishes = ["shop.item_purchased"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.ledger" = ["currency:bonus"]
+"ctx.accounting" = ["write:adjust"]
+"ctx.invites" = ["write:quota"]
+"ctx.promotions" = ["write:cards"]
+"ctx.hnr" = ["forgive"]
+
+[[http.routes]]
+id = "items"
+method = "GET"
+path = "/v1/items"
+auth = "user"
+
+[[http.routes]]
+id = "purchase"
+method = "POST"
+path = "/v1/items/{id}/purchase"
+auth = "user"
+permission = "shop.buy"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "orders"
+method = "GET"
+path = "/v1/orders"
+auth = "user"
+
+[[http.routes]]
+id = "admin_items"
+method = "GET"
+path = "/v1/admin/items"
+auth = "admin"
+permission = "shop.manage"
+
+[[http.routes]]
+id = "admin_create"
+method = "POST"
+path = "/v1/admin/items"
+auth = "admin"
+permission = "shop.manage"
+
+[[http.routes]]
+id = "admin_update"
+method = "PATCH"
+path = "/v1/admin/items/{id}"
+auth = "admin"
+permission = "shop.manage"
+
+[[http.routes]]
+id = "admin_orders"
+method = "GET"
+path = "/v1/admin/orders"
+auth = "admin"
+permission = "shop.manage"
+
+[[permissions]]
+name = "shop.buy"
+description_term = "shop.perm.buy"
+default_roles = ["user"]
+
+[[permissions]]
+name = "shop.manage"
+description_term = "shop.perm.manage"
+default_roles = ["admin"]
+
+[error_codes]
+"shop.unavailable" = 422
+"shop.sold_out" = 409
+"shop.limit_reached" = 409
+"shop.insufficient_funds" = 402
+"shop.invalid_target" = 422
+"shop.fulfillment_failed" = 502
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu"]
+routes = ["/p/shop/*", "/admin/p/shop/*"]
+
+[terms]
+"shop.name" = { zh-CN = "魔力值商城", en = "Bonus shop" }
+"shop.perm.buy" = { zh-CN = "在商城购买", en = "Buy in the shop" }
+"shop.perm.manage" = { zh-CN = "管理商城", en = "Manage the shop" }
