@@ -51,7 +51,7 @@ export default {
 | `torrent.detail.actions` | list | `{ torrent }` | reports、bonus（赠送）、subtitles |
 | `torrent.detail.tabs` | tabs | `{ torrent }` | comments、subtitles、tracker-bridge（peer 列表）、accounting（完成者列表） |
 | `torrent.upload.type_form` | single | `{ type_id, schema }` | type-*（默认由 JSON Schema 自动生成，插件可替换） |
-| `torrent.upload.extra` | list | `{ draft }` | mediainfo、metadata-*（拉取信息按钮） |
+| `torrent.upload.extra` | list | `{ draft, update(patch) }`（`update` 回填 title / subtitle / description） | mediainfo、metadata-*（拉取信息按钮） |
 | `group.detail.header` | list | `{ group }` | type-*、metadata-* |
 | `group.detail.tabs` | tabs | `{ group }` | comments、requests |
 | `request.detail.sidebar` | list | `{ request }` | requests、comments |

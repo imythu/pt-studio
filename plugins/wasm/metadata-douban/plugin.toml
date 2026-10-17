@@ -1,0 +1,88 @@
+id = "metadata-douban"
+name = "元数据：豆瓣"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "豆瓣元数据（经站点自建的代理或 PT-Gen 兼容端点，不内置爬取）：查询、搜索、归一化、缓存、海报转存、PT-Gen 版式简介；默认关闭，启用需确认风险声明"
+
+provides = ["ctx.metadata@0.1.0"]
+publishes = ["metadata.fetched"]
+
+[capabilities]
+sql = true
+kv = true
+blob = true
+redis = true
+# site.toml [plugin.metadata-douban]：mode = "proxy" | "ptgen"、proxy_base_url / ptgen_url、proxy_token / ptgen_apikey、image_hosts
+http_outbound = [
+  "*.doubanio.com",
+  { config = "proxy_base_url", allow_private = true },
+  { config = "ptgen_url", allow_private = true },
+]
+
+[[http.routes]]
+id = "lookup"
+method = "GET"
+path = "/v1/lookup"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "search"
+method = "GET"
+path = "/v1/search"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "ptgen"
+method = "GET"
+path = "/v1/ptgen"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "admin_status"
+method = "GET"
+path = "/v1/admin/status"
+auth = "admin"
+permission = "kernel.settings.manage"
+
+[[http.routes]]
+id = "admin_enable"
+method = "POST"
+path = "/v1/admin/enable"
+auth = "admin"
+permission = "kernel.settings.manage"
+
+[[http.routes]]
+id = "admin_disable"
+method = "POST"
+path = "/v1/admin/disable"
+auth = "admin"
+permission = "kernel.settings.manage"
+
+[error_codes]
+"metadata-douban.not_enabled" = 503
+"metadata-douban.not_configured" = 503
+"metadata-douban.id_invalid" = 422
+"metadata-douban.not_found" = 404
+"metadata-douban.upstream_error" = 502
+"metadata-douban.search_unsupported" = 501
+
+[wasm]
+memory_mb = 64
+default_timeout_ms = 20000
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.upload.extra"]
+routes = ["/admin/p/metadata-douban/*"]
+
+[terms]
+"metadata-douban.name" = { zh-CN = "豆瓣", en = "Douban" }

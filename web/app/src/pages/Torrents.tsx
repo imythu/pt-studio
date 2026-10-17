@@ -1048,7 +1048,14 @@ export function Upload() {
           <label className="pt-check">
             <input type="checkbox" checked={meta.anonymous} onChange={(e) => setMeta({ ...meta, anonymous: e.target.checked })} /> {t('ui.upload.anonymous')}
           </label>
-          <Slot name="torrent.upload.extra" ctx={{ draft: { ...meta, type_id: info?.type_id, fields } }} />
+          <Slot
+            name="torrent.upload.extra"
+            ctx={{
+              draft: { ...meta, type_id: info?.type_id, fields },
+              // 插件回填标题 / 副标题 / 描述（如豆瓣简介）
+              update: (patch: Partial<typeof meta>) => setMeta((m) => ({ ...m, ...patch })),
+            }}
+          />
           <ErrorText error={error} />
           <Button type="submit" variant="primary" className="btn-lg submit-btn" disabled={busy || !file || !info}>
             {busy ? <Spinner /> : <Icon name="upload" size={18} />} {t('ui.upload.submit')}
