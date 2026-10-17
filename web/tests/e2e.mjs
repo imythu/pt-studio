@@ -414,6 +414,29 @@ try {
   await p.getByText('购买成功').waitFor();
   await p.getByText('1 GiB 体验包 × 1').waitFor();
 
+  // 6j. 勋章：后台新建头衔并授予 → 用户激活头衔 → 个人页显示
+  step('medals');
+  await a.goto(`${BASE}/admin/p/medals/`);
+  await a.locator('select[name=medal_kind]').selectOption('title');
+  await a.locator('input[name=medal_name]').fill('网页元老');
+  await a.getByRole('button', { name: '保存' }).click();
+  await a.locator('strong', { hasText: '网页元老' }).waitFor();
+  await a.getByRole('tab', { name: '授予' }).click();
+  await a.locator('select[name=grant_item]').selectOption({ label: '网页元老' });
+  await a.locator('textarea[name=grant_users]').fill('web_bob');
+  await a.locator('input[name=grant_reason]').fill('首批用户');
+  await a.getByRole('button', { name: '授予', exact: true }).click();
+  await a.getByText('已授予 1 人').waitFor();
+  await p.goto(`${BASE}/p/medals/`);
+  await p.getByRole('heading', { name: '我的勋章' }).waitFor();
+  await p.getByRole('heading', { name: '成就' }).waitFor();
+  await p.locator('select[name=medal_title]').selectOption({ label: '网页元老' });
+  await p.getByRole('button', { name: '保存' }).click();
+  await p.getByText('已保存').waitFor();
+  await openMenu(p);
+  await p.getByRole('menuitem', { name: '个人主页' }).click();
+  await p.locator('[data-testid=medal-display]', { hasText: '网页元老' }).waitFor();
+
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);

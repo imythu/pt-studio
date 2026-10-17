@@ -5,10 +5,10 @@ kind = "wasm"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "魔力值商城：用魔力值兑换上传量、邀请名额、促销卡、消除 H&R；先冻结后发放、失败自动退回"
+description = "魔力值商城：用魔力值兑换上传量、邀请名额、促销卡、消除 H&R、勋章 / 头衔；先冻结后发放、失败自动退回"
 
 requires = ["ctx.ledger@^0.1"]
-optional_requires = ["ctx.accounting@^0.1", "ctx.invites@^0.1", "ctx.promotions@^0.1", "ctx.hnr@^0.1"]
+optional_requires = ["ctx.accounting@^0.1", "ctx.invites@^0.1", "ctx.promotions@^0.1", "ctx.hnr@^0.1", "ctx.medals@^0.1"]
 publishes = ["shop.item_purchased"]
 
 [capabilities]
@@ -21,6 +21,7 @@ views = ["identity.v_user_public"]
 "ctx.invites" = ["write:quota"]
 "ctx.promotions" = ["write:cards"]
 "ctx.hnr" = ["forgive"]
+"ctx.medals" = ["grant"]
 
 [[http.routes]]
 id = "items"

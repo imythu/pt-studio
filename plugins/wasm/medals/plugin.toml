@@ -1,0 +1,215 @@
+id = "medals"
+name = "勋章与头衔"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "勋章与头衔：管理员定义物品与成就规则（事件计数 / 每日累计数据），自动或手动授予，用户选择佩戴的勋章与激活的头衔，个人页展示；shop 可出售"
+
+provides = ["ctx.medals@0.1.0"]
+optional_requires = ["ctx.notify@^0.1"]
+publishes = ["medal.granted", "medal.revoked"]
+
+[capabilities]
+sql = true
+blob = true
+views = ["identity.v_user_public", "accounting.v_user_totals"]
+
+[capabilities.scopes]
+"ctx.notify" = ["send"]
+
+[[subscriptions]]
+name = "ach_torrent_created"
+event = "torrent.created"
+
+[[subscriptions]]
+name = "ach_snatch_completed"
+event = "traffic.snatch_completed"
+
+[[subscriptions]]
+name = "ach_checked_in"
+event = "checkin.checked_in"
+
+[[subscriptions]]
+name = "ach_comment_created"
+event = "comment.created"
+
+[[subscriptions]]
+name = "ach_forum_post"
+event = "forum.post_created"
+
+[[subscriptions]]
+name = "ach_subtitle_uploaded"
+event = "subtitle.uploaded"
+
+[[subscriptions]]
+name = "ach_request_filled"
+event = "request.filled"
+
+[[subscriptions]]
+name = "ach_invite_redeemed"
+event = "invite.redeemed"
+
+[[subscriptions]]
+name = "on_user_deleted"
+event = "user.deleted"
+
+[[cron]]
+name = "eval_stats"
+schedule = "30 3 * * *"
+timeout_secs = 600
+tx = "manual"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+
+[[http.routes]]
+id = "set_display"
+method = "PUT"
+path = "/v1/me/display"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "user_wall"
+method = "GET"
+path = "/v1/users/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "show"
+method = "GET"
+path = "/v1/show"
+auth = "user"
+
+[[http.routes]]
+id = "admin_items"
+method = "GET"
+path = "/v1/admin/items"
+auth = "admin"
+permission = "medals.grant"
+
+[[http.routes]]
+id = "admin_create"
+method = "POST"
+path = "/v1/admin/items"
+auth = "admin"
+permission = "medals.manage"
+
+[[http.routes]]
+id = "admin_update"
+method = "PATCH"
+path = "/v1/admin/items/{id}"
+auth = "admin"
+permission = "medals.manage"
+
+[[http.routes]]
+id = "admin_icon"
+method = "POST"
+path = "/v1/admin/items/{id}/icon"
+auth = "admin"
+permission = "medals.manage"
+max_body_kb = 256
+
+[[http.routes]]
+id = "admin_holders"
+method = "GET"
+path = "/v1/admin/items/{id}/holders"
+auth = "admin"
+permission = "medals.grant"
+
+[[http.routes]]
+id = "admin_grant"
+method = "POST"
+path = "/v1/admin/grants"
+auth = "admin"
+permission = "medals.grant"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_revoke"
+method = "POST"
+path = "/v1/admin/grants/{id}/revoke"
+auth = "admin"
+permission = "medals.grant"
+
+[[http.routes]]
+id = "admin_rules"
+method = "GET"
+path = "/v1/admin/rules"
+auth = "admin"
+permission = "medals.manage"
+
+[[http.routes]]
+id = "admin_rule_create"
+method = "POST"
+path = "/v1/admin/rules"
+auth = "admin"
+permission = "medals.manage"
+
+[[http.routes]]
+id = "admin_rule_update"
+method = "PATCH"
+path = "/v1/admin/rules/{id}"
+auth = "admin"
+permission = "medals.manage"
+
+[[http.routes]]
+id = "admin_rule_eval"
+method = "POST"
+path = "/v1/admin/rules/{id}/evaluate"
+auth = "admin"
+permission = "medals.manage"
+rate_limit = "user:10/m"
+
+[[permissions]]
+name = "medals.grant"
+description_term = "medals.perm.grant"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "medals.manage"
+description_term = "medals.perm.manage"
+default_roles = ["admin"]
+
+[error_codes]
+"medals.inactive" = 422
+"medals.limit_reached" = 409
+"medals.not_held" = 422
+"medals.bad_icon" = 422
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["user.profile.header", "user.profile.badges", "nav.user_menu"]
+routes = ["/p/medals/*", "/admin/p/medals/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["max_worn", "notify_on_grant"]
+
+[settings_schema.properties.max_worn]
+type = "integer"
+minimum = 1
+maximum = 10
+default = 5
+title = "最多佩戴的勋章数"
+
+[settings_schema.properties.notify_on_grant]
+type = "boolean"
+default = true
+title = "获得勋章时通知用户"
+
+[terms]
+"medals.name" = { zh-CN = "勋章与头衔", en = "Medals & titles" }
+"medals.medal" = { zh-CN = "勋章", en = "Medal" }
+"medals.title" = { zh-CN = "头衔", en = "Title" }
+"medals.perm.grant" = { zh-CN = "颁发 / 收回勋章", en = "Grant and revoke medals" }
+"medals.perm.manage" = { zh-CN = "管理勋章定义与成就规则", en = "Manage medal definitions and achievement rules" }

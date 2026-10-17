@@ -336,6 +336,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-medals"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-mediainfo"
 version = "0.1.0"
 dependencies = [

@@ -41,6 +41,7 @@ registerMessages('zh-CN', {
   'shop.kind.invite': '邀请名额',
   'shop.kind.promo_card': '促销卡',
   'shop.kind.hnr_removal': '消除 H&R',
+  'shop.kind.medal': '勋章 / 头衔',
   'shop.unavailable': '商品不可购买',
   'shop.sold_out': '已售罄',
   'shop.limit_reached': '已达到限购数量',
@@ -84,6 +85,7 @@ registerMessages('en', {
   'shop.kind.invite': 'Invites',
   'shop.kind.promo_card': 'Promotion cards',
   'shop.kind.hnr_removal': 'Clear an H&R',
+  'shop.kind.medal': 'Medal / title',
   'shop.unavailable': 'This item is not available',
   'shop.sold_out': 'Sold out',
   'shop.limit_reached': 'You have reached the purchase limit',
@@ -120,6 +122,8 @@ function summary(api: PluginApi, it: Item): string {
       return `× ${Number(p.count ?? 1)}`;
     case 'promo_card':
       return `${String(p.card_kind ?? '')} × ${Number(p.count ?? 1)}`;
+    case 'medal':
+      return p.days ? `${Number(p.days)} d` : api.t('shop.kind.medal');
     default:
       return api.t(`shop.kind.${it.kind}`);
   }
@@ -163,7 +167,7 @@ function BuyBox({ api, it, done }: { api: PluginApi; it: Item; done(): void }) {
             ))}
           </select>
         )
-      ) : (
+      ) : it.kind === 'medal' ? null : (
         <Input type="number" aria-label={api.t('shop.ui.quantity')} min={1} max={10} value={qty} onChange={(e) => setQty(Math.max(1, Math.min(10, Number(e.target.value) || 1)))} />
       )}
       <Button variant="primary" disabled={soldOut || limited || (single && !record)} onClick={() => void buy()}>
@@ -236,12 +240,13 @@ function Shop({ api }: { api: PluginApi }) {
   );
 }
 
-const KINDS = ['upload_credit', 'invite', 'promo_card', 'hnr_removal'];
+const KINDS = ['upload_credit', 'invite', 'promo_card', 'hnr_removal', 'medal'];
 const PARAM_HINT: Record<string, string> = {
   upload_credit: '{"bytes": 10737418240}',
   invite: '{"count": 1, "expires_days": 30}',
   promo_card: '{"card_kind": "free", "count": 1}',
   hnr_removal: '{}',
+  medal: '{"medal_id": 1, "days": 30}',
 };
 
 type Draft = { kind: string; title: string; description: string; price: string; params: string; stock: string; per_user_limit: string; limit_period: string; active: boolean };

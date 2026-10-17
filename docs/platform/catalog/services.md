@@ -67,7 +67,7 @@ WASM 插件通过 `pt:plugin` 的宿主接口使用；Native 插件通过 `Ctx` 
 | `ctx.shop` | shop | single | `items(locale)`、`purchase(user_id, item_id, qty, idempotency_key) -> order_id` | — | 0.1.0 |
 | `ctx.checkin` | checkin | single | `status(user_id) -> {checked_today, streak}`、`check_in(user_id) -> reward` | — | 0.1.0 |
 | `ctx.lottery` | lottery | single | `rounds(status)`、`buy(user_id, round_id, tickets, idempotency_key)` | — | 0.1.0 |
-| `ctx.medals` | medals | single | `of_user(user_id)`、`grant(user_id, medal_id, reason)`、`revoke(user_id, medal_id, reason)`、`set_title(user_id, title)` | `grant` | 0.1.0 |
+| `ctx.medals` | medals | single | `of_user(user_id, include_hidden?)`、`worn_many(user_ids)`、`definitions()`、`grant(user_id, medal_id, reason, expires_at?, idempotency_key)`、`revoke(user_id, medal_id, reason, idempotency_key)`（`set_title` 尚未实现） | `grant` | 0.1.0 |
 | `ctx.levels` | levels | single | `level_of(user_id) -> {class_id, name_term, next_class_id, progress}`、`classes() -> Vec<ClassDef>`、`evaluate(user_id)`、`is_protected(user_id) -> bool`（保号） | `evaluate` | 0.1.0 |
 | `ctx.ratio` | ratio-policy | single | `status(user_id) -> {ratio, required, warned_until, can_download}` | — | 0.1.0 |
 | `ctx.hnr` | hnr | single | `status(user_id) -> {active, failed, can_download}`、`records(user_id, cursor)`、`forgive(record_id, reason)` | `forgive` | 0.1.0 |

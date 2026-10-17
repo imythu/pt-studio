@@ -518,6 +518,13 @@ html, body { overflow-x: clip; }
 .shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 16px; }
 .shop-buy { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .shop-buy input[type=number] { width: 80px; }
+.medal-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+.medal-icon { object-fit: contain; vertical-align: middle; }
+.medal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px; margin-bottom: 12px; }
+.medal-pick { display: flex; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); cursor: pointer; }
+.medal-ach { display: flex; gap: 10px; align-items: flex-start; }
+.medal-ach > div { flex: 1; min-width: 0; }
+.medal-wall summary { cursor: pointer; color: var(--pt-color-muted); font-size: 0.9em; }
 .mediainfo-text { max-height: 480px; overflow: auto; white-space: pre; padding: 10px 12px; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); }
 .bookmarks-action select.pt-input { width: auto; display: inline-block; }
 .attachments-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 12px; }

@@ -1,7 +1,7 @@
 //! shop 插件（WASM，docs/plugins/shop/）：魔力值商城。
 //!
 //! - 商品类型：上传量（`ctx.accounting.adjust`）、邀请名额（`ctx.invites.grant_quota`）、促销卡（`ctx.promotions.grant_cards`）、
-//!   消除 H&R（`ctx.hnr.forgive`）。依赖都是可选的，缺失时该类型购买失败并退回魔力值。
+//!   消除 H&R（`ctx.hnr.forgive`）、勋章 / 头衔（`ctx.medals.grant`）。依赖都是可选的，缺失时该类型购买失败并退回魔力值。
 //! - 购买：锁商品行（库存与限购一致）→ 写订单取得 ID → `ledger.hold` 冻结 → 履约 → `capture_hold` 扣款；
 //!   履约失败则 `release_hold` 解冻并报错。各步骤的幂等键由订单 ID 派生。服务调用各自提交，
 //!   若进程在履约后、扣款前中断，冻结到期自动解冻（用户得到商品而未扣款，偏向用户）。
@@ -13,7 +13,7 @@ use pt_plugin_sdk::{audit, prelude::*, sql, time};
 
 struct Shop;
 
-pub const KINDS: &[&str] = &["upload_credit", "invite", "promo_card", "hnr_removal"];
+pub const KINDS: &[&str] = &["upload_credit", "invite", "promo_card", "hnr_removal", "medal"];
 
 fn one(q: &str, p: &[SqlValue]) -> R<i64> {
     Ok(sql::query(q, p)?.rows.first().and_then(|r| r.int(0)).unwrap_or(0))
@@ -35,6 +35,10 @@ pub fn check_params(kind: &str, p: &Value) -> Result<(), &'static str> {
             _ => Err("params.card_kind must be free or double_up and params.count 1..100"),
         },
         "hnr_removal" => Ok(()),
+        "medal" => match (p["medal_id"].as_i64(), p["days"].as_i64()) {
+            (Some(m), d) if m > 0 && d.is_none_or(|d| (1..=3650).contains(&d)) => Ok(()),
+            _ => Err("params.medal_id is required and params.days must be 1..3650 when set"),
+        },
         _ => Err("unknown item kind"),
     }
 }
@@ -106,6 +110,14 @@ fn fulfill(kind: &str, p: &Value, uid: i64, qty: i64, target: &Value, oid: i64) 
                 &json!({ "record_id": target["record_id"], "reason": format!("shop order {oid}"), "idempotency_key": key }),
             )?;
         }
+        "medal" => {
+            let expires = p["days"].as_i64().map(|d| time::now() + d * 86_400_000);
+            ctx::call(
+                "ctx.medals",
+                "grant",
+                &json!({ "user": uid, "medal_id": p["medal_id"], "reason": "shop", "expires_at": expires, "idempotency_key": key }),
+            )?;
+        }
         _ => return Err(err("shop.unavailable", "unknown item kind")),
     }
     Ok(())
@@ -138,7 +150,7 @@ fn purchase(uid: i64, item_id: i64, b: &Value) -> R<Value> {
     let params = row.json(5).unwrap_or(json!({}));
     let stock = row.int(6);
     let (limit, period) = (row.int(7).unwrap_or(0), row.text(8).unwrap_or_default());
-    let qty = if kind == "hnr_removal" { 1 } else { b["quantity"].as_i64().unwrap_or(1) };
+    let qty = if matches!(kind.as_str(), "hnr_removal" | "medal") { 1 } else { b["quantity"].as_i64().unwrap_or(1) };
     if !(1..=10).contains(&qty) {
         return Err(err("kernel.validation_failed", "quantity must be between 1 and 10"));
     }
@@ -304,6 +316,8 @@ mod tests {
         assert!(check_params("invite", &json!({ "count": 0 })).is_err());
         assert!(check_params("promo_card", &json!({ "card_kind": "free", "count": 2 })).is_ok());
         assert!(check_params("promo_card", &json!({ "card_kind": "gold", "count": 2 })).is_err());
+        assert!(check_params("medal", &json!({ "medal_id": 3, "days": 30 })).is_ok());
+        assert!(check_params("medal", &json!({})).is_err());
         assert!(check_params("rename", &json!({})).is_err());
     }
 }
