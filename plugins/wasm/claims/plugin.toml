@@ -1,0 +1,154 @@
+id = "claims"
+name = "种子认领"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "种子认领：认领自己下载过的种子并长期保种，每月按做种时长考核，达标发魔力值，连续不达标取消认领"
+
+provides = ["ctx.claims@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+optional_requires = ["ctx.ledger@^0.1", "ctx.notify@^0.1"]
+publishes = ["claim.created", "claim.removed", "claim.settled"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public", "torrent.v_torrent_public", "accounting.v_snatch"]
+
+[capabilities.scopes]
+"ctx.ledger" = ["currency:bonus"]
+"ctx.notify" = ["send"]
+
+[[subscriptions]]
+name = "on_torrent_deleted"
+event = "torrent.deleted"
+
+[[cron]]
+name = "settle"
+schedule = "30 0 1 * *"
+timeout_secs = 3600
+tx = "manual"
+
+[[http.routes]]
+id = "claim"
+method = "POST"
+path = "/v1/torrents/{id}/claims"
+auth = "user"
+permission = "claims.use"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "unclaim"
+method = "DELETE"
+path = "/v1/torrents/{id}/claims"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "torrent"
+method = "GET"
+path = "/v1/torrents/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "claimers"
+method = "GET"
+path = "/v1/torrents/{id}/claimers"
+auth = "user"
+
+[[http.routes]]
+id = "me"
+method = "GET"
+path = "/v1/me"
+auth = "user"
+
+[[permissions]]
+name = "claims.use"
+description_term = "claims.perm.use"
+default_roles = ["user"]
+
+[[permissions]]
+name = "claims.manage"
+description_term = "claims.perm.manage"
+default_roles = ["moderator"]
+
+[error_codes]
+"claims.disabled" = 403
+"claims.not_allowed" = 422
+"claims.not_completed" = 422
+"claims.limit_reached" = 409
+"claims.torrent_full" = 409
+"claims.cooldown" = 409
+"claims.already_claimed" = 409
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["torrent.detail.actions", "nav.user_menu"]
+routes = ["/p/claims/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["enabled", "monthly_seed_hours", "reward_bonus", "remove_after_failures", "max_claims_per_user", "max_claimers_per_torrent", "require_completed", "min_torrent_age_days", "unclaim_cooldown_days"]
+
+[settings_schema.properties.enabled]
+type = "boolean"
+default = true
+title = "允许认领"
+
+[settings_schema.properties.monthly_seed_hours]
+type = "integer"
+minimum = 0
+maximum = 744
+default = 500
+title = "每个认领种子每月需要的做种时长（小时）"
+
+[settings_schema.properties.reward_bonus]
+type = "integer"
+minimum = 0
+default = 300
+title = "每个达标的认领每月奖励的魔力值"
+
+[settings_schema.properties.remove_after_failures]
+type = "integer"
+minimum = 0
+default = 2
+title = "连续几个月不达标取消认领（0 = 不取消）"
+
+[settings_schema.properties.max_claims_per_user]
+type = "integer"
+minimum = 1
+default = 1000
+title = "每人最多认领数"
+
+[settings_schema.properties.max_claimers_per_torrent]
+type = "integer"
+minimum = 0
+default = 0
+title = "每个种子最多认领人数（0 = 不限）"
+
+[settings_schema.properties.require_completed]
+type = "boolean"
+default = true
+title = "只能认领自己下载完成过的种子"
+
+[settings_schema.properties.min_torrent_age_days]
+type = "integer"
+minimum = 0
+default = 0
+title = "种子发布满多少天后才能认领"
+
+[settings_schema.properties.unclaim_cooldown_days]
+type = "integer"
+minimum = 0
+default = 0
+title = "取消认领后多少天内不能再认领同一种子"
+
+[terms]
+"claims.name" = { zh-CN = "认领", en = "Claims" }
+"claims.perm.use" = { zh-CN = "认领种子", en = "Claim torrents" }
+"claims.perm.manage" = { zh-CN = "管理认领", en = "Manage claims" }

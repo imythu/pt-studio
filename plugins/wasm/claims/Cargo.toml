@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-claims"
+description = "PT Studio torrent claims (WASM): claim torrents you seed, monthly seeding checks and bonus rewards"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

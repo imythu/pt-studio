@@ -144,7 +144,7 @@
 
 ### M3 内容功能（国内站刚需）
 
-- [ ] M3.1 种子认领（claims：认领、保种考核、认领奖励）
+- [x] M3.1 种子认领（claims：认领、保种考核、认领奖励）
 - [ ] M3.2 forum（版块、主题、回复、种子讨论帖、公告）
 - [ ] M3.3 metadata-douban / PT-Gen 兼容简介生成
 - [ ] M3.4 mediainfo（MediaInfo / BDInfo 解析，上传校验）

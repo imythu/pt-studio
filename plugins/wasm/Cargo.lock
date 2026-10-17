@@ -261,6 +261,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-claims"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-comments"
 version = "0.1.0"
 dependencies = [
