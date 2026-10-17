@@ -277,6 +277,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-forum"
+version = "0.1.0"
+dependencies = [
+ "pt-markup",
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-hnr"
 version = "0.1.0"
 dependencies = [

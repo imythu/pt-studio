@@ -1,7 +1,7 @@
 # WASM 插件工作区（目标 wasm32-wasip2）：cargo build --release --target wasm32-wasip2
 [workspace]
 resolver = "3"
-members = ["ai-moderation", "ai-upload-review", "anticheat", "bonus", "captcha", "claims", "checkin", "comments", "hnr", "invite", "levels", "messages", "metadata-tmdb", "moderation", "newbie-exam", "notify", "promotion", "ratio-policy", "registration-policy", "reports", "requests", "seedbox", "type-anime", "type-generic", "type-movie", "type-music", "type-tv", "x-chaos"]
+members = ["ai-moderation", "ai-upload-review", "anticheat", "bonus", "captcha", "claims", "checkin", "comments", "forum", "hnr", "invite", "levels", "messages", "metadata-tmdb", "moderation", "newbie-exam", "notify", "promotion", "ratio-policy", "registration-policy", "reports", "requests", "seedbox", "type-anime", "type-generic", "type-movie", "type-music", "type-tv", "x-chaos"]
 
 [workspace.package]
 version = "0.1.0"

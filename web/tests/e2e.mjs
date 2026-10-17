@@ -328,6 +328,27 @@ try {
   await a.getByRole('button', { name: '确认执行' }).click();
   await a.getByText('已执行').waitFor();
 
+  // 6g. 论坛：后台建分区与版块 → 用户发主题、回复
+  step('forum');
+  await a.goto(`${BASE}/admin/p/forum/`);
+  await a.locator('input[name=category_name]').fill('站务');
+  await a.getByRole('button', { name: '新建分区' }).click();
+  await a.locator('select[name=board_category] option', { hasText: '站务' }).waitFor({ state: 'attached' });
+  await a.locator('select[name=board_category]').selectOption({ label: '站务' });
+  await a.locator('input[name=board_name]').fill('综合讨论');
+  await a.getByRole('button', { name: '新建版块' }).click();
+  await a.getByRole('cell', { name: '综合讨论' }).waitFor();
+  await p.goto(`${BASE}/p/forum/`);
+  await p.getByRole('link', { name: '综合讨论' }).click();
+  await p.locator('input[name=topic_title]').fill('第一次发帖');
+  await p.locator('textarea[name=post_body]').fill('大家好，**请多关照**');
+  await p.getByRole('button', { name: '发表' }).click();
+  await p.getByRole('heading', { name: /第一次发帖/ }).waitFor();
+  await p.locator('strong', { hasText: '请多关照' }).waitFor();
+  await p.locator('textarea[name=post_body]').fill('自己顶一下');
+  await p.getByRole('button', { name: '发表' }).click();
+  await p.getByText('自己顶一下').waitFor();
+
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);

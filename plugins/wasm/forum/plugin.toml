@@ -1,0 +1,270 @@
+id = "forum"
+name = "论坛"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "论坛：分区与版块（按等级 / 角色的读写权限、版块版主）、主题与楼层、引用、编辑历史、感谢、投票、置顶 / 锁定 / 公告 / 精华 / 移动、已读标记、订阅通知、首页公告"
+
+provides = ["ctx.forum@0.1.0"]
+requires = ["ctx.rbac@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
+publishes = ["forum.topic_created", "forum.post_created", "forum.post_updated", "forum.post_deleted", "forum.topic_moved", "forum.topic_locked"]
+
+[capabilities]
+sql = true
+redis = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.notify" = ["send"]
+
+[[hook_points]]
+name = "forum.before_post"
+input_schema = "schemas/hooks/forum.before_post.json"
+
+[[cron]]
+name = "subs_digest"
+schedule = "*/10 * * * *"
+timeout_secs = 300
+
+[[http.routes]]
+id = "boards"
+method = "GET"
+path = "/v1/boards"
+auth = "public"
+
+[[http.routes]]
+id = "topics"
+method = "GET"
+path = "/v1/boards/{id}/topics"
+auth = "public"
+
+[[http.routes]]
+id = "create_topic"
+method = "POST"
+path = "/v1/boards/{id}/topics"
+auth = "user"
+permission = "forum.post"
+rate_limit = "user:30/h"
+
+[[http.routes]]
+id = "topic"
+method = "GET"
+path = "/v1/topics/{id}"
+auth = "public"
+
+[[http.routes]]
+id = "reply"
+method = "POST"
+path = "/v1/topics/{id}/posts"
+auth = "user"
+permission = "forum.post"
+rate_limit = "user:120/h"
+
+[[http.routes]]
+id = "edit_post"
+method = "PATCH"
+path = "/v1/posts/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "delete_post"
+method = "DELETE"
+path = "/v1/posts/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "history"
+method = "GET"
+path = "/v1/posts/{id}/history"
+auth = "user"
+
+[[http.routes]]
+id = "thank"
+method = "POST"
+path = "/v1/posts/{id}/thanks"
+auth = "user"
+
+[[http.routes]]
+id = "unthank"
+method = "DELETE"
+path = "/v1/posts/{id}/thanks"
+auth = "user"
+
+[[http.routes]]
+id = "vote"
+method = "POST"
+path = "/v1/topics/{id}/vote"
+auth = "user"
+
+[[http.routes]]
+id = "subscribe"
+method = "POST"
+path = "/v1/topics/{id}/subscription"
+auth = "user"
+
+[[http.routes]]
+id = "unsubscribe"
+method = "DELETE"
+path = "/v1/topics/{id}/subscription"
+auth = "user"
+
+[[http.routes]]
+id = "moderate"
+method = "POST"
+path = "/v1/topics/{id}/moderate"
+auth = "user"
+
+[[http.routes]]
+id = "catchup"
+method = "POST"
+path = "/v1/catchup"
+auth = "user"
+
+[[http.routes]]
+id = "announcements"
+method = "GET"
+path = "/v1/announcements"
+auth = "public"
+
+[[http.routes]]
+id = "admin_list"
+method = "GET"
+path = "/v1/admin/boards"
+auth = "admin"
+permission = "forum.manage"
+
+[[http.routes]]
+id = "admin_create_category"
+method = "POST"
+path = "/v1/admin/categories"
+auth = "admin"
+permission = "forum.manage"
+
+[[http.routes]]
+id = "admin_create_board"
+method = "POST"
+path = "/v1/admin/boards"
+auth = "admin"
+permission = "forum.manage"
+
+[[http.routes]]
+id = "admin_update_board"
+method = "PATCH"
+path = "/v1/admin/boards/{id}"
+auth = "admin"
+permission = "forum.manage"
+
+[[http.routes]]
+id = "admin_add_moderator"
+method = "POST"
+path = "/v1/admin/boards/{id}/moderators"
+auth = "admin"
+permission = "forum.manage"
+
+[[http.routes]]
+id = "admin_remove_moderator"
+method = "DELETE"
+path = "/v1/admin/boards/{id}/moderators/{uid}"
+auth = "admin"
+permission = "forum.manage"
+
+[[permissions]]
+name = "forum.read"
+description_term = "forum.perm.read"
+default_roles = ["guest"]
+
+[[permissions]]
+name = "forum.post"
+description_term = "forum.perm.post"
+default_roles = ["user"]
+
+[[permissions]]
+name = "forum.manage"
+description_term = "forum.perm.manage"
+default_roles = ["moderator"]
+
+[error_codes]
+"forum.board_not_found" = 404
+"forum.topic_not_found" = 404
+"forum.post_not_found" = 404
+"forum.permission_denied" = 403
+"forum.topic_locked" = 403
+"forum.rate_limited" = 429
+"forum.title_invalid" = 422
+"forum.body_invalid" = 422
+"forum.poll_closed" = 409
+"forum.poll_invalid" = 422
+"forum.edit_window_expired" = 403
+"forum.moderation_invalid" = 422
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["home.announcements", "nav.main"]
+routes = ["/p/forum/*", "/admin/p/forum/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["edit_window_minutes", "posts_per_page", "topics_per_page", "max_length", "rate_per_30s", "rate_per_hour", "digest_minutes", "image_hosts"]
+
+[settings_schema.properties.edit_window_minutes]
+type = "integer"
+minimum = 0
+default = 60
+title = "发帖后多少分钟内作者可以编辑"
+
+[settings_schema.properties.posts_per_page]
+type = "integer"
+minimum = 10
+maximum = 100
+default = 25
+title = "每页楼层数"
+
+[settings_schema.properties.topics_per_page]
+type = "integer"
+minimum = 10
+maximum = 100
+default = 30
+title = "每页主题数"
+
+[settings_schema.properties.max_length]
+type = "integer"
+minimum = 100
+default = 20000
+title = "帖子最大长度（字符）"
+
+[settings_schema.properties.rate_per_30s]
+type = "integer"
+minimum = 1
+default = 3
+title = "每人每 30 秒最多发帖数"
+
+[settings_schema.properties.rate_per_hour]
+type = "integer"
+minimum = 1
+default = 60
+title = "每人每小时最多发帖数"
+
+[settings_schema.properties.digest_minutes]
+type = "integer"
+minimum = 0
+default = 10
+title = "订阅通知的汇总间隔（分钟）"
+
+[settings_schema.properties.image_hosts]
+type = "array"
+title = "允许外链图片的域名"
+default = []
+items = { type = "string" }
+
+[terms]
+"forum.name" = { zh-CN = "论坛", en = "Forum" }
+"forum.perm.read" = { zh-CN = "浏览论坛", en = "Read the forum" }
+"forum.perm.post" = { zh-CN = "在论坛发帖", en = "Post in the forum" }
+"forum.perm.manage" = { zh-CN = "管理论坛", en = "Manage the forum" }
