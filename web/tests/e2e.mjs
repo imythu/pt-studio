@@ -39,9 +39,19 @@ async function login(page, user) {
   await page.goto(`${BASE}/login`);
   await page.getByLabel('用户名').fill(user);
   await page.getByLabel('密码').fill(PASS);
+  // “保持登录”默认勾选：会话 cookie 带 Max-Age（关闭浏览器后仍有效）
+  if (!(await page.getByRole('checkbox', { name: /保持登录/ }).isChecked())) throw new Error('remember me should default to checked');
   await page.getByRole('button', { name: '登录' }).click();
   await page.waitForURL(`${BASE}/`);
-  await page.getByRole('link', { name: user }).waitFor();
+  await page.getByRole('button', { name: '菜单' }).getByText(user, { exact: true }).waitFor();
+  const sid = (await page.context().cookies()).find((c) => c.httpOnly && c.expires > 0);
+  if (!sid || sid.expires * 1000 < Date.now() + 7 * 86400_000) throw new Error('session cookie is not persistent');
+}
+
+/** 打开顶栏用户菜单（重设计后用户名在菜单按钮里，个人主页 / 插件入口都在菜单中） */
+async function openMenu(page) {
+  const btn = page.getByRole('button', { name: '菜单' });
+  if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
 }
 
 function step(name) {
@@ -68,14 +78,20 @@ try {
   // 2. 登录；用户菜单插槽（invite）
   step('login and user menu slot');
   await login(p, 'web_bob');
-  await p.getByRole('button', { name: '菜单' }).click();
+  await openMenu(p);
   await p.getByRole('link', { name: /邀请（\d+）/ }).waitFor();
+  await p.getByRole('link', { name: '等级说明' }).waitFor();
 
   // 3. 个人页：levels 插槽显示等级
   step('profile slots');
-  await p.getByRole('link', { name: 'web_bob' }).click();
-  await p.getByText('等级').waitFor();
+  await p.getByRole('menuitem', { name: '个人主页' }).click();
+  await p.getByRole('link', { name: '等级' }).waitFor();
   await p.getByText('用户', { exact: true }).waitFor({ timeout: 15000 });
+  // 等级说明页（levels 插件路由）：全部等级与升级条件
+  await p.getByRole('link', { name: '等级' }).click();
+  await p.waitForURL(`${BASE}/p/levels/`);
+  await p.getByRole('columnheader', { name: '升级条件' }).waitFor();
+  await p.getByText('养老族', { exact: true }).waitFor();
 
   // 4. 种子详情：hnr / promotion 插槽、下载链接
   step('torrent detail slots');
@@ -98,27 +114,27 @@ try {
   // 4b. 按资源类型发布：电影（发布名补全 + IMDb 链接）→ 详情字段 → 作品页
   step('typed upload (movie) and group page');
   await p.goto(`${BASE}/upload`);
-  await p.getByLabel('类型').selectOption('movie');
-  await p.locator('input[type=file]').setInputFiles(TORRENT_FILE);
+  await p.getByRole('radio', { name: '电影' }).click();
+  await p.locator('input[name=torrent]').setInputFiles(TORRENT_FILE);
   await p.locator('input[name=title]').fill('Web.Movie.2024.2160p.WEB-DL.H265.DDP5.1-WEB');
   await p.getByText(/更多资源信息/).click();
   await p.getByText('IMDb', { exact: true }).locator('..').locator('input').fill('https://www.imdb.com/title/tt1234567/');
   await p.getByRole('button', { name: '发布' }).click();
   await p.waitForURL(/\/torrents\/\d+$/);
-  await p.getByText('资源信息').waitFor();
+  await p.getByRole('heading', { name: '资源信息', exact: true }).waitFor();
   await p.getByText('2160p', { exact: true }).waitFor();
   await p.getByText('tt1234567', { exact: true }).waitFor();
   await p.getByRole('link', { name: '查看作品' }).click();
   await p.getByRole('heading', { name: /Web Movie/ }).waitFor();
   await p.getByText(/全部版本（1）/).waitFor();
-  // 从 TMDB 搜索预填 → 上传 → 作品页显示转存海报与简介（type-movie 拉取元数据）
+  // 从 TMDB 搜索选定 → 上传 → 作品页显示转存海报与简介（type-movie 拉取元数据）
   step('tmdb prefill and group metadata');
   await p.goto(`${BASE}/upload`);
-  await p.getByLabel('类型').selectOption('movie');
+  await p.getByRole('radio', { name: '电影' }).click();
+  // 输入后自动搜索（无“搜索”按钮），从结果中选定
   await p.locator('input[name=meta_q]').fill('matrix');
-  await p.getByRole('button', { name: 'TMDB' }).click();
   await p.getByRole('button', { name: /黑客帝国/ }).click();
-  await p.locator('input[type=file]').setInputFiles(process.env.PT_TORRENT_FILE2);
+  await p.locator('input[name=torrent]').setInputFiles(process.env.PT_TORRENT_FILE2);
   await p.locator('input[name=title]').fill('The.Matrix.1999.1080p.BluRay.x264-GRP');
   await p.getByRole('button', { name: '发布' }).click();
   await p.waitForURL(/\/torrents\/\d+$/);
@@ -136,7 +152,7 @@ try {
 
   // 通用类型：kind 切换出对应字段
   await p.goto(`${BASE}/upload`);
-  await p.getByLabel('类型').selectOption('generic');
+  await p.getByRole('radio', { name: '其他' }).click();
   await p.getByText('分类', { exact: true }).locator('..').locator('select').selectOption({ label: '游戏' });
   await p.getByText('平台', { exact: true }).waitFor();
   await p.getByText('分类', { exact: true }).locator('..').locator('select').selectOption({ label: '电子书' });
@@ -144,17 +160,21 @@ try {
 
   // 5. 插件页面路由
   step('plugin route /p/invite/');
+  await openMenu(p);
   await p.getByRole('link', { name: /邀请（\d+）/ }).click();
   await p.getByRole('heading', { name: '我的邀请' }).waitFor();
   await p.getByText('我邀请的人').waitFor();
 
-  // 6. 后台：插件列表与设置保存（JSON 编辑器）
+  // 6. 后台：插件列表与设置保存（JSON 页签）
   step('admin settings');
   const a = await newPage();
   await login(a, ADMIN);
   await a.getByRole('link', { name: '管理' }).click();
-  await a.getByRole('cell', { name: 'invite', exact: true }).waitFor();
-  await a.goto(`${BASE}/admin/p/invite/settings`);
+  // 插件卡片列表 → 卡片上的“设置”入口；invite 声明了 schema，切到 JSON 页签编辑
+  const card = a.locator('.plugin-card').filter({ has: a.getByText(/^invite · v/) });
+  await card.getByRole('link', { name: '设置' }).click();
+  await a.waitForURL(`${BASE}/admin/p/invite/settings`);
+  await a.getByRole('tab', { name: 'JSON' }).click();
   const editor = a.locator('textarea');
   await editor.waitFor();
   const cur = JSON.parse(await editor.inputValue());
