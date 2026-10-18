@@ -22,8 +22,10 @@ impl TrustedKeys {
         let mut keys = Vec::new();
         for item in items {
             let item = item.trim();
-            let pk = if item.starts_with("RW") && !item.contains('/') {
-                minisign::PublicKey::from_base64(item)
+            // base64 本身可能含 `/`，先按公钥解析，失败再当路径读
+            let inline = item.starts_with("RW").then(|| minisign::PublicKey::from_base64(item).ok()).flatten();
+            let pk = if let Some(pk) = inline {
+                Ok(pk)
             } else {
                 let text = std::fs::read_to_string(item).map_err(|e| format!("trusted key `{item}`: {e}"))?;
                 minisign::PublicKeyBox::from_string(&text).and_then(minisign::PublicKeyBox::into_public_key)
