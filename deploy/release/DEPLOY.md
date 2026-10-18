@@ -150,7 +150,7 @@ sudo -u pt-studio /opt/pt-studio/bin/pt-server --config /etc/pt-studio/site.toml
 | tracker 地址 | `[plugin.torrent] announce_base_urls` | 改动后新下载的种子生效；已下载的种子不变 |
 | TMDB 元数据 | `[plugin.metadata-tmdb] api_key` | 可选：电影 / 剧集自动补全 |
 | Claude | `[plugin.llm-claude] api_key` | 可选：AI 上传预审、内容审核、站内助手 |
-| 邮件通知 | `[plugin.notify]` | 可选：`email_provider`（http_relay / postmark / sendgrid）、`email_token`、`email_from`、`site_url`、`unsubscribe_secret` |
+| 邮件通知 | `[plugin.notify]` | 可选：`email_provider`（http_relay / postmark / sendgrid / resend）、`email_token`、`email_from`、`site_url`、`unsubscribe_secret` |
 | 运行时设置 | 后台“插件设置” | 注册是否开放、邀请、魔力值、等级、H&R、tracker 间隔与客户端白名单等，修改后数秒内生效 |
 
 tracker（`/etc/pt-studio/tracker.toml`）：

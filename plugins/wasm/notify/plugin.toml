@@ -18,6 +18,7 @@ sensitive_optional = ["user.email"]
 http_outbound = [
   "api.postmarkapp.com",
   "api.sendgrid.com",
+  "api.resend.com",
   { config = "email_endpoint", allow_private = true },
 ]
 

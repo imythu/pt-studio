@@ -1,4 +1,4 @@
-//! 邮件渠道（LLD §1.4、§1.7）：提供方请求构造（http_relay / postmark / sendgrid）、邮件正文、退订令牌。纯函数，便于单元测试。
+//! 邮件渠道（LLD §1.4、§1.7）：提供方请求构造（http_relay / postmark / sendgrid / resend）、邮件正文、退订令牌。纯函数，便于单元测试。
 
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
@@ -32,7 +32,7 @@ impl Config {
         };
         let ok = match c.provider.as_str() {
             "http_relay" => c.endpoint.starts_with("http"),
-            "postmark" | "sendgrid" => !c.token.is_empty(),
+            "postmark" | "sendgrid" | "resend" => !c.token.is_empty(),
             _ => false,
         };
         (ok && c.from.contains('@')).then_some(c)
@@ -154,6 +154,14 @@ pub fn request(c: &Config, m: &Message) -> Request {
                 body: b.to_string().into_bytes(),
             }
         }
+        "resend" => Request {
+            url: "https://api.resend.com/emails".into(),
+            headers: vec![json_ct, ("authorization".into(), format!("Bearer {}", c.token))],
+            body: json!({ "from": c.from, "to": [m.to], "subject": m.subject, "text": m.text, "html": m.html,
+                          "headers": hdrs.iter().map(|(k, v)| (k.clone(), json!(v))).collect::<serde_json::Map<_, _>>() })
+            .to_string()
+            .into_bytes(),
+        },
         // http_relay：站点自建的 HTTP→SMTP 中继
         _ => {
             let mut headers = vec![json_ct];
@@ -311,6 +319,25 @@ mod tests {
         assert_eq!(
             b["headers"]["List-Unsubscribe-Post"],
             "List-Unsubscribe=One-Click"
+        );
+        let r = request(&cfg("resend"), &m);
+        let b: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(
+            (
+                r.url.as_str(),
+                b["to"][0].as_str(),
+                b["headers"]["List-Unsubscribe"].as_str()
+            ),
+            (
+                "https://api.resend.com/emails",
+                Some("u@x.y"),
+                Some("<https://u>")
+            )
+        );
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| k == "authorization" && v == "Bearer tk")
         );
         let r = request(&cfg("http_relay"), &m);
         let b: Value = serde_json::from_slice(&r.body).unwrap();

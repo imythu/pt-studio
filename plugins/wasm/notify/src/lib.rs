@@ -5,7 +5,7 @@
 //! （`<key>.title` / `<key>.body`，参数插值）渲染，存储的 `title` / `body` 为调用方给出的回退文本。
 //! 邮件渠道：按类别与渠道的偏好（security、account 默认开启邮件）、每人每小时上限、待投递记录 + 延迟任务 `deliver`
 //! （投递时经 `ctx.users.get_sensitive` 读取已验证的邮箱，需 `user.email` 授权；4xx 永久失败、429 / 5xx 由内核重试）、
-//! 提供方 http_relay / postmark / sendgrid、一键退订（签名令牌，List-Unsubscribe）。Telegram、Discord、合并通知在后续迭代实现。
+//! 提供方 http_relay / postmark / sendgrid / resend、一键退订（签名令牌，List-Unsubscribe）。Telegram、Discord、合并通知在后续迭代实现。
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -123,7 +123,10 @@ struct Send<'a> {
 
 /// 发送；返回 (已投递, 跳过)
 fn send(s: Send<'_>) -> R<(u32, u32)> {
-    let owner = s.owner.clone().unwrap_or_else(|| invocation::current().caller_plugin);
+    let owner = s
+        .owner
+        .clone()
+        .unwrap_or_else(|| invocation::current().caller_plugin);
     if !s.key.starts_with(&format!("{owner}.")) {
         return Err(err(
             "notify.template_not_owned",
@@ -618,10 +621,22 @@ fn on_challenge(p: &Value) -> R<()> {
     let zh = p["locale"].as_str().unwrap_or("zh-CN").starts_with("zh");
     let purpose = p["purpose"].as_str().unwrap_or("");
     let (title, body) = match (purpose, zh) {
-        ("password_reset", true) => ("找回密码", "有人（希望是你）申请重置这个账号的密码。点击下面的链接设置新密码，链接 1 小时内有效、只能使用一次。\n如果不是你本人操作，请忽略这封邮件，密码不会改变。"),
-        ("password_reset", false) => ("Reset your password", "Someone (hopefully you) asked to reset the password for this account. Open the link below to choose a new one; it works once and expires in an hour.\nIf this wasn't you, ignore this email and your password stays the same."),
-        ("email_verify", true) => ("验证邮箱", "请点击下面的链接验证你的邮箱地址，链接 48 小时内有效。"),
-        ("email_verify", false) => ("Verify your email address", "Open the link below to verify your email address. It expires in 48 hours."),
+        ("password_reset", true) => (
+            "找回密码",
+            "有人（希望是你）申请重置这个账号的密码。点击下面的链接设置新密码，链接 1 小时内有效、只能使用一次。\n如果不是你本人操作，请忽略这封邮件，密码不会改变。",
+        ),
+        ("password_reset", false) => (
+            "Reset your password",
+            "Someone (hopefully you) asked to reset the password for this account. Open the link below to choose a new one; it works once and expires in an hour.\nIf this wasn't you, ignore this email and your password stays the same.",
+        ),
+        ("email_verify", true) => (
+            "验证邮箱",
+            "请点击下面的链接验证你的邮箱地址，链接 48 小时内有效。",
+        ),
+        ("email_verify", false) => (
+            "Verify your email address",
+            "Open the link below to verify your email address. It expires in 48 hours.",
+        ),
         _ => return Ok(()),
     };
     let r = sql::query(

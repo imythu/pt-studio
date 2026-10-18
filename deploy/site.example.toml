@@ -68,7 +68,7 @@ instances = [{ id = "m1", url = "http://127.0.0.1:7700", api_key = "@MEILI_MASTE
 # [plugin.metadata-tmdb]
 # api_key = "..."
 
-# 可选：邮件通知（http_relay / postmark / sendgrid）
+# 可选：邮件通知（http_relay / postmark / sendgrid / resend）
 # [plugin.notify]
 # email_provider = "postmark"
 # email_token = "..."
