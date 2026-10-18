@@ -14,11 +14,14 @@ h1, h2, .brand, .page-title, .step-h, .greeting h1, .hero h1 { font-family: var(
 .mainnav a { display: inline-flex; align-items: center; color: var(--pt-color-muted); font-weight: 600; font-size: 14.5px; padding: 0 12px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
 .mainnav a:hover { color: var(--pt-color-fg); }
 .mainnav a.active { color: var(--pt-color-fg); border-bottom-color: var(--pt-color-accent); }
-.nav-search { display: flex; align-items: center; gap: 8px; padding: 0 14px; height: 38px; flex: 0 1 300px; min-width: 140px; border-radius: 999px;
+.nav-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 38px; flex: 0 1 300px; min-width: 140px; border-radius: 999px;
   background: var(--pt-color-surface-2); border: 1px solid transparent; color: var(--pt-color-muted); transition: border-color .15s, box-shadow .15s, background .15s; }
 .nav-search:focus-within { background: var(--pt-color-surface); border-color: var(--pt-color-accent); box-shadow: var(--pt-ring); }
 .nav-search input { border: 0; background: transparent; outline: none; font: inherit; color: var(--pt-color-fg); width: 100%; min-width: 0; }
 .nav-search input::-webkit-search-cancel-button { display: none; }
+.nav-kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; font-family: var(--pt-mono); font-size: 11px; font-weight: 600; color: var(--pt-color-muted); background: var(--pt-color-surface); border: 1px solid var(--pt-color-border-strong); border-radius: 4px; pointer-events: none; line-height: 1; flex-shrink: 0; }
+.nav-clear { border: 0; background: transparent; color: var(--pt-color-muted); cursor: pointer; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; flex-shrink: 0; transition: color .15s, background .15s; }
+.nav-clear:hover { color: var(--pt-color-fg); background: var(--pt-color-surface-2); }
 .suggest { position: relative; display: block; flex: 1; min-width: 0; }
 .nav-search .suggest input { width: 100%; }
 .suggest-list { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0; min-width: min(320px, 90vw); margin: 0; padding: 4px; list-style: none;
@@ -208,13 +211,23 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
   :root:not([data-theme="light"]) .type-anime { background: #3b1a2e; color: #ff9fd0; }
   :root:not([data-theme="light"]) .type-music { background: #16352f; color: #74c9b5; }
 }
-.swarm { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
-.swarm i { color: var(--pt-color-border-strong); font-style: normal; }
+.swarm { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 999px; background: var(--pt-color-surface-2); font-size: 12.5px; border: 1px solid var(--pt-color-border); }
+.swarm i { color: var(--pt-color-border-strong); font-style: normal; opacity: .7; }
 .swarm b { font-weight: 650; }
 .swarm .seed { color: var(--pt-color-success); }
 .swarm .leech { color: var(--pt-color-sky); }
 .swarm .done { color: var(--pt-color-muted); }
-.swarm .zero { opacity: .45; }
+.swarm .zero { opacity: .4; }
+.t-quick-actions { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; opacity: 0; transition: opacity .15s ease; }
+.torrent-table .pt-table tbody tr:hover .t-quick-actions { opacity: 1; }
+.infohash-meta { display: inline-flex; align-items: center; gap: 6px; }
+.infohash-meta code { font-size: 12px; background: var(--pt-color-surface-2); padding: 2px 6px; border-radius: 4px; }
+.filter-clear-all { font-size: 12px; color: var(--pt-color-primary); background: none; border: 0; padding: 2px 8px; border-radius: 999px; cursor: pointer; font-weight: 550; }
+.filter-clear-all:hover { background: var(--pt-color-primary-soft); }
+.empty-actions { margin-top: 10px; }
+@media (max-width: 860px) {
+  .t-quick-actions { opacity: 1; }
+}
 
 /* ============ 种子详情 ============ */
 .t-head { background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius-lg); padding: 20px 22px; margin-bottom: 14px; box-shadow: var(--pt-shadow-sm); position: relative; }
@@ -252,8 +265,11 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .shots button { padding: 0; border: 0; background: var(--pt-color-surface-2); border-radius: var(--pt-radius); overflow: hidden; cursor: zoom-in; line-height: 0; aspect-ratio: 16 / 10; }
 .shots img { width: 100%; height: 100%; object-fit: cover; transition: transform .2s; }
 .shots button:hover img { transform: scale(1.04); }
-.lightbox { position: fixed; inset: 0; z-index: 100; background: rgb(10 14 26 / .85); display: grid; place-items: center; padding: 20px; cursor: zoom-out; animation: pt-toast-in .15s ease-out; }
-.lightbox img { max-width: min(96vw, 1400px); max-height: 92vh; border-radius: 8px; box-shadow: var(--pt-shadow-lg); }
+.lightbox { position: fixed; inset: 0; z-index: 100; background: rgb(10 14 26 / .88); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: grid; place-items: center; padding: 20px; cursor: zoom-out; animation: pt-toast-in .15s ease-out; }
+.lightbox img { max-width: min(96vw, 1400px); max-height: 92vh; border-radius: 8px; box-shadow: var(--pt-shadow-lg); cursor: default; }
+.lightbox-close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgb(255 255 255 / .15); color: #fff; display: grid; place-items: center; cursor: pointer; transition: background .15s, transform .15s; }
+.lightbox-close:hover { background: rgb(255 255 255 / .3); transform: scale(1.05); }
+.lightbox-hint { position: absolute; bottom: 20px; color: rgb(255 255 255 / .7); font-size: 13px; font-weight: 500; background: rgb(0 0 0 / .45); padding: 4px 14px; border-radius: 999px; pointer-events: none; }
 .group-meta { display: flex; gap: var(--pt-space-4); margin-bottom: var(--pt-space-4); }
 .group-meta .poster { width: 160px; height: auto; border-radius: var(--pt-radius); flex-shrink: 0; box-shadow: var(--pt-shadow); }
 .attribution { margin-top: var(--pt-space-3); }

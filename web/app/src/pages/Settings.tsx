@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Spinner, Table, Tabs, useToast } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, CopyButton, Field, Input, Spinner, Table, Tabs, useToast } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { useManifest } from '../manifest';
 import { createCredential, webauthnSupported } from '../webauthn';
@@ -304,7 +304,10 @@ function TwoFactorCard() {
           <pre className="pt-mono" data-testid="recovery-codes">
             {codes.join('\n')}
           </pre>
-          <Button onClick={() => setCodes(null)}>{t('ui.two_factor.codes_saved')}</Button>
+          <div className="pt-row" style={{ marginTop: '8px', marginBottom: '8px' }}>
+            <CopyButton text={codes.join('\n')} label={t('ui.common.copy')} />
+            <Button onClick={() => setCodes(null)}>{t('ui.two_factor.codes_saved')}</Button>
+          </div>
         </div>
       )}
       {!st ? (
@@ -326,7 +329,8 @@ function TwoFactorCard() {
           {/* 服务端生成的二维码 SVG（只含 otpauth URI） */}
           <div className="qr" dangerouslySetInnerHTML={{ __html: setup.qr_svg }} />
           <p className="small">
-            {t('ui.two_factor.manual')} <code className="pt-mono" data-testid="totp-secret">{setup.secret}</code>
+            {t('ui.two_factor.manual')} <code className="pt-mono" data-testid="totp-secret">{setup.secret}</code>{' '}
+            <CopyButton text={setup.secret} title={t('ui.common.copy')} />
           </p>
           <Field label={t('ui.two_factor.code')}>
             <Input name="totp_code" autoComplete="one-time-code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required maxLength={6} />
@@ -462,7 +466,11 @@ function PasskeyTab() {
           {passkey ?? '••••••••••••••••••••••••••••••••'}
         </code>
       </p>
-      <Button onClick={reveal}>{t('ui.settings.reveal')}</Button>{' '}
+      {passkey ? (
+        <CopyButton text={passkey} label={t('ui.common.copy')} />
+      ) : (
+        <Button onClick={reveal}>{t('ui.settings.reveal')}</Button>
+      )}{' '}
       <Button variant="danger" onClick={reset}>
         {t('ui.settings.passkey_reset')}
       </Button>

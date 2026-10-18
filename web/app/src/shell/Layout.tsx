@@ -5,6 +5,7 @@ import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@pt-studio/sdk';
+import { BackToTop, SkipLink } from '@pt-studio/ui-kit';
 import { Icon, Logo, type IconName } from '../art';
 import { useSession } from '../session';
 import { useInstalled, useManifest } from '../manifest';
@@ -18,11 +19,24 @@ function currentTheme(): 'dark' | 'light' {
 
 function toggleTheme(): 'dark' | 'light' {
   const next = currentTheme() === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = next;
-  try {
-    localStorage.setItem('pt-theme', next);
-  } catch {
-    /* 隐私模式 */
+  const apply = () => {
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem('pt-theme', next);
+    } catch {
+      /* 隐私模式 */
+    }
+  };
+
+  const doc = document as unknown as { startViewTransition?: (fn: () => void) => void };
+  if (typeof doc.startViewTransition === 'function' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    doc.startViewTransition(apply);
+  } else {
+    document.documentElement.classList.add('theme-transition');
+    apply();
+    window.setTimeout(() => {
+      document.documentElement.classList.remove('theme-transition');
+    }, 280);
   }
   return next;
 }
@@ -50,6 +64,25 @@ function NavSearch() {
   const t = useT();
   const nav = useNavigate();
   const [q, setQ] = useState('');
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    const handleKey = (e: globalThis.KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+      if (isInput) return;
+
+      if (e.key === '/' || ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K'))) {
+        e.preventDefault();
+        const input = document.querySelector<HTMLInputElement>('input[name="nav_q"]');
+        input?.focus();
+        input?.select();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
+
   return (
     <form
       className="nav-search"
@@ -60,7 +93,29 @@ function NavSearch() {
       }}
     >
       <Icon name="search" size={16} />
-      <SuggestInput type="search" name="nav_q" value={q} onValue={setQ} placeholder={t('ui.torrent.search')} aria-label={t('ui.torrent.search')} />
+      <SuggestInput
+        type="search"
+        name="nav_q"
+        value={q}
+        onValue={setQ}
+        placeholder={t('ui.torrent.search')}
+        aria-label={t('ui.torrent.search')}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+      />
+      {q ? (
+        <button
+          type="button"
+          className="nav-clear"
+          onClick={() => setQ('')}
+          aria-label={t('ui.common.cancel')}
+          title={t('ui.common.cancel')}
+        >
+          <Icon name="close" size={14} />
+        </button>
+      ) : (
+        !focused && <kbd className="nav-kbd">/</kbd>
+      )}
     </form>
   );
 }
@@ -239,6 +294,7 @@ export function Layout() {
   );
   return (
     <div className={`app${s.me ? ' has-tabbar' : ''}`}>
+      <SkipLink targetId="main-content">{t('ui.common.skip_to_content')}</SkipLink>
       <header className="topbar">
         <div className="topbar-in">
           <Link to="/" className="brand">
@@ -295,7 +351,7 @@ export function Layout() {
           </div>
         </div>
       </header>
-      <main className={`content${bare ? ' content-bare' : ''}`}>
+      <main id="main-content" className={`content${bare ? ' content-bare' : ''}`}>
         {s.me && !s.emailVerified && <VerifyBanner />}
         {s.me && s.twoFactorNeeded && (
           <p className="notice notice-warn" role="status">
@@ -308,6 +364,7 @@ export function Layout() {
         <span>{m.site.name} · Powered by PT Studio</span>
       </footer>
       <TabBar />
+      <BackToTop title={t('ui.common.back_to_top')} />
     </div>
   );
 }

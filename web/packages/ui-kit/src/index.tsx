@@ -1,7 +1,7 @@
 // @pt-studio/ui-kit：基础组件（样式见 styles.css，全部基于主题令牌）。
 
 import DOMPurify from 'dompurify';
-import { createContext, isValidElement, useCallback, useContext, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from 'react';
+import { createContext, isValidElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from 'react';
 
 export function cx(...xs: (string | false | null | undefined)[]): string {
   return xs.filter(Boolean).join(' ');
@@ -349,21 +349,65 @@ interface ToastItem {
 
 const ToastCtx = createContext<(msg: string, kind?: ToastKind) => void>(() => undefined);
 
+function ToastEntry({ item, onDismiss }: { item: ToastItem; onDismiss: (id: number) => void }) {
+  const [hovered, setHovered] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const startTimer = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => onDismiss(item.id), 4000);
+  }, [item.id, onDismiss]);
+
+  useEffect(() => {
+    if (!hovered) {
+      startTimer();
+    } else if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [hovered, startTimer]);
+
+  const icon = item.kind === 'success' ? '✓' : item.kind === 'error' ? '!' : 'ℹ';
+
+  return (
+    <div
+      role="status"
+      className={cx('pt-toast', `pt-toast-${item.kind}`)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <span className="pt-toast-icon" aria-hidden="true">{icon}</span>
+      <div className="pt-toast-msg">{item.msg}</div>
+      <button
+        type="button"
+        className="pt-toast-close"
+        onClick={() => onDismiss(item.id)}
+        aria-label="关闭提示"
+        title="关闭"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export function ToastHost({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
+  const dismiss = useCallback((id: number) => {
+    setItems((xs) => xs.filter((x) => x.id !== id));
+  }, []);
   const push = useCallback((msg: string, kind: ToastKind = 'info') => {
     const id = Date.now() + Math.random();
     setItems((xs) => [...xs, { id, msg, kind }]);
-    setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), 4000);
   }, []);
   return (
     <ToastCtx.Provider value={push}>
       {children}
       <div className="pt-toasts" aria-live="polite">
         {items.map((t) => (
-          <div key={t.id} className={cx('pt-toast', `pt-toast-${t.kind}`)}>
-            {t.msg}
-          </div>
+          <ToastEntry key={t.id} item={t} onDismiss={dismiss} />
         ))}
       </div>
     </ToastCtx.Provider>
@@ -372,4 +416,120 @@ export function ToastHost({ children }: { children: ReactNode }) {
 
 export function useToast(): (msg: string, kind?: ToastKind) => void {
   return useContext(ToastCtx);
+}
+
+// ---------------- 快捷复制 ----------------
+
+export function CopyButton({
+  text,
+  label,
+  copiedLabel,
+  title,
+  variant = 'default',
+  className,
+  onCopied,
+}: {
+  text: string;
+  label?: ReactNode;
+  copiedLabel?: ReactNode;
+  title?: string;
+  variant?: 'default' | 'primary' | 'danger' | 'ghost';
+  className?: string;
+  onCopied?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      onCopied?.();
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* 忽略复制失败 */
+    }
+  }, [text, onCopied]);
+
+  return (
+    <button
+      type="button"
+      className={cx('pt-btn', 'pt-copy-btn', `pt-btn-${variant}`, copied && 'copied', className)}
+      onClick={copy}
+      title={title ?? (copied ? '已复制' : '复制')}
+      aria-label={title ?? (copied ? '已复制' : '复制')}
+      aria-live="polite"
+    >
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+      {copied ? (copiedLabel ?? (label ? '已复制' : null)) : label}
+    </button>
+  );
+}
+
+// ---------------- 回到顶部 ----------------
+
+export function BackToTop({ threshold = 320, title = '回到顶部' }: { threshold?: number; title?: string }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    let ticking = false;
+    const onScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          setVisible(window.scrollY > threshold);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [threshold]);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  return (
+    <button
+      type="button"
+      className={cx('pt-back-to-top', visible && 'visible')}
+      onClick={scrollToTop}
+      title={title}
+      aria-label={title}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 19V5M5 12l7-7 7 7" />
+      </svg>
+    </button>
+  );
+}
+
+// ---------------- 跳至主要内容（无障碍） ----------------
+
+export function SkipLink({ targetId = 'main-content', children = '跳至主要内容' }: { targetId?: string; children?: ReactNode }) {
+  return (
+    <a href={`#${targetId}`} className="pt-skip-link">
+      {children}
+    </a>
+  );
 }

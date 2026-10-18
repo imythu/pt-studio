@@ -73,8 +73,14 @@ export function SuggestInput({ value, onValue, className, ...rest }: Omit<InputH
           onValue(e.target.value);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        onFocus={(e) => {
+          setOpen(true);
+          rest.onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setOpen(false);
+          rest.onBlur?.(e);
+        }}
         onKeyDown={key}
       />
       {hits.length > 0 && (

@@ -6,7 +6,7 @@ import { api, apiFetch, parse, renderPreview } from '@pt-studio/sdk';
 import { Slot, useSlotColumns } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
 import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Schema } from '@pt-studio/schema-form';
-import { Badge, Button, Card, Empty, Field, Input, MarkdownEditor, SkeletonRows, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, CopyButton, Empty, Field, Input, MarkdownEditor, SkeletonRows, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
 import { HeroArt, Icon, Logo } from '../art';
 import { Hint, DownloadGuide, GettingStarted, useFirstTime } from '../help';
 import { ApiError } from '@pt-studio/sdk';
@@ -283,6 +283,21 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
               ))}
               <Slot name="torrent.list.row_badges" ctx={{ torrent: r }} />
             </div>
+            <div className="t-quick-actions">
+              <a
+                className="pt-copy-btn"
+                href={`/api/p/torrent/v1/torrents/${r.id}/download`}
+                download
+                title={t('ui.torrent.download')}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Icon name="download" size={13} /> {t('ui.torrent.download')}
+              </a>
+              <CopyButton
+                text={typeof window !== 'undefined' ? `${window.location.origin}/api/p/torrent/v1/torrents/${r.id}/download` : `/api/p/torrent/v1/torrents/${r.id}/download`}
+                title={t('ui.torrent.copy_link')}
+              />
+            </div>
             </div>
           </div>
         );
@@ -316,6 +331,16 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
                         {x}
                       </span>
                     ))}
+                    <a
+                      className="pt-copy-btn"
+                      style={{ marginLeft: 'auto', padding: '2px 8px' }}
+                      href={`/api/p/torrent/v1/torrents/${r.id}/download`}
+                      download
+                      title={t('ui.torrent.download')}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Icon name="download" size={13} />
+                    </a>
                   </div>
                   <b className="t-card-title">{zhName(r) ?? r.title}</b>
                   {zhName(r) && <span className="t-card-sub">{r.title}</span>}
@@ -411,6 +436,19 @@ export function TorrentList() {
               {a.val} <Icon name="close" size={14} />
             </button>
           ))}
+          <button
+            type="button"
+            className="filter-clear-all"
+            onClick={() => {
+              const p = new URLSearchParams(params);
+              for (const [k] of params.entries()) {
+                if (k.startsWith('f.') && k !== 'f.type_id') p.delete(k);
+              }
+              setParams(p);
+            }}
+          >
+            {t('ui.torrent.clear_filters')}
+          </button>
         </div>
       )}
       <div className={`with-sidebar list-layout${showFilters ? ' filters-open' : ''}`}>
@@ -421,9 +459,30 @@ export function TorrentList() {
           {res.data && (
             <>
               <p className="result-count">{t('ui.torrent.count', { n: res.data.estimated_total })}</p>
-              <Card className="list-card">
-                <TorrentTable rows={res.data.hits.map((h) => h.document)} highlights={new Map(res.data.hits.map((h) => [h.id, h.highlights]))} />
-              </Card>
+              {res.data.hits.length === 0 ? (
+                <Card className="list-card">
+                  <Empty>
+                    <span>{t('ui.torrent.no_results')}</span>
+                    {(q || active.length > 0) && (
+                      <div className="empty-actions">
+                        <Button
+                          variant="primary"
+                          onClick={() => {
+                            setQ('');
+                            setParams(new URLSearchParams());
+                          }}
+                        >
+                          {t('ui.torrent.reset_search')}
+                        </Button>
+                      </div>
+                    )}
+                  </Empty>
+                </Card>
+              ) : (
+                <Card className="list-card">
+                  <TorrentTable rows={res.data.hits.map((h) => h.document)} highlights={new Map(res.data.hits.map((h) => [h.id, h.highlights]))} />
+                </Card>
+              )}
             </>
           )}
         </div>
@@ -569,7 +628,11 @@ function Lightbox({ src, onClose }: { src: string | null; onClose(): void }) {
   if (!src) return null;
   return (
     <div className="lightbox" role="dialog" aria-modal="true" onClick={onClose}>
-      <img src={src} alt="" />
+      <img src={src} alt="" onClick={(e) => e.stopPropagation()} />
+      <button type="button" className="lightbox-close" onClick={onClose} aria-label="关闭">
+        <Icon name="close" size={20} />
+      </button>
+      <span className="lightbox-hint">ESC 退出</span>
     </div>
   );
 }
@@ -727,13 +790,28 @@ export function TorrentPage() {
               )}
             </span>
             <span>{new Date(d.created_at).toLocaleString()}</span>
+            {d.info_hash_v1 && (
+              <span className="infohash-meta">
+                <span className="pt-muted">Hash:</span>
+                <code className="pt-mono">{d.info_hash_v1.slice(0, 8)}…{d.info_hash_v1.slice(-6)}</code>
+                <CopyButton text={d.info_hash_v1} title={t('ui.torrent.copy_hash')} />
+              </span>
+            )}
           </div>
           {overview && <p className="t-overview">{overview}</p>}
           <div className="t-actions">
             {d.can_download ? (
-              <a className="pt-btn pt-btn-primary btn-lg" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download onClick={() => guide.trigger()}>
-                <Icon name="download" size={18} /> {t('ui.torrent.download')}
-              </a>
+              <>
+                <a className="pt-btn pt-btn-primary btn-lg" href={`/api/p/torrent/v1/torrents/${d.id}/download`} download onClick={() => guide.trigger()}>
+                  <Icon name="download" size={18} /> {t('ui.torrent.download')}
+                </a>
+                <CopyButton
+                  variant="default"
+                  className="btn-lg"
+                  text={typeof window !== 'undefined' ? `${window.location.origin}/api/p/torrent/v1/torrents/${d.id}/download` : `/api/p/torrent/v1/torrents/${d.id}/download`}
+                  label={t('ui.torrent.copy_link')}
+                />
+              </>
             ) : (
               <span className="pt-muted small">{t('ui.torrent.cannot_download')}</span>
             )}
