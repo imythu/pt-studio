@@ -457,6 +457,33 @@ try {
   await p.getByRole('button', { name: '在浏览器中复算' }).click();
   await p.getByText(/验证通过/).waitFor();
 
+  // 6l. 群发公告与联系管理组：后台发布公告 → 首页横幅；用户提交工单 → 员工回复 → 用户看到回复
+  step('broadcasts and tickets');
+  await a.goto(`${BASE}/admin/p/messages/`);
+  await a.locator('input[name=broadcast_subject]').fill('网页公告');
+  await a.locator('textarea[name=broadcast_body]').fill('今晚 **维护**');
+  await a.getByRole('button', { name: '发布' }).click();
+  await a.getByText('公告已发布').waitFor();
+  await p.goto(`${BASE}/`);
+  await p.locator('[data-testid=broadcast]', { hasText: '网页公告' }).waitFor();
+  await p.getByRole('button', { name: '知道了' }).click();
+  await p.locator('[data-testid=broadcast]').waitFor({ state: 'detached' });
+  await p.goto(`${BASE}/p/tickets/`);
+  await p.locator('select[name=ticket_category]').selectOption('torrent');
+  await p.locator('input[name=ticket_subject]').fill('种子无法下载');
+  await p.locator('textarea[name=ticket_body]').fill('提示 tracker 错误');
+  await p.getByRole('button', { name: '提交' }).click();
+  await p.waitForURL(/\/p\/tickets\/\d+$/);
+  const ticketUrl = p.url();
+  await a.goto(`${BASE}/admin/p/tickets/`);
+  await a.getByRole('link', { name: '种子无法下载' }).click();
+  await a.locator('textarea[name=ticket_reply]').fill('请重新下载种子文件');
+  await a.getByRole('button', { name: '发送' }).click();
+  await a.getByText('请重新下载种子文件').waitFor();
+  await p.goto(ticketUrl);
+  await p.getByText('请重新下载种子文件').waitFor();
+  await p.getByText('等待用户').waitFor();
+
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);

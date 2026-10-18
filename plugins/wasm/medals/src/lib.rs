@@ -103,7 +103,7 @@ fn grant(g: &Grant) -> R<Value> {
     if let Some(r) = sql::query("SELECT id FROM grants WHERE source_ref = $1", &[SqlValue::Text(g.source_ref.clone())])?.rows.first() {
         return Ok(json!({ "grant_id": r.int(0), "created": false }));
     }
-    let it = sql::query("SELECT kind, name, max_holders, validity_days, active FROM items WHERE id = $1 FOR UPDATE", &[SqlValue::Int(g.item)])?;
+    let it = sql::query("SELECT kind, name, max_holders, validity_days, active, description FROM items WHERE id = $1 FOR UPDATE", &[SqlValue::Int(g.item)])?;
     let Some(it) = it.rows.first() else { return Err(err("kernel.not_found", "medal not found")) };
     if !it.bool(4).unwrap_or(false) {
         return Err(err("medals.inactive", "this medal is disabled"));
@@ -153,7 +153,8 @@ fn grant(g: &Grant) -> R<Value> {
             "ctx.notify",
             "send",
             &json!({ "user_id": g.user, "template_key": "medals.granted", "category": "account",
-                     "title": format!("你获得了「{name}」 / You earned \"{name}\""), "body": g.reason, "link": "/p/medals/",
+                     "title": format!("你获得了「{name}」 / You earned \"{name}\""),
+                     "body": if g.source == "achievement" { it.text(5).unwrap_or_default() } else { g.reason.to_owned() }, "link": "/p/medals/",
                      "args": { "medal_id": g.item, "name": name }, "idempotency_key": format!("medals:grant:{id}") })
             .to_string(),
         );

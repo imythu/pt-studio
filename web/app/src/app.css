@@ -525,6 +525,12 @@ html, body { overflow-x: clip; }
 .medal-ach { display: flex; gap: 10px; align-items: flex-start; }
 .medal-ach > div { flex: 1; min-width: 0; }
 .medal-wall summary { cursor: pointer; color: var(--pt-color-muted); font-size: 0.9em; }
+.ticket-staff { border-left: 3px solid var(--pt-color-primary); }
+.ticket-internal { border-left: 3px solid var(--pt-color-gold-soft); background: var(--pt-color-surface); }
+.broadcast summary { cursor: pointer; }
+.broadcast + .broadcast { margin-top: 8px; }
+.ledger-in { color: var(--pt-color-accent); font-variant-numeric: tabular-nums; }
+.ledger-out { color: var(--pt-color-muted); font-variant-numeric: tabular-nums; }
 .mediainfo-text { max-height: 480px; overflow: auto; white-space: pre; padding: 10px 12px; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); }
 .bookmarks-action select.pt-input { width: auto; display: inline-block; }
 .attachments-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 12px; }

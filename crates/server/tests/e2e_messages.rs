@@ -63,11 +63,9 @@ async fn messages_end_to_end() {
     // 评论 @提醒 → 通知（带链接与模板参数）
     let c1 = comment(&app, &alice, &target, json!({ "body": "@ms_bob 感谢分享" })).await;
     let n = inbox(&app, &bob).await;
-    assert_eq!(
-        (n["unread"].as_i64(), n["items"][0]["template_key"].as_str()),
-        (Some(1), Some("comments.mentioned")),
-        "{n}"
-    );
+    // 只看评论相关的通知（发布种子还可能带来勋章等其他插件的通知）
+    let mentions = n["items"].as_array().unwrap().iter().filter(|x| x["template_key"].as_str().is_some_and(|k| k.starts_with("comments."))).count();
+    assert_eq!((mentions, n["items"][0]["template_key"].as_str()), (1, Some("comments.mentioned")), "{n}");
     assert_eq!(n["items"][0]["args"]["user"], "ms_alice");
     assert_eq!(
         n["items"][0]["link"],

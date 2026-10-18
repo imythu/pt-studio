@@ -144,6 +144,9 @@ JSON 示例：
 | `lottery.ticket_bought` | lottery | `user:<id>` | `round_id, user_id, tickets, cost, first_no, currency` |
 | `lottery.round_drawn` | lottery | `global` | `round_id, winners[{user_id, tier, ticket_no, prize}]`（最多 100 条）、`winners_truncated` |
 | `lottery.round_cancelled` | lottery | `global` | `round_id, reason, refunded_batches` |
+| `message.broadcast_sent` | messages | `global` | `broadcast_id, subject, min_class` |
+| `ticket.created` | tickets | `user:<id>` | `ticket_id, user_id, category` |
+| `ticket.closed` | tickets | `user:<id>` | `ticket_id, user_id, by` |
 | `medal.granted` | medals | `user:<id>` | `user_id, medal_id, reason` |
 | `medal.revoked` | medals | `user:<id>` | `user_id, medal_id, reason` |
 

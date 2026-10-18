@@ -78,7 +78,7 @@ WASM 插件通过 `pt:plugin` 的宿主接口使用；Native 插件通过 `Ctx` 
 | `ctx.mediainfo` | mediainfo | single | `parse(text) -> MediaInfo`、`parse_nfo(text) -> Nfo` | — | 0.1.0 |
 | `ctx.comments` | comments | single | `count(target) -> u64`、`count_many(targets)`、`exists(id)`（目标、作者、状态、摘要）、`get(id)`（原文与纯文本，需 `read:raw`）、`create(author_id, target, body)`、`delete(id, reason)` | `read:raw`、`write` | 0.1.0 |
 | `ctx.forum` | forum | single | `create_topic(forum_id, author_id, title, body) -> topic_id`、`get_topic(id)`、`link_topic(target, topic_id)` | `write` | 0.1.0 |
-| `ctx.messages` | messages | single | `send_system(user_id, subject, body)`（Markdown）、`unread_count(user_id)` | `send` | 0.1.0 |
+| `ctx.messages` | messages | single | `send_system(user_id, subject, body)`（Markdown）、`unread_count(user_id)`、`broadcast(subject, body, min_class?, expires_at?, idempotency_key)` | `send`、`broadcast` | 0.1.0 |
 | `ctx.requests` | requests | single | `get(id)`、`fill(request_id, torrent_id, filler_id)` | `write` | 0.1.0 |
 | `ctx.subtitles` | subtitles | single | `list_for(torrent_id)` | — | 0.1.0 |
 | `ctx.moderation` | moderation | single | `submit(target, reason)`、`decide(target, Decision, note)`、`queue_stats()` | `write` | 0.1.0 |

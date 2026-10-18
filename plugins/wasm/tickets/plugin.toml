@@ -1,0 +1,124 @@
+id = "tickets"
+name = "联系管理组"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "联系管理组（工单）：用户按类别提交问题（账号、种子、申诉、建议），员工队列认领、回复、内部备注、关闭；双方回复互相通知"
+
+requires = ["ctx.rbac@^0.1"]
+optional_requires = ["ctx.notify@^0.1"]
+publishes = ["ticket.created", "ticket.closed"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.notify" = ["send"]
+
+[[subscriptions]]
+name = "on_user_deleted"
+event = "user.deleted"
+
+[[http.routes]]
+id = "mine"
+method = "GET"
+path = "/v1/tickets"
+auth = "user"
+
+[[http.routes]]
+id = "create"
+method = "POST"
+path = "/v1/tickets"
+auth = "user"
+permission = "tickets.create"
+rate_limit = "user:5/h"
+
+[[http.routes]]
+id = "get"
+method = "GET"
+path = "/v1/tickets/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "reply"
+method = "POST"
+path = "/v1/tickets/{id}/messages"
+auth = "user"
+rate_limit = "user:30/h"
+
+[[http.routes]]
+id = "close"
+method = "POST"
+path = "/v1/tickets/{id}/close"
+auth = "user"
+
+[[http.routes]]
+id = "reopen"
+method = "POST"
+path = "/v1/tickets/{id}/reopen"
+auth = "user"
+rate_limit = "user:10/h"
+
+[[http.routes]]
+id = "queue"
+method = "GET"
+path = "/v1/admin/tickets"
+auth = "admin"
+permission = "tickets.handle"
+
+[[http.routes]]
+id = "assign"
+method = "POST"
+path = "/v1/admin/tickets/{id}/assign"
+auth = "admin"
+permission = "tickets.handle"
+
+[[permissions]]
+name = "tickets.create"
+description_term = "tickets.perm.create"
+default_roles = ["user"]
+
+[[permissions]]
+name = "tickets.handle"
+description_term = "tickets.perm.handle"
+default_roles = ["moderator"]
+
+[error_codes]
+"tickets.too_many_open" = 409
+"tickets.closed" = 409
+"tickets.reopen_expired" = 409
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu", "admin.dashboard.widgets"]
+routes = ["/p/tickets/*", "/admin/p/tickets/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["max_open", "reopen_days"]
+
+[settings_schema.properties.max_open]
+type = "integer"
+minimum = 1
+maximum = 20
+default = 3
+title = "每人同时未关闭的工单数上限"
+
+[settings_schema.properties.reopen_days]
+type = "integer"
+minimum = 0
+maximum = 90
+default = 14
+title = "关闭后多少天内用户可以重新打开"
+
+[terms]
+"tickets.name" = { zh-CN = "联系管理组", en = "Contact staff" }
+"tickets.perm.create" = { zh-CN = "提交工单", en = "Open support tickets" }
+"tickets.perm.handle" = { zh-CN = "处理工单", en = "Handle support tickets" }

@@ -5,12 +5,12 @@ kind = "wasm"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "站内信：会话、回复、系统消息、拉黑与接收设置、举报某条消息（ctx.messages）"
+description = "站内信：会话、回复、系统消息、群发公告、拉黑与接收设置、举报某条消息（ctx.messages）"
 
 provides = ["ctx.messages@0.1.0"]
 requires = ["ctx.rbac@^0.1"]
 optional_requires = ["ctx.reports@^0.1"]
-publishes = ["message.sent"]
+publishes = ["message.sent", "message.broadcast_sent"]
 
 [capabilities]
 sql = true
@@ -105,6 +105,46 @@ auth = "user"
 permission = "reports.create"
 rate_limit = "user:20/m"
 
+[[http.routes]]
+id = "broadcasts"
+method = "GET"
+path = "/v1/broadcasts"
+auth = "user"
+
+[[http.routes]]
+id = "broadcasts_read"
+method = "POST"
+path = "/v1/broadcasts/read"
+auth = "user"
+
+[[http.routes]]
+id = "broadcast_hide"
+method = "DELETE"
+path = "/v1/broadcasts/{id}"
+auth = "user"
+
+[[http.routes]]
+id = "admin_broadcasts"
+method = "GET"
+path = "/v1/admin/broadcasts"
+auth = "admin"
+permission = "messages.broadcast"
+
+[[http.routes]]
+id = "admin_broadcast_create"
+method = "POST"
+path = "/v1/admin/broadcasts"
+auth = "admin"
+permission = "messages.broadcast"
+rate_limit = "user:10/m"
+
+[[http.routes]]
+id = "admin_broadcast_revoke"
+method = "POST"
+path = "/v1/admin/broadcasts/{id}/revoke"
+auth = "admin"
+permission = "messages.broadcast"
+
 [[mcp.tools]]
 name = "list_my_messages"
 title = "我的站内信"
@@ -134,8 +174,8 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["nav.user_menu"]
-routes = ["/p/messages/*"]
+slots = ["nav.user_menu", "home.announcements"]
+routes = ["/p/messages/*", "/admin/p/messages/*"]
 settings_ui = "schema"
 
 [settings_schema]

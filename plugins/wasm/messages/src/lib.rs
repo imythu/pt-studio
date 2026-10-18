@@ -3,7 +3,8 @@
 //! 本版本实现：会话（发起：按用户名收件、去重、拉黑与“只接收员工”检查、频率限制、`message.before_send` 钩子；回复：重新进入
 //! 其他参与者的收件箱、未读数；已读；移出）、收件箱 / 已发送 / 系统文件夹、会话详情（Markdown / BBCode 经 pt-markup）、
 //! 系统消息（`ctx.messages.send_system`，作用域 `send`）、拉黑、接收设置、未读数、举报某条消息（快照经 `ctx.reports` 提交）、
-//! MCP 工具 `list_my_messages`（不含正文）/ `send_message`（需确认）。群发公告、星标、数据清理在后续迭代实现。
+//! MCP 工具 `list_my_messages`（不含正文）/ `send_message`（需确认）、群发公告（一行存储 + 用户已读游标，可按最低等级、
+//! 到期时间投放，可撤回；`ctx.messages.broadcast`，作用域 `broadcast`）。星标、数据清理在后续迭代实现。
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -11,7 +12,7 @@ pt_plugin_sdk::world!("messages");
 
 use exports::pt::plugin::{http_handler, mcp_tool, service_provider};
 use pt_plugin_sdk::{
-    config, events, hook_runner, invocation, redis, services,
+    audit, config, events, hook_runner, invocation, redis, services,
     sql::{self, SqlValue},
     types::PluginError,
 };
@@ -304,6 +305,83 @@ fn send_system(uid: i64, subject: &str, body: &str) -> R<Value> {
     Ok(json!({ "conversation_id": conv, "message_id": mid }))
 }
 
+// ---------------- 群发公告 ----------------
+
+/// 对该用户可见的公告条件（$1 = 用户 ID）
+const VISIBLE: &str = "b.revoked_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > now())
+    AND (b.min_class IS NULL OR coalesce((SELECT class_id FROM identity.v_user_public WHERE id = $1), 0) >= b.min_class)
+    AND NOT EXISTS (SELECT 1 FROM broadcast_hidden h WHERE h.user_id = $1 AND h.broadcast_id = b.id)";
+
+fn broadcasts_for(uid: i64) -> R<Value> {
+    let r = sql::query(
+        &format!(
+            "SELECT b.id, b.subject, b.body_html, (extract(epoch FROM b.created_at) * 1000)::bigint, b.id > coalesce((SELECT last_read FROM broadcast_cursors WHERE user_id = $1), 0)
+               FROM broadcasts b WHERE {VISIBLE} ORDER BY b.id DESC LIMIT 50"
+        ),
+        &[SqlValue::Int(uid)],
+    )?;
+    Ok(json!({ "items": r.rows.iter().map(|row| json!({ "id": int(&row[0]), "subject": text(&row[1]), "html": text(&row[2]), "created_at": int(&row[3]),
+        "unread": matches!(row[4], SqlValue::Boolean(true)) })).collect::<Vec<_>>() }))
+}
+
+fn unread_broadcasts(uid: i64) -> R<i64> {
+    let r = sql::query(
+        &format!("SELECT count(*) FROM broadcasts b WHERE {VISIBLE} AND b.id > coalesce((SELECT last_read FROM broadcast_cursors WHERE user_id = $1), 0)"),
+        &[SqlValue::Int(uid)],
+    )?;
+    Ok(r.rows.first().and_then(|row| int(&row[0])).unwrap_or(0))
+}
+
+struct NewBroadcast<'a> {
+    subject: &'a str,
+    body: &'a str,
+    markup: &'a str,
+    min_class: Option<i64>,
+    expires_ms: Option<i64>,
+    created_by: Option<i64>,
+    source: Option<(String, String)>,
+}
+
+fn broadcast(n: &NewBroadcast) -> R<Value> {
+    check_body(n.subject, n.body)?;
+    if let Some((plugin, key)) = &n.source {
+        let dup = sql::query("SELECT id FROM broadcasts WHERE source_plugin = $1 AND idempotency_key = $2", &[SqlValue::Text(plugin.clone()), SqlValue::Text(key.clone())])?;
+        if let Some(row) = dup.rows.first() {
+            return Ok(json!({ "id": int(&row[0]) }));
+        }
+    }
+    let html = render(n.body, n.markup).html;
+    let r = sql::query(
+        "INSERT INTO broadcasts (subject, body, body_html, markup, min_class, created_by, source_plugin, idempotency_key, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $9::bigint IS NULL THEN NULL ELSE to_timestamp($9::bigint / 1000.0) END) RETURNING id",
+        &[
+            SqlValue::Text(n.subject.into()),
+            SqlValue::Text(n.body.into()),
+            SqlValue::Text(html),
+            SqlValue::Text(n.markup.into()),
+            n.min_class.map_or(SqlValue::Null, SqlValue::Int),
+            n.created_by.map_or(SqlValue::Null, SqlValue::Int),
+            n.source.as_ref().map_or(SqlValue::Null, |s| SqlValue::Text(s.0.clone())),
+            n.source.as_ref().map_or(SqlValue::Null, |s| SqlValue::Text(s.1.clone())),
+            n.expires_ms.map_or(SqlValue::Null, SqlValue::Int),
+        ],
+    )?;
+    let id = r.rows.first().and_then(|row| int(&row[0])).unwrap_or(0);
+    publish("message.broadcast_sent", "global", json!({ "broadcast_id": id, "subject": n.subject, "min_class": n.min_class }))?;
+    Ok(json!({ "id": id }))
+}
+
+fn admin_broadcasts() -> R<Value> {
+    let r = sql::query(
+        "SELECT b.id, b.subject, b.min_class, (extract(epoch FROM b.created_at) * 1000)::bigint, (extract(epoch FROM b.expires_at) * 1000)::bigint,
+                b.revoked_at IS NOT NULL, u.username, b.source_plugin, (SELECT count(*) FROM broadcast_cursors c WHERE c.last_read >= b.id)
+           FROM broadcasts b LEFT JOIN identity.v_user_public u ON u.id = b.created_by ORDER BY b.id DESC LIMIT 100",
+        &[],
+    )?;
+    Ok(json!({ "items": r.rows.iter().map(|row| json!({ "id": int(&row[0]), "subject": text(&row[1]), "min_class": int(&row[2]), "created_at": int(&row[3]),
+        "expires_at": int(&row[4]), "revoked": matches!(row[5], SqlValue::Boolean(true)), "created_by": text(&row[6]), "source_plugin": text(&row[7]), "read": int(&row[8]) })).collect::<Vec<_>>() }))
+}
+
 fn unread(uid: i64) -> R<i64> {
     let r = sql::query(
         "SELECT coalesce(sum(unread_count), 0)::bigint FROM participants WHERE user_id = $1 AND removed_at IS NULL AND in_inbox",
@@ -454,7 +532,51 @@ impl http_handler::Guest for Messages {
                 }
                 Ok(no_content())
             }
-            "unread" => Ok(resp(200, &json!({ "private": unread(uid)? }))),
+            "unread" => Ok(resp(200, &json!({ "private": unread(uid)?, "broadcasts": unread_broadcasts(uid)? }))),
+            "broadcasts" => Ok(resp(200, &broadcasts_for(uid)?)),
+            "broadcasts_read" => {
+                sql::execute(
+                    "INSERT INTO broadcast_cursors (user_id, last_read) VALUES ($1, coalesce((SELECT max(id) FROM broadcasts), 0))
+                     ON CONFLICT (user_id) DO UPDATE SET last_read = EXCLUDED.last_read",
+                    &[SqlValue::Int(uid)],
+                )?;
+                Ok(no_content())
+            }
+            "broadcast_hide" => {
+                sql::execute(
+                    "INSERT INTO broadcast_hidden (user_id, broadcast_id) SELECT $1, id FROM broadcasts WHERE id = $2 ON CONFLICT DO NOTHING",
+                    &[SqlValue::Int(uid), SqlValue::Int(id_param(&req)?)],
+                )?;
+                Ok(no_content())
+            }
+            "admin_broadcasts" => Ok(resp(200, &admin_broadcasts()?)),
+            "admin_broadcast_create" => {
+                let expires = b["expires_days"].as_i64().filter(|d| (1..=365).contains(d)).map(|d| pt_plugin_sdk::time::now() + d * 86_400_000);
+                let out = broadcast(&NewBroadcast {
+                    subject: b["subject"].as_str().unwrap_or("").trim(),
+                    body: b["body"].as_str().unwrap_or(""),
+                    markup: b["markup"].as_str().unwrap_or("markdown"),
+                    min_class: b["min_class"].as_i64().filter(|c| *c > 0),
+                    expires_ms: expires,
+                    created_by: Some(uid),
+                    source: None,
+                })?;
+                audit::write(&audit::AuditEntry {
+                    action: "messages.broadcast".into(),
+                    target: format!("broadcast:{}", out["id"]),
+                    details: json!({ "subject": b["subject"], "min_class": b["min_class"], "expires_days": b["expires_days"] }).to_string(),
+                })?;
+                Ok(resp(201, &out))
+            }
+            "admin_broadcast_revoke" => {
+                let id = id_param(&req)?;
+                let n = sql::execute("UPDATE broadcasts SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL", &[SqlValue::Int(id)])?;
+                if n == 0 {
+                    return Err(err("messages.not_found", "broadcast not found"));
+                }
+                audit::write(&audit::AuditEntry { action: "messages.broadcast_revoke".into(), target: format!("broadcast:{id}"), details: "{}".into() })?;
+                Ok(no_content())
+            }
             "blocks" => {
                 let r = sql::query(
                     "SELECT b.blocked_id, u.username FROM blocks b LEFT JOIN identity.v_user_public u ON u.id = b.blocked_id WHERE b.user_id = $1 ORDER BY b.created_at DESC",
@@ -563,6 +685,25 @@ impl service_provider::Guest for Messages {
                     a["subject"].as_str().unwrap_or(""),
                     a["body"].as_str().unwrap_or(""),
                 )?
+            }
+            "broadcast" => {
+                let inv = invocation::current();
+                if !inv.caller_scopes.iter().any(|s| s == "broadcast") {
+                    return Err(err("kernel.forbidden", "scope broadcast required"));
+                }
+                let key = a["idempotency_key"]
+                    .as_str()
+                    .filter(|k| (1..=128).contains(&k.len()))
+                    .ok_or_else(|| err("kernel.validation_failed", "idempotency_key"))?;
+                broadcast(&NewBroadcast {
+                    subject: a["subject"].as_str().unwrap_or(""),
+                    body: a["body"].as_str().unwrap_or(""),
+                    markup: "markdown",
+                    min_class: a["min_class"].as_i64().filter(|c| *c > 0),
+                    expires_ms: a["expires_at"].as_i64(),
+                    created_by: None,
+                    source: Some((inv.caller_plugin, key.to_owned())),
+                })?
             }
             other => {
                 return Err(err(
