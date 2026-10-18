@@ -5,7 +5,7 @@ import { Link, useParams } from 'react-router';
 import { api } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { formatBytes, formatDuration, useT } from '@pt-studio/terms';
-import { Badge, Card, Empty, SkeletonRows, Stat, Tabs } from '@pt-studio/ui-kit';
+import { Avatar, Badge, Card, Empty, SkeletonRows, Stat, Tabs } from '@pt-studio/ui-kit';
 import { SwarmCell } from './Torrents';
 import { ErrorText } from '../errors';
 import { useInstalled } from '../manifest';
@@ -131,13 +131,7 @@ export function ProfilePage() {
   return (
     <div className="profile">
       <section className="p-head">
-        {profile.avatar_url && profile.avatar_url.startsWith('/media/') ? (
-          <img className="p-avatar" src={profile.avatar_url} alt="" />
-        ) : (
-          <span className="p-avatar p-avatar-text" aria-hidden="true">
-            {profile.username.slice(0, 1).toUpperCase()}
-          </span>
-        )}
+        <Avatar src={profile.avatar_url} name={profile.username} size={72} className="p-avatar" />
         <div className="p-main">
           <h1>
             {profile.username} {profile.status !== 'active' && <Badge tone="danger">{profile.status}</Badge>}

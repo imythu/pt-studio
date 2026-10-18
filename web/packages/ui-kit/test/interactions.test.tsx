@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { CopyButton, BackToTop, SkipLink, ToastHost, useToast } from '../src/index';
+import { Avatar, BackToTop, CopyButton, Empty, SkipLink, ToastHost, useToast } from '../src/index';
 
 describe('UI kit interactive components', () => {
   it('renders CopyButton and handles copy action', async () => {
@@ -61,5 +61,26 @@ describe('UI kit interactive components', () => {
     expect(closeBtn).toBeDefined();
     fireEvent.click(closeBtn);
     expect(screen.queryByText('Saved successfully')).toBeNull();
+  });
+
+  it('renders Avatar with fallback image and handles error fallback to initial', () => {
+    const { container, rerender } = render(<Avatar name="Frieren" />);
+    const img = container.querySelector('img');
+    expect(img).toBeDefined();
+    expect(img?.getAttribute('src')).toBe('/frieren/frieren-avatar-generated.jpg');
+
+    // Trigger image error on both custom and fallback to test graceful degradation to initial
+    rerender(<Avatar src="/invalid-avatar.png" fallbackSrc={null} name="Frieren" />);
+    const customImg = container.querySelector('img');
+    fireEvent.error(customImg!);
+    expect(container.textContent).toBe('F');
+  });
+
+  it('renders Empty with illustration mode', () => {
+    const { container } = render(<Empty illustration>暂无种子</Empty>);
+    const img = container.querySelector('.pt-empty-illustration');
+    expect(img).toBeDefined();
+    expect(img?.getAttribute('src')).toBe('/frieren/frieren-empty-state-generated.jpg');
+    expect(container.textContent).toContain('暂无种子');
   });
 });

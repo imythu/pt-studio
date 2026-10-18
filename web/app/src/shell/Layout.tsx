@@ -5,7 +5,7 @@ import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@pt-studio/sdk';
-import { BackToTop, SkipLink } from '@pt-studio/ui-kit';
+import { Avatar, BackToTop, SkipLink } from '@pt-studio/ui-kit';
 import { Icon, Logo, type IconName } from '../art';
 import { useSession } from '../session';
 import { useInstalled, useManifest } from '../manifest';
@@ -164,9 +164,7 @@ function UserMenu() {
   return (
     <div className="user-menu" ref={ref}>
       <button type="button" className="user-chip" aria-haspopup="menu" aria-expanded={open} aria-label={t('ui.nav.menu')} onClick={() => setOpen(!open)}>
-        <span className="avatar" aria-hidden="true">
-          {s.me.username.slice(0, 1).toUpperCase()}
-        </span>
+        <Avatar src={(s.me as any).avatar_url} name={s.me.username} size={30} className="avatar" />
         <span className="user-chip-name">{s.me.username}</span>
         <Icon name="chevron" size={14} />
       </button>
@@ -378,9 +376,7 @@ export function MePage() {
   return (
     <div className="me-page">
       <Link to={`/users/${s.me.id}`} className="me-card">
-        <span className="avatar avatar-lg" aria-hidden="true">
-          {s.me.username.slice(0, 1).toUpperCase()}
-        </span>
+        <Avatar src={(s.me as any).avatar_url} name={s.me.username} size={52} className="avatar avatar-lg" />
         <span>
           <b>{s.me.username}</b>
           <span className="pt-muted small">{t('ui.me.view_profile')}</span>

@@ -71,8 +71,7 @@ export function Spinner() {
   return <span className="pt-spinner" aria-label="loading" />;
 }
 
-/** 空状态插画（主题色随令牌变化） */
-/** 空状态插画：摊开的魔导书与一朵苍月草 */
+/** 空状态插画：摊开的魔导书与一朵苍月草（SVG 极简矢量版） */
 export function EmptyArt({ className }: { className?: string }) {
   return (
     <svg className={cx('pt-empty-art', className)} viewBox="0 0 160 120" fill="none" aria-hidden="true">
@@ -97,14 +96,82 @@ export function EmptyArt({ className }: { className?: string }) {
   );
 }
 
-export function Empty({ children }: { children: ReactNode }) {
+/** 空状态精美插画：芙莉莲坐在苍月草花海中静心阅读魔导书 */
+export function EmptyIllustration({
+  className,
+  src = '/frieren/frieren-empty-state-generated.jpg',
+  alt = '',
+}: {
+  className?: string;
+  src?: string;
+  alt?: string;
+}) {
+  return (
+    <div className={cx('pt-empty-illustration-wrap', className)}>
+      <img className="pt-empty-illustration" src={src} alt={alt} loading="lazy" />
+    </div>
+  );
+}
+
+export function Empty({
+  children,
+  illustration,
+}: {
+  children?: ReactNode;
+  illustration?: boolean | string;
+}) {
   // 插件常用 `—` 作占位文案：只显示插画
   const blank = children === '—' || children === null || children === undefined;
   return (
     <div className="pt-empty">
-      <EmptyArt />
+      {illustration ? (
+        <EmptyIllustration src={typeof illustration === 'string' ? illustration : undefined} />
+      ) : (
+        <EmptyArt />
+      )}
       {!blank && <p>{children}</p>}
     </div>
+  );
+}
+
+/** 用户头像：支持用户自定义头像，未配置或加载失败时优雅降级为芙莉莲默认头像或首字母缩写 */
+export function Avatar({
+  src,
+  fallbackSrc = '/frieren/frieren-avatar-generated.jpg',
+  name,
+  size = 32,
+  className,
+}: {
+  src?: string | null;
+  fallbackSrc?: string | null;
+  name?: string;
+  size?: number;
+  className?: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const [fallbackError, setFallbackError] = useState(false);
+  const initial = (name || '?').slice(0, 1).toUpperCase();
+  const effectiveSrc = !imgError && src ? src : (!fallbackError && fallbackSrc ? fallbackSrc : null);
+
+  return (
+    <span
+      className={cx('pt-avatar', className)}
+      style={{ width: size, height: size, minWidth: size, minHeight: size }}
+      aria-hidden="true"
+    >
+      {effectiveSrc ? (
+        <img
+          src={effectiveSrc}
+          alt={name ? `${name}` : ''}
+          onError={() => {
+            if (src && !imgError) setImgError(true);
+            else setFallbackError(true);
+          }}
+        />
+      ) : (
+        <span className="pt-avatar-fallback">{initial}</span>
+      )}
+    </span>
   );
 }
 

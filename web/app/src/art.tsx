@@ -22,8 +22,20 @@ export function Logo({ size = 32 }: { size?: number }) {
   );
 }
 
-/** 首页 / 登录页主插画：晴空、远山、苍月草花海与旅途中的魔法使（原创） */
-export function HeroArt({ className }: { className?: string }) {
+/** 首页 / 登录页主插画：晴空、远山、苍月草花海与旅途中的魔法使 */
+export function HeroArt({ className, variant = 'image' }: { className?: string; variant?: 'image' | 'svg' }) {
+  if (variant === 'image') {
+    return (
+      <div className={`hero-art-box ${className ?? ''}`.trim()}>
+        <img
+          src="/frieren/frieren-hero-banner-generated.jpg"
+          alt="Sousou no Frieren Journey"
+          className="hero-art-img"
+        />
+        <div className="hero-art-overlay" aria-hidden="true" />
+      </div>
+    );
+  }
   const flowers: [number, number, string][] = [
     [34, 396, '#6f9fd8'], [70, 414, '#9cc0ef'], [110, 400, '#fff'], [150, 424, '#6f9fd8'], [262, 404, '#9cc0ef'], [298, 420, '#6f9fd8'],
     [214, 426, '#fff'], [336, 400, '#6f9fd8'], [372, 424, '#9cc0ef'], [410, 402, '#fff'], [446, 418, '#6f9fd8'], [486, 398, '#9cc0ef'],

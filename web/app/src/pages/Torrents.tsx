@@ -309,7 +309,7 @@ export function TorrentTable({ rows, highlights }: { rows: TorrentDoc[]; highlig
     { key: 'size', header: t('ui.torrent.size'), render: (r) => formatBytes(r.size), className: 'num' },
     { key: 'created', header: t('ui.torrent.created'), render: (r) => (r.created_at ? timeAgo(r.created_at * 1000) : '-'), className: 'nowrap' },
   ];
-  if (rows.length === 0) return <Empty>{t('ui.torrent.no_results')}</Empty>;
+  if (rows.length === 0) return <Empty illustration>{t('ui.torrent.no_results')}</Empty>;
   return (
     <div className="torrent-table">
       <div className="t-desktop">
@@ -1299,7 +1299,7 @@ function HomeFeed() {
     <div>
       <section className="greeting">
         <span className="mascot">
-          <Logo size={48} />
+          <img src="/frieren/frieren-avatar-generated.jpg" alt="" className="mascot-img" />
         </span>
         <div>
           <h1>{t('ui.home.welcome', { name: me?.username ?? '' })}</h1>

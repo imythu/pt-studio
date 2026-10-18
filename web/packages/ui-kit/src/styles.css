@@ -104,7 +104,13 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 550; bord
 @keyframes pt-shimmer { to { background-position: -200% 0; } }
 .pt-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: var(--pt-space-6) var(--pt-space-4); margin: 0; }
 .pt-empty-art { width: 132px; height: auto; opacity: .95; }
+.pt-empty-illustration-wrap { width: 140px; height: 140px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 24px -6px rgb(111 159 216 / .3); border: 1px solid var(--pt-color-border); margin-bottom: 6px; background: var(--pt-color-surface-2); }
+.pt-empty-illustration { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .3s ease; }
+.pt-empty:hover .pt-empty-illustration { transform: scale(1.04); }
 @keyframes pt-bob { 50% { transform: translateY(-3px); } }
+.pt-avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; position: relative; background: linear-gradient(140deg, #6f9fd8, #2a7a6b); box-shadow: 0 0 0 2px var(--pt-color-surface), 0 0 0 3px var(--pt-color-accent); flex-shrink: 0; user-select: none; }
+.pt-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }
+.pt-avatar-fallback { font-size: 13px; font-weight: 700; color: #fff; line-height: 1; }
 .pt-plugin-error { color: var(--pt-color-danger); font-size: 12px; }
 
 /* 提示 */
