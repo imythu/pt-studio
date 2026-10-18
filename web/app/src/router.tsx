@@ -24,11 +24,22 @@ function NotFound() {
   const t = useT();
   return (
     <div className="lost">
-      <LostArt />
-      <h1>{t('ui.common.not_found')}</h1>
-      <Link className="pt-btn pt-btn-primary" to="/">
-        {t('ui.nav.home')}
-      </Link>
+      <div className="lost-card">
+        <div className="lost-cover">
+          <img src="/frieren/frieren-wide-scenery.jpg" alt="" className="lost-scenery" />
+          <div className="lost-overlay" />
+        </div>
+        <div className="lost-body">
+          <LostArt />
+          <h1>{t('ui.common.not_found')}</h1>
+          <p className="pt-muted" style={{ margin: '0 0 18px' }}>
+            在漫长的时间与魔法旅途中迷失了方向……
+          </p>
+          <Link className="pt-btn pt-btn-primary" to="/">
+            {t('ui.nav.home')}
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

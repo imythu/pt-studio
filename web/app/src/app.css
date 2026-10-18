@@ -1,6 +1,9 @@
 /* ============ 外壳 ============ */
-.app { min-height: 100vh; display: flex; flex-direction: column;
+.app { min-height: 100vh; display: flex; flex-direction: column; position: relative;
   background: linear-gradient(180deg, var(--pt-sky-top) 0, var(--pt-color-bg) 320px) no-repeat, var(--pt-color-bg); }
+.pt-backdrop { position: fixed; inset: 0; pointer-events: none; z-index: 0; background-size: cover; background-position: center 30%;
+  opacity: .055; transition: opacity .35s ease, background-image .35s ease; }
+[data-theme="dark"] .pt-backdrop { opacity: .10; }
 h1, h2, .brand, .page-title, .step-h, .greeting h1, .hero h1 { font-family: var(--pt-font-display); }
 
 .topbar { position: sticky; top: 0; z-index: 30; background: var(--pt-nav-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -148,9 +151,14 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .notice { padding: 8px 12px; border-radius: var(--pt-radius); background: var(--pt-color-success-soft); color: var(--pt-color-success); font-weight: 550; margin-bottom: 14px; }
 .notice-warn { background: var(--pt-color-gold-soft); color: var(--pt-color-fg); }
 .linklike { background: none; border: 0; padding: 0; color: var(--pt-color-primary); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
-.lost { text-align: center; padding: 48px 0; }
-.lost svg { width: 260px; max-width: 80%; height: auto; }
-.lost h1 { margin: 10px 0 18px; }
+.lost { text-align: center; padding: 24px 16px; }
+.lost-card { max-width: 560px; margin: 0 auto; border-radius: 20px; overflow: hidden; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); box-shadow: var(--pt-shadow-lg); text-align: center; }
+.lost-cover { position: relative; height: 160px; overflow: hidden; }
+.lost-scenery { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; display: block; }
+.lost-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 30%, var(--pt-color-surface) 100%); }
+.lost-body { padding: 0 24px 28px; margin-top: -30px; position: relative; z-index: 1; }
+.lost-body svg { width: 220px; max-width: 80%; height: auto; }
+.lost-body h1 { margin: 8px 0 6px; }
 
 /* ============ 找资源 ============ */
 .page-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -317,6 +325,9 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .img-add input { display: none; }
 
 /* ============ 个人页 / 我的 ============ */
+.p-cover { height: 160px; border-radius: var(--pt-radius-lg) var(--pt-radius-lg) 0 0; background-size: cover; background-position: center 30%; position: relative; overflow: hidden; border: 1px solid var(--pt-color-border); border-bottom: 0; box-shadow: var(--pt-shadow-sm); }
+.p-cover-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 40%, rgb(15 23 42 / .45) 100%); }
+.profile .p-head { border-top-left-radius: 0; border-top-right-radius: 0; margin-top: -1px; }
 .p-head { display: flex; gap: 16px; align-items: center; padding: 20px; margin-bottom: 14px; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius-lg); box-shadow: var(--pt-shadow-sm); }
 .p-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; flex-shrink: 0; box-shadow: 0 0 0 3px var(--pt-color-surface), 0 0 0 4px var(--pt-color-accent); }
 .p-avatar-text { display: grid; place-items: center; font-size: 30px; font-weight: 700; color: #fff; background: linear-gradient(140deg, #6f9fd8, #2a7a6b); }
@@ -352,6 +363,13 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .steps li span { color: var(--pt-color-muted); font-size: 13px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .help-page { max-width: 760px; margin: 0 auto; }
+.help-hero { position: relative; border-radius: var(--pt-radius-lg); overflow: hidden; margin-bottom: 20px; min-height: 150px; display: flex; align-items: flex-end; padding: 24px 20px; border: 1px solid var(--pt-color-border); box-shadow: var(--pt-shadow-sm); }
+.help-hero-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 30%; transition: transform .4s ease; }
+.help-hero:hover .help-hero-bg { transform: scale(1.02); }
+.help-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 20%, rgb(15 23 42 / .75) 100%); z-index: 1; }
+.help-hero-content { position: relative; z-index: 2; color: #fff; text-shadow: 0 2px 8px rgb(0 0 0 / .6); }
+.help-hero-content h1 { margin: 0 0 4px; font-size: 24px; color: #fff; }
+.help-hero-content p { margin: 0; color: #e2e8f0; font-size: 14px; }
 .faq { display: grid; gap: 10px; margin-top: 14px; }
 .faq details { background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius-lg); padding: 12px 16px; }
 .faq summary { cursor: pointer; font-weight: 650; font-size: 15px; }
@@ -578,4 +596,6 @@ html, body { overflow-x: clip; }
   .upload-grid .span2 { grid-column: auto; }
   .stats-row { flex-wrap: wrap; }
   .searchbar > * { min-width: 0; }
+  .p-cover { height: 110px; }
+  .help-hero { min-height: 120px; padding: 18px 14px; }
 }

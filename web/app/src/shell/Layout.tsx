@@ -284,6 +284,26 @@ export function Layout() {
   const m = useManifest();
   const loc = useLocation();
   const [theme, setTheme] = useState(currentTheme);
+  const [wallpaper, setWallpaper] = useState(() => {
+    try {
+      return localStorage.getItem('pt-wallpaper') || '/frieren/frieren-sky-landscape.jpg';
+    } catch {
+      return '/frieren/frieren-sky-landscape.jpg';
+    }
+  });
+
+  useEffect(() => {
+    const onWallpaper = () => {
+      try {
+        setWallpaper(localStorage.getItem('pt-wallpaper') || '/frieren/frieren-sky-landscape.jpg');
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('pt-wallpaper-change', onWallpaper);
+    return () => window.removeEventListener('pt-wallpaper-change', onWallpaper);
+  }, []);
+
   const bare = !s.me && (loc.pathname === '/login' || loc.pathname === '/register' || loc.pathname === '/');
   const themeBtn = (
     <button type="button" className="icon-btn" onClick={() => setTheme(toggleTheme())} aria-label={t('ui.theme.toggle')} title={t('ui.theme.toggle')}>
@@ -292,6 +312,9 @@ export function Layout() {
   );
   return (
     <div className={`app${s.me ? ' has-tabbar' : ''}`}>
+      {wallpaper && wallpaper !== 'none' && (
+        <div className="pt-backdrop" style={{ backgroundImage: `url(${wallpaper})` }} aria-hidden="true" />
+      )}
       <SkipLink targetId="main-content">{t('ui.common.skip_to_content')}</SkipLink>
       <header className="topbar">
         <div className="topbar-in">

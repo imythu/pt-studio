@@ -171,8 +171,13 @@ export function HelpPage() {
   const t = useT();
   return (
     <div className="help-page">
-      <h1>{t('ui.help.title')}</h1>
-      <p className="pt-muted">{t('ui.help.intro')}</p>
+      <div className="help-hero">
+        <img src="/frieren/frieren-magic-journey.jpg" alt="" className="help-hero-bg" />
+        <div className="help-hero-content">
+          <h1>{t('ui.help.title')}</h1>
+          <p>{t('ui.help.intro')}</p>
+        </div>
+      </div>
       <div className="faq">
         {FAQ.map((k, i) => (
           <details key={k} open={i < 2}>

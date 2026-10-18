@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
-import { Badge, Button, Card, CopyButton, Field, Input, Spinner, Table, Tabs, useToast } from '@pt-studio/ui-kit';
+import { Avatar, Badge, Button, Card, CopyButton, Field, Input, Spinner, Table, Tabs, useToast } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { useManifest } from '../manifest';
 import { createCredential, webauthnSupported } from '../webauthn';
@@ -28,6 +28,15 @@ interface Session {
   current: boolean;
 }
 
+const WALLPAPERS = [
+  { id: '/frieren/frieren-sky-landscape.jpg', label: '晴空漫旅（默认）' },
+  { id: '/frieren/frieren-sunset-horizon.jpg', label: '晚霞天际线' },
+  { id: '/frieren/frieren-hero-field.jpg', label: '苍月草花海' },
+  { id: '/frieren/frieren-magic-journey.jpg', label: '林间随行' },
+  { id: '/frieren/frieren-wide-scenery.jpg', label: '超宽旷野' },
+  { id: 'none', label: '无背景纹理（极简纯色）' },
+];
+
 function ProfileTab() {
   const t = useT();
   const toast = useToast();
@@ -36,6 +45,24 @@ function ProfileTab() {
   const q = useQuery({ queryKey: ['my-profile'], queryFn: () => api<Profile>('/api/p/identity/v1/users/me/profile') });
   const [draft, setDraft] = useState<Partial<Profile> | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [wallpaper, setWallpaper] = useState(() => {
+    try {
+      return localStorage.getItem('pt-wallpaper') || '/frieren/frieren-sky-landscape.jpg';
+    } catch {
+      return '/frieren/frieren-sky-landscape.jpg';
+    }
+  });
+
+  const onWallpaperChange = (val: string) => {
+    setWallpaper(val);
+    try {
+      localStorage.setItem('pt-wallpaper', val);
+      window.dispatchEvent(new Event('pt-wallpaper-change'));
+    } catch {
+      /* ignore */
+    }
+  };
+
   if (q.isLoading) return <Spinner />;
   const p = { ...(q.data as Profile), ...(draft ?? {}) };
   const save = async (e: FormEvent) => {
@@ -64,8 +91,25 @@ function ProfileTab() {
       <Field label={t('ui.settings.title_field')} hint={t('ui.settings.title_hint')}>
         <Input name="title" value={p.title ?? ''} maxLength={30} onChange={set('title')} />
       </Field>
-      <Field label={t('ui.settings.avatar')}>
-        <Input name="avatar_url" type="url" placeholder="https://" value={p.avatar_url ?? ''} onChange={set('avatar_url')} />
+      <Field label={t('ui.settings.avatar')} hint="支持外部图片链接，留空则默认使用芙莉莲头像">
+        <div className="pt-row" style={{ gap: 10, alignItems: 'center' }}>
+          <Avatar src={p.avatar_url} size={38} />
+          <Input name="avatar_url" type="url" placeholder="https://" value={p.avatar_url ?? ''} onChange={set('avatar_url')} />
+          {p.avatar_url && (
+            <Button variant="ghost" onClick={() => setDraft({ ...(draft ?? {}), avatar_url: '' })}>
+              恢复默认
+            </Button>
+          )}
+        </div>
+      </Field>
+      <Field label="旅途氛围壁纸" hint="全站背景的微光氛围纹理">
+        <select className="pt-input" value={wallpaper} onChange={(e) => onWallpaperChange(e.target.value)}>
+          {WALLPAPERS.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.label}
+            </option>
+          ))}
+        </select>
       </Field>
       <Field label={t('ui.settings.bio')}>
         <textarea className="pt-input" name="bio" rows={4} maxLength={2000} value={p.bio ?? ''} onChange={set('bio')} />

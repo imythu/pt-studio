@@ -193,14 +193,71 @@ function Boards({ api }: { api: PluginApi }) {
   if (!cats) return null;
   return (
     <div className="forum">
-      <h1>
-        {api.t('forum.ui.boards')}{' '}
-        {api.user() && (
-          <Button variant="ghost" onClick={() => void catchup()}>
-            {api.t('forum.ui.catchup')}
-          </Button>
-        )}
-      </h1>
+      <div
+        className="forum-banner"
+        style={{
+          position: 'relative',
+          borderRadius: 'var(--pt-radius-lg)',
+          overflow: 'hidden',
+          minHeight: 140,
+          marginBottom: 18,
+          display: 'flex',
+          alignItems: 'flex-end',
+          padding: '24px 20px',
+          border: '1px solid var(--pt-color-border)',
+          boxShadow: 'var(--pt-shadow-sm)',
+        }}
+      >
+        <img
+          src="/frieren/frieren-hero-field.jpg"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            objectPosition: 'center 45%',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'linear-gradient(180deg, transparent 20%, rgb(15 23 42 / .75) 100%)',
+          }}
+        />
+        <div
+          style={{
+            position: 'relative',
+            zIndex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            width: '100%',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div>
+            <h1 style={{ margin: 0, color: '#fff', fontSize: 24, textShadow: '0 2px 8px rgb(0 0 0 / .6)' }}>
+              {api.t('forum.ui.boards')}
+            </h1>
+            <p style={{ margin: '4px 0 0', color: '#e2e8f0', fontSize: 13, textShadow: '0 1px 4px rgb(0 0 0 / .6)' }}>
+              旅人们的思想交汇所与魔法研讨地
+            </p>
+          </div>
+          {api.user() && (
+            <Button
+              variant="ghost"
+              style={{ color: '#fff', borderColor: 'rgb(255 255 255 / .4)', backdropFilter: 'blur(4px)' }}
+              onClick={() => void catchup()}
+            >
+              {api.t('forum.ui.catchup')}
+            </Button>
+          )}
+        </div>
+      </div>
       {cats.map((c) => (
         <Card key={c.id} title={c.name}>
           <Table

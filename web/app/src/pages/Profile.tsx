@@ -130,8 +130,11 @@ export function ProfilePage() {
   const s = stats.data;
   return (
     <div className="profile">
+      <div className="p-cover" style={{ backgroundImage: 'url(/frieren/frieren-sky-landscape.jpg)' }}>
+        <div className="p-cover-overlay" />
+      </div>
       <section className="p-head">
-        <Avatar src={profile.avatar_url} name={profile.username} size={72} className="p-avatar" />
+        <Avatar src={profile.avatar_url} name={profile.username} size={76} className="p-avatar" />
         <div className="p-main">
           <h1>
             {profile.username} {profile.status !== 'active' && <Badge tone="danger">{profile.status}</Badge>}
