@@ -1,0 +1,14 @@
+[package]
+name = "pt-wasm-donations"
+description = "PT Studio donations (WASM): staff-recorded donations rewarded with VIP days, bonus and medals; public goal and donor list"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }
+pt-markup = { path = "../../../crates/markup" }

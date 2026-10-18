@@ -147,6 +147,7 @@ JSON 示例：
 | `message.broadcast_sent` | messages | `global` | `broadcast_id, subject, min_class` |
 | `ticket.created` | tickets | `user:<id>` | `ticket_id, user_id, category` |
 | `ticket.closed` | tickets | `user:<id>` | `ticket_id, user_id, by` |
+| `donation.recorded` | donations | `user:<id>` | `donation_id, user_id, vip_days, bonus` |
 | `medal.granted` | medals | `user:<id>` | `user_id, medal_id, reason` |
 | `medal.revoked` | medals | `user:<id>` | `user_id, medal_id, reason` |
 

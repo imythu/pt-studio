@@ -292,6 +292,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-donations"
+version = "0.1.0"
+dependencies = [
+ "pt-markup",
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-dupe"
 version = "0.1.0"
 dependencies = [

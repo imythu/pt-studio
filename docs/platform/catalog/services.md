@@ -68,7 +68,7 @@ WASM 插件通过 `pt:plugin` 的宿主接口使用；Native 插件通过 `Ctx` 
 | `ctx.checkin` | checkin | single | `status(user_id) -> {checked_today, streak}`、`check_in(user_id) -> reward` | — | 0.1.0 |
 | `ctx.lottery` | lottery | single | `rounds()`、`buy(user_id, round_id, tickets)`（返回 `{batch_id, first_no, count, cost}`） | `buy`（代用户购票） | 0.1.0 |
 | `ctx.medals` | medals | single | `of_user(user_id, include_hidden?)`、`worn_many(user_ids)`、`definitions()`、`grant(user_id, medal_id, reason, expires_at?, idempotency_key)`、`revoke(user_id, medal_id, reason, idempotency_key)`（`set_title` 尚未实现） | `grant` | 0.1.0 |
-| `ctx.levels` | levels | single | `level_of(user_id) -> {class_id, name_term, next_class_id, progress}`、`classes() -> Vec<ClassDef>`、`evaluate(user_id)`、`is_protected(user_id) -> bool`（保号） | `evaluate` | 0.1.0 |
+| `ctx.levels` | levels | single | `level_of(user_id) -> {class_id, name_term, next_class_id, progress}`、`classes() -> Vec<ClassDef>`、`evaluate(user_id)`、`is_protected(user_id) -> bool`（保号）、`grant_vip(user, days, source_ref) -> {until_ms}`（顺延、幂等）、`vip_until(user) -> {until_ms}` | `evaluate`、`grant` | 0.1.0 |
 | `ctx.ratio` | ratio-policy | single | `status(user_id) -> {ratio, required, warned_until, can_download}` | — | 0.1.0 |
 | `ctx.hnr` | hnr | single | `status(user_id) -> {active, failed, can_download}`、`records(user_id, cursor)`、`forgive(record_id, reason)` | `forgive` | 0.1.0 |
 | `ctx.exams` | newbie-exam | single | `status(user_id) -> Option<ExamProgress>`、`assign(user_id, exam_id)`、`exempt(user_id, reason)` | `write` | 0.1.0 |

@@ -484,6 +484,19 @@ try {
   await p.getByText('请重新下载种子文件').waitFor();
   await p.getByText('等待用户').waitFor();
 
+  step('donations and bonus history');
+  await a.goto(`${BASE}/admin/p/donations/`);
+  await a.locator('input[name=donation_username]').fill('web_bob');
+  await a.locator('input[name=donation_amount]').fill('50');
+  await a.getByLabel('用户同意出现在捐赠名单').check();
+  await a.getByRole('button', { name: '登记并发放奖励' }).click();
+  await a.getByText('已登记，奖励已发放').waitFor();
+  await p.goto(`${BASE}/p/donations/`);
+  await p.locator('[data-testid=donor-list]', { hasText: 'web_bob' }).waitFor();
+  await p.locator('[data-testid=donation-goal]', { hasText: '¥50' }).waitFor();
+  await p.goto(`${BASE}/p/bonus/`);
+  await p.getByText('捐赠奖励').first().waitFor();
+
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);

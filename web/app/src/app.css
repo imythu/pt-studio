@@ -538,3 +538,4 @@ html, body { overflow-x: clip; }
 .attachments-item img { display: block; width: 100%; height: 160px; object-fit: cover; }
 .attachments-item figcaption { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
 .attachments-picker { cursor: pointer; display: inline-flex; align-items: center; }
+.donor-list { flex-wrap: wrap; gap: 6px 14px; }

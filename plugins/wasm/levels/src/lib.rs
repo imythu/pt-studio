@@ -3,7 +3,8 @@
 //! 本版本实现：等级定义（NexusPHP 预设）、角色同步（每个等级一个 `levels:class_<id>` 角色并绑定到等级）、
 //! 指标（注册天数、上传 / 下载 / 分享率、做种时长、发布数、做种体积）、评估（升级、保级警告、到期降级、
 //! 升级保护期、手动覆盖与保号）、增量评估（流量结算后标记）与每日全量评估、`invite.before_issue` 钩子、
-//! `ctx.levels` 服务、HTTP。邀请奖励、不活跃处理、VIP / 荣誉覆盖、模拟评估在后续迭代实现。
+//! `ctx.levels` 服务、HTTP。VIP 授予（`grant_vip`，顺延、幂等）与覆盖到期自动结束。
+//! 邀请奖励、不活跃处理、荣誉覆盖、模拟评估在后续迭代实现。
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -711,6 +712,68 @@ fn full_evaluate() -> R<()> {
     }
 }
 
+/// VIP 授予（捐赠、商城等）：在当前有效的 VIP 覆盖之后顺延 days 天；source_ref 幂等（重复调用返回同一结果）
+fn grant_vip(user: i64, a: &Value) -> R<Value> {
+    let days = a["days"].as_i64().filter(|d| (1..=3650).contains(d))
+        .ok_or_else(|| err("kernel.validation_failed", "days must be 1..=3650"))?;
+    let source_ref = a["source_ref"].as_str().filter(|s| !s.is_empty() && s.len() <= 200)
+        .ok_or_else(|| err("kernel.validation_failed", "source_ref is required"))?;
+    if user <= 0 {
+        return Err(err("kernel.validation_failed", "user is required"));
+    }
+    let done = sql::query(
+        "SELECT (extract(epoch FROM until) * 1000)::bigint FROM overrides WHERE source_ref = $1",
+        &[SqlValue::Text(source_ref.into())],
+    )?;
+    if let Some(until) = done.rows.first().map(|row| int(&row[0])) {
+        return Ok(json!({ "until_ms": until, "duplicate": true }));
+    }
+    let cls = classes()?;
+    let vip = cls
+        .iter()
+        .find(|c| c.kind == "vip" && c.key == "vip")
+        .or_else(|| cls.iter().find(|c| c.kind == "vip"))
+        .ok_or_else(|| err("levels.class_not_found", "no VIP class configured"))?
+        .id;
+    ensure_row(user, &cls)?;
+    let prev = sql::query(
+        "UPDATE overrides SET ended_at = now() WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL AND until > now()
+          RETURNING (extract(epoch FROM until) * 1000)::bigint",
+        &[SqlValue::Int(user)],
+    )?;
+    let start = prev.rows.iter().map(|row| int(&row[0])).max();
+    let r = sql::query(
+        "INSERT INTO overrides (user_id, kind, class_id, until, reason, created_by, source_ref)
+         VALUES ($1, 'vip', $2, coalesce(to_timestamp($3::float8 / 1000), now()) + make_interval(days => $4::int), $5, $6, $7)
+         RETURNING (extract(epoch FROM until) * 1000)::bigint",
+        &[
+            SqlValue::Int(user),
+            SqlValue::Int(vip),
+            start.map_or(SqlValue::Null, SqlValue::Int),
+            SqlValue::Int(days),
+            SqlValue::Text(a["reason"].as_str().unwrap_or("").chars().take(200).collect()),
+            SqlValue::Text(format!("plugin:{}", invocation::current().caller_plugin)),
+            SqlValue::Text(source_ref.into()),
+        ],
+    )?;
+    evaluate_batch(&[user], Mode::Full)?;
+    Ok(json!({ "until_ms": r.rows.first().map(|row| int(&row[0])), "duplicate": false }))
+}
+
+/// 已到期但未结束的覆盖：结束并重新评估这些用户（回到基线等级），由 incr_evaluate 执行
+fn end_expired_overrides() -> R<()> {
+    let r = sql::query(
+        "UPDATE overrides SET ended_at = now() WHERE ended_at IS NULL AND until <= now() RETURNING user_id",
+        &[],
+    )?;
+    let mut ids: Vec<i64> = r.rows.iter().map(|row| int(&row[0])).collect();
+    ids.dedup();
+    if !ids.is_empty() {
+        evaluate_batch(&ids, Mode::Full)?;
+    }
+    sql::commit()
+}
+
 fn level_info(user: i64) -> R<Value> {
     let cls = classes()?;
     let st = ensure_row(user, &cls)?;
@@ -822,6 +885,7 @@ impl on_cron::Guest for Levels {
                     sql::commit()?;
                     full_evaluate()?;
                 }
+                end_expired_overrides()?;
                 loop {
                 let r = sql::query(
                     "DELETE FROM dirty_users WHERE user_id IN (SELECT user_id FROM dirty_users ORDER BY since LIMIT 2000 FOR UPDATE SKIP LOCKED)
@@ -982,6 +1046,20 @@ impl service_provider::Guest for Levels {
                 level_info(user)?
             }
             "is_protected" => level_info(user)?["protected"].clone(),
+            "vip_until" => {
+                let r = sql::query(
+                    "SELECT (extract(epoch FROM max(until)) * 1000)::bigint FROM overrides
+                      WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL AND until > now()",
+                    &[SqlValue::Int(user)],
+                )?;
+                json!({ "until_ms": r.rows.first().and_then(|row| match row[0] { SqlValue::Int(v) => Some(v), _ => None }) })
+            }
+            "grant_vip" => {
+                if !inv.caller_scopes.iter().any(|s| s == "grant") {
+                    return Err(err("levels.scope_required", "scope `grant` required"));
+                }
+                grant_vip(user, &a)?
+            }
             _ => return Err(err("kernel.not_found", "unknown method")),
         };
         Ok(out.to_string())

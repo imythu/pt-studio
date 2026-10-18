@@ -64,8 +64,8 @@ default_timeout_ms = 2000
 
 [frontend]
 entry = "index.js"
-slots = ["user.profile.stats"]
-routes = []
+slots = ["user.profile.stats", "nav.user_menu"]
+routes = ["/p/bonus/*"]
 settings_ui = "schema"
 
 [terms]

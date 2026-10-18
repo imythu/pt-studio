@@ -1,0 +1,133 @@
+id = "donations"
+name = "捐赠"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "捐赠：捐赠说明页、月度目标进度、公开捐赠名单（用户自愿）；管理员登记捐赠后自动授予 VIP 天数（顺延）、魔力值与勋章，VIP 到期前提醒"
+
+optional_requires = ["ctx.levels@^0.1", "ctx.ledger@^0.1", "ctx.medals@^0.1", "ctx.notify@^0.1"]
+publishes = ["donation.recorded"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public"]
+
+[capabilities.scopes]
+"ctx.levels" = ["grant"]
+"ctx.ledger" = ["currency:bonus"]
+"ctx.medals" = ["grant"]
+"ctx.notify" = ["send"]
+
+[[cron]]
+name = "remind"
+schedule = "0 10 * * *"
+timeout_secs = 300
+tx = "manual"
+
+[[http.routes]]
+id = "summary"
+method = "GET"
+path = "/v1/summary"
+auth = "user"
+
+[[http.routes]]
+id = "admin_list"
+method = "GET"
+path = "/v1/admin/donations"
+auth = "admin"
+permission = "donations.manage"
+
+[[http.routes]]
+id = "admin_create"
+method = "POST"
+path = "/v1/admin/donations"
+auth = "admin"
+permission = "donations.manage"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "admin_revoke"
+method = "POST"
+path = "/v1/admin/donations/{id}/revoke"
+auth = "admin"
+permission = "donations.manage"
+
+[[permissions]]
+name = "donations.manage"
+description_term = "donations.perm.manage"
+default_roles = ["admin"]
+
+[error_codes]
+"donations.user_not_found" = 422
+"donations.reward_failed" = 502
+
+[database]
+migrations = "migrations"
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu"]
+routes = ["/p/donations/*", "/admin/p/donations/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["enabled", "instructions", "currency_symbol", "monthly_goal", "show_donors", "vip_days_per_unit", "bonus_per_unit", "remind_days"]
+
+[settings_schema.properties.enabled]
+type = "boolean"
+title = "开放捐赠页（用户菜单显示入口）"
+default = false
+
+[settings_schema.properties.instructions]
+type = "string"
+title = "捐赠说明（Markdown）"
+description = "捐赠方式、收款账号、联系方式、捐赠后如何告知管理组等"
+maxLength = 10000
+x-pt-widget = "textarea"
+default = "感谢你对本站的支持！捐赠后请通过「联系管理组」提交工单，附上付款时间与金额，管理组核实后为你登记。"
+
+[settings_schema.properties.currency_symbol]
+type = "string"
+title = "货币符号"
+maxLength = 8
+default = "¥"
+
+[settings_schema.properties.monthly_goal]
+type = "integer"
+title = "每月目标金额（元，0 = 不显示进度条）"
+minimum = 0
+maximum = 100000000
+default = 0
+
+[settings_schema.properties.show_donors]
+type = "boolean"
+title = "显示捐赠名单（仅列出同意公开的捐赠者，不显示金额）"
+default = true
+
+[settings_schema.properties.vip_days_per_unit]
+type = "number"
+title = "每 1 元默认奖励的 VIP 天数（登记时可修改）"
+minimum = 0
+maximum = 100
+default = 0
+
+[settings_schema.properties.bonus_per_unit]
+type = "integer"
+title = "每 1 元默认奖励的魔力值（登记时可修改）"
+minimum = 0
+maximum = 1000000
+default = 0
+
+[settings_schema.properties.remind_days]
+type = "integer"
+title = "VIP 到期前几天提醒（0 = 不提醒）"
+minimum = 0
+maximum = 30
+default = 3
+
+[terms]
+"donations.name" = { zh-CN = "捐赠", en = "Donations" }
+"donations.perm.manage" = { zh-CN = "登记捐赠", en = "Record donations" }
