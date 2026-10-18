@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@pt-studio/ui-kit';
 import { useErrorText } from '../errors';
 import { ErrorText } from '../errors';
+import { SuggestInput } from '../suggest';
 
 export interface TorrentDoc {
   id: number;
@@ -371,7 +372,7 @@ export function TorrentList() {
       <form onSubmit={submit} className="page-search">
         <div className="search-box">
           <Icon name="search" size={18} />
-          <Input name="q" type="search" value={q} placeholder={t('ui.torrent.search')} onChange={(e) => setQ(e.target.value)} />
+          <SuggestInput className="pt-input" name="q" type="search" value={q} placeholder={t('ui.torrent.search')} aria-label={t('ui.torrent.search')} onValue={setQ} />
         </div>
         <div className="segmented" role="group" aria-label={t('ui.torrent.sort')}>
           {Object.keys(SORTS).map((k) => (
@@ -716,7 +717,14 @@ export function TorrentPage() {
             </span>
             <span>
               {t('ui.torrent.uploader')}:{' '}
-              {d.uploader.anonymous ? t('ui.torrent.anonymous') : <Link to={`/users/${d.uploader.id}`}>{d.uploader.username ?? `#${d.uploader.id}`}</Link>}
+              {d.uploader.anonymous || d.uploader.id === undefined ? (
+                t('ui.torrent.anonymous')
+              ) : (
+                <>
+                  <Link to={`/users/${d.uploader.id}`}>{d.uploader.username ?? `#${d.uploader.id}`}</Link>
+                  <Slot name="user.name.decorations" ctx={{ user_id: d.uploader.id, size: 'sm' }} className="user-deco" />
+                </>
+              )}
             </span>
             <span>{new Date(d.created_at).toLocaleString()}</span>
           </div>

@@ -126,8 +126,8 @@ premake = 3
 
 [frontend]
 entry = "index.js"
-slots = ["user.profile.stats", "torrent.detail.header"]
-routes = []
+slots = ["user.profile.stats", "user.profile.tabs", "torrent.detail.header", "nav.user_menu", "admin.user.tabs"]
+routes = ["/p/hnr/*"]
 settings_ui = "schema"
 
 [settings_schema]

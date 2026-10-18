@@ -1,7 +1,8 @@
-// comments 前端：种子与作品页的评论区（tabs 插槽）——楼层、回复、引用、感谢、编辑、删除、举报、Markdown / BBCode 与预览。
+// comments 前端：种子与作品页的评论区（tabs 插槽）——楼层、回复、引用、感谢、编辑、删除、举报、Markdown / BBCode 与预览、
+// 编辑历史（comments.moderate）；个人页“评论”标签（该用户最近的评论）。
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
-import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
+import { Slot, type PluginApi, type PluginFrontend, type SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
 import { Badge, Button, Card, Empty, UserContent } from '@pt-studio/ui-kit';
 
@@ -27,6 +28,14 @@ registerMessages('zh-CN', {
   'comments.ui.report': '举报',
   'comments.ui.reported': '已举报，感谢反馈',
   'comments.ui.reason': '举报理由',
+  'comments.ui.history': '编辑历史',
+  'comments.ui.history_denied': '只有管理员可以查看编辑历史',
+  'comments.ui.history_item': '{at} · 编辑者 #{editor} 修改前：',
+  'comments.ui.hide': '收起',
+  'comments.ui.recent': '最近的评论',
+  'comments.ui.on_torrent': '种子 #{id}',
+  'comments.ui.on_group': '作品 #{id}',
+  'comments.ui.on_request': '求种 #{id}',
 });
 registerMessages('en', {
   'comments.ui.tab': 'Comments',
@@ -50,6 +59,14 @@ registerMessages('en', {
   'comments.ui.report': 'Report',
   'comments.ui.reported': 'Reported, thanks',
   'comments.ui.reason': 'Reason',
+  'comments.ui.history': 'Edit history',
+  'comments.ui.history_denied': 'Only staff can see the edit history',
+  'comments.ui.history_item': '{at} · editor #{editor}, before:',
+  'comments.ui.hide': 'Hide',
+  'comments.ui.recent': 'Recent comments',
+  'comments.ui.on_torrent': 'Torrent #{id}',
+  'comments.ui.on_group': 'Title #{id}',
+  'comments.ui.on_request': 'Request #{id}',
 });
 
 interface Comment {
@@ -123,6 +140,7 @@ function ReportButton({ api, id }: { api: PluginApi; id: number }) {
 
 function Item({ api, c, onReply, onQuote, reload }: { api: PluginApi; c: Comment; onReply?: (c: Comment) => void; onQuote: (c: Comment) => void; reload(): void }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [history, setHistory] = useState<{ editor_id: number; old_source: string; edited_at: number }[] | null>(null);
   const [thanks, setThanks] = useState({ n: c.thanks, mine: c.thanked_by_me });
   const me = api.user();
   async function startEdit() {
@@ -137,6 +155,17 @@ function Item({ api, c, onReply, onQuote, reload }: { api: PluginApi; c: Comment
   async function remove() {
     await api.fetch(`/api/p/comments/v1/comments/${c.id}`, { method: 'DELETE' });
     reload();
+  }
+  async function toggleHistory() {
+    if (history) {
+      setHistory(null);
+      return;
+    }
+    try {
+      setHistory((await api.json<{ items: { editor_id: number; old_source: string; edited_at: number }[] }>(`/api/p/comments/v1/comments/${c.id}/edits`)).items);
+    } catch (e) {
+      api.toast(e instanceof ApiError && e.status === 403 ? api.t('comments.ui.history_denied') : errText(api, e), 'error');
+    }
   }
   async function thank() {
     await api.fetch(`/api/p/comments/v1/comments/${c.id}/thanks`, { method: 'POST', json: {} });
@@ -157,9 +186,27 @@ function Item({ api, c, onReply, onQuote, reload }: { api: PluginApi; c: Comment
             {c.author.username ?? `#${c.author.id}`}
           </a>
         ) : null}
+        {c.author && <Slot name="user.name.decorations" ctx={{ user_id: c.author.id, size: 'sm' }} className="user-deco" />}
         <span>{new Date(c.created_at).toLocaleString()}</span>
-        {c.edited_at && <span>· {api.t('comments.ui.edited')}</span>}
+        {c.edited_at && (
+          <span>
+            ·{' '}
+            <button type="button" className="link-btn" title={api.t('comments.ui.history')} onClick={() => void toggleHistory()}>
+              {api.t(history ? 'comments.ui.hide' : 'comments.ui.edited')}
+            </button>
+          </span>
+        )}
       </div>
+      {history && (
+        <div className="pt-stack pt-muted small">
+          {history.map((h, i) => (
+            <div key={i}>
+              {api.t('comments.ui.history_item', { at: new Date(h.edited_at).toLocaleString(), editor: h.editor_id })}
+              <pre className="pt-mono pt-prewrap">{h.old_source}</pre>
+            </div>
+          ))}
+        </div>
+      )}
       {c.deleted && !c.html ? (
         <p className="pt-muted">{api.t('comments.ui.deleted')}</p>
       ) : editing !== null ? (
@@ -335,8 +382,58 @@ function RequestSection({ api, ctx }: SlotProps<{ request: { id: number } }>) {
   return <CommentSection api={api} target={`request:${ctx.request.id}`} />;
 }
 
+/** 个人页“评论”标签：该用户最近 50 条可见评论（只列出查看者可见的目标） */
+function ProfileTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
+  const [rows, setRows] = useState<{ id: number; target: string; floor: number; excerpt: string | null; created_at: number }[] | null>(null);
+  useEffect(() => {
+    void api
+      .json<{ items: NonNullable<typeof rows> }>(`/api/p/comments/v1/users/${ctx.profile.id}/comments`)
+      .then((r) => setRows(r.items))
+      .catch(() => setRows([]));
+  }, [api, ctx.profile.id]);
+  if (!rows) return null;
+  if (rows.length === 0) return <Empty>—</Empty>;
+  const where = (target: string, id: number): [string, string] => {
+    const [kind, tid] = target.split(':');
+    if (kind === 'torrent') return [`/torrents/${tid}#comment-${id}`, api.t('comments.ui.on_torrent', { id: tid })];
+    if (kind === 'group') return [`/groups/${tid}#comment-${id}`, api.t('comments.ui.on_group', { id: tid })];
+    if (kind === 'request') return [`/p/requests/${tid}`, api.t('comments.ui.on_request', { id: tid })];
+    return ['', target];
+  };
+  return (
+    <div className="pt-stack">
+      {rows.map((r) => {
+        const [to, label] = where(r.target, r.id);
+        return (
+          <div key={r.id} className="pt-comment">
+            <div className="pt-row pt-muted small">
+              {to ? (
+                <a
+                  href={to}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    api.navigate(to);
+                  }}
+                >
+                  {label}
+                </a>
+              ) : (
+                label
+              )}
+              <Badge>#{r.floor}</Badge>
+              <span>{new Date(r.created_at).toLocaleString()}</span>
+            </div>
+            <p>{r.excerpt}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default {
   slots: {
+    'user.profile.tabs': { component: ProfileTab, order: 40, title_term: 'comments.ui.tab' },
     'request.detail.sidebar': { component: RequestSection, order: 10 },
     'torrent.detail.tabs': { component: TorrentTab, order: 10, title_term: 'comments.ui.tab' },
     'group.detail.tabs': { component: GroupTab, order: 10, title_term: 'comments.ui.tab' },

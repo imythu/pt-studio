@@ -1,5 +1,6 @@
 // messages 前端：用户菜单的未读站内信数、收件箱 / 已发送 / 系统（/p/messages/）、写信（/p/messages/new?to=）、会话（/p/messages/<id>：
-// 回复、举报某条消息、拉黑、删除会话）、群发公告（“公告”页签、首页未读公告横幅、后台 /admin/p/messages/ 发布与撤回）。
+// 回复、举报某条消息、拉黑、删除会话）、群发公告（“公告”页签、首页未读公告横幅、后台 /admin/p/messages/ 发布与撤回）、
+// 设置页“站内信”标签（谁可以给我发信、黑名单与解除拉黑）。
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, renderPreview } from "@pt-studio/sdk";
 import type { PluginApi, PluginFrontend, SlotProps } from "@pt-studio/slots";
@@ -18,6 +19,16 @@ import {
 } from "@pt-studio/ui-kit";
 
 registerMessages("zh-CN", {
+  "messages.ui.prefs_tab": "站内信",
+  "messages.ui.accept": "谁可以给我发站内信",
+  "messages.ui.accept.all": "所有用户",
+  "messages.ui.accept.staff_only": "仅管理组",
+  "messages.ui.blocklist": "黑名单",
+  "messages.ui.blocklist_hint": "被拉黑的用户不能再给你发站内信。",
+  "messages.ui.block_user": "拉黑用户（用户名）",
+  "messages.ui.block_add": "拉黑",
+  "messages.ui.unblock": "解除",
+  "messages.ui.saved": "已保存",
   "messages.ui.menu": "站内信（{n}）",
   "messages.ui.title": "站内信",
   "messages.ui.inbox": "收件箱",
@@ -51,6 +62,16 @@ registerMessages("zh-CN", {
   "messages.ui.read_by": "{n} 人已读",
 });
 registerMessages("en", {
+  "messages.ui.prefs_tab": "Messages",
+  "messages.ui.accept": "Who can message me",
+  "messages.ui.accept.all": "Everyone",
+  "messages.ui.accept.staff_only": "Staff only",
+  "messages.ui.blocklist": "Blocked users",
+  "messages.ui.blocklist_hint": "Blocked users can no longer message you.",
+  "messages.ui.block_user": "Block a user (username)",
+  "messages.ui.block_add": "Block",
+  "messages.ui.unblock": "Unblock",
+  "messages.ui.saved": "Saved",
   "messages.ui.menu": "Messages ({n})",
   "messages.ui.title": "Messages",
   "messages.ui.inbox": "Inbox",
@@ -585,6 +606,13 @@ function Conversation({ api, id }: { api: PluginApi; id: number }) {
   async function block() {
     const other = c?.participants.find((p) => p.id !== me?.id);
     if (!other) return;
+    if (blocked) {
+      await api.fetch(`/api/p/messages/v1/blocks/${other.id}`, {
+        method: "DELETE",
+      });
+      setBlocked(false);
+      return;
+    }
     await api.fetch("/api/p/messages/v1/blocks", {
       method: "POST",
       json: { user: other.id },
@@ -600,10 +628,10 @@ function Conversation({ api, id }: { api: PluginApi; id: number }) {
           {c.kind === "user" && (
             <Button
               variant="ghost"
-              disabled={blocked}
+              title={blocked ? api.t("messages.ui.blocked") : undefined}
               onClick={() => void block()}
             >
-              {api.t(blocked ? "messages.ui.blocked" : "messages.ui.block")}
+              {api.t(blocked ? "messages.ui.unblock" : "messages.ui.block")}
             </Button>
           )}
           <Button variant="ghost" onClick={() => void remove()}>
@@ -645,6 +673,122 @@ function Conversation({ api, id }: { api: PluginApi; id: number }) {
   );
 }
 
+/** 设置页“站内信”标签：接收范围与黑名单 */
+function Prefs({ api }: SlotProps) {
+  const [accept, setAccept] = useState<string | null>(null);
+  const [blocks, setBlocks] = useState<{ id: number; username: string | null }[]>([]);
+  const [name, setName] = useState("");
+  const load = useCallback(async () => {
+    const [s, b] = await Promise.all([
+      api.json<{ accept: string }>("/api/p/messages/v1/settings"),
+      api.json<{ items: { id: number; username: string | null }[] }>("/api/p/messages/v1/blocks"),
+    ]);
+    setAccept(s.accept);
+    setBlocks(b.items);
+  }, [api]);
+  useEffect(() => {
+    void load().catch(() => undefined);
+  }, [load]);
+  const act = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+      api.toast(api.t("messages.ui.saved"), "success");
+      await load();
+    } catch (e) {
+      api.toast(errText(api, e), "error");
+      await load().catch(() => undefined);
+    }
+  };
+  if (accept === null) return null;
+  return (
+    <div className="pt-stack">
+      <Card title={api.t("messages.ui.accept")}>
+        {["all", "staff_only"].map((v) => (
+          <label key={v} className="pt-check">
+            <input
+              type="radio"
+              name="messages_accept"
+              checked={accept === v}
+              onChange={() => {
+                // 先切换选中状态，失败时 act 的重新加载会恢复服务端的值
+                setAccept(v);
+                void act(() =>
+                  api.json("/api/p/messages/v1/settings", {
+                    method: "PUT",
+                    json: { accept: v },
+                  }),
+                );
+              }}
+            />{" "}
+            {api.t(`messages.ui.accept.${v}`)}
+          </label>
+        ))}
+      </Card>
+      <Card title={api.t("messages.ui.blocklist")}>
+        <p className="pt-muted small">{api.t("messages.ui.blocklist_hint")}</p>
+        <Table
+          rows={blocks}
+          rowKey={(r) => r.id}
+          empty={<Empty>—</Empty>}
+          columns={[
+            {
+              key: "u",
+              header: "",
+              render: (r) => (
+                <a href={`/users/${r.id}`} onClick={go(api, `/users/${r.id}`)}>
+                  {r.username ?? `#${r.id}`}
+                </a>
+              ),
+            },
+            {
+              key: "x",
+              header: "",
+              render: (r) => (
+                <Button
+                  variant="ghost"
+                  onClick={() =>
+                    void act(() =>
+                      api.json(`/api/p/messages/v1/blocks/${r.id}`, {
+                        method: "DELETE",
+                      }),
+                    )
+                  }
+                >
+                  {api.t("messages.ui.unblock")}
+                </Button>
+              ),
+            },
+          ]}
+        />
+        <form
+          className="searchbar"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act(async () => {
+              await api.json("/api/p/messages/v1/blocks", {
+                json: { user: name.trim() },
+              });
+              setName("");
+            });
+          }}
+        >
+          <Input
+            name="block_user"
+            aria-label={api.t("messages.ui.block_user")}
+            placeholder={api.t("messages.ui.block_user")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={64}
+          />
+          <Button type="submit" variant="danger" disabled={!name.trim()}>
+            {api.t("messages.ui.block_add")}
+          </Button>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
 function Pages({ api, path }: { api: PluginApi; path: string }) {
   const rest = path.replace(/^\/p\/messages\/?/, "");
   if (rest.startsWith("new")) return <Compose api={api} />;
@@ -657,6 +801,11 @@ export default {
   slots: {
     "nav.user_menu": { component: MenuItem, order: 6 },
     "home.announcements": { component: Announcements, order: 5 },
+    "user.settings.tabs": {
+      component: Prefs,
+      order: 30,
+      title_term: "messages.ui.prefs_tab",
+    },
   },
   routes: [
     { path: "/p/messages/*", component: Pages },

@@ -110,5 +110,5 @@ default = []
 
 [frontend]
 entry = "index.js"
-slots = []
+slots = ["admin.torrent.tabs"]
 routes = ["/admin/p/ai-upload-review/*"]

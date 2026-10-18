@@ -190,6 +190,36 @@ function ProfileHeader({ api, ctx }: SlotProps<{ profile: { id: number } }>) {
   );
 }
 
+/** 用户名旁的装饰（列表中每个用户名一个实例）：头衔与佩戴的勋章图标；同一轮渲染的请求经 api.batch 合并 */
+function NameDecoration({ api, ctx }: SlotProps<{ user_id: number; size?: 'sm' | 'md' }>) {
+  const [d, setD] = useState<Display | null>(null);
+  useEffect(() => {
+    let live = true;
+    void api
+      .batch<number, Display>('show', async (ids) => {
+        const r = await api.json<Record<string, Display>>(`/api/p/medals/v1/show?user_ids=${ids.join(',')}`);
+        return new Map(Object.entries(r).map(([k, v]) => [Number(k), v]));
+      })(ctx.user_id)
+      .then((v) => live && setD(v ?? null))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [api, ctx.user_id]);
+  if (!d || (!d.title && d.worn.length === 0)) return null;
+  const px = ctx.size === 'md' ? 20 : 16;
+  return (
+    <>
+      {d.title && <Badge tone="success">{d.title.name}</Badge>}
+      {d.worn
+        .filter((m) => m.icon)
+        .map((m) => (
+          <MedalChip key={m.id} m={m} size={px} />
+        ))}
+    </>
+  );
+}
+
 function ProfileWall({ api, ctx }: SlotProps<{ profile: { id: number } }>) {
   const w = useWall(api, ctx.profile.id);
   const medals = (w?.holdings ?? []).filter((h) => h.kind === 'medal');
@@ -714,6 +744,7 @@ export default {
     'user.profile.header': { component: ProfileHeader, order: 10 },
     'user.profile.badges': { component: ProfileWall, order: 10 },
     'nav.user_menu': { component: MenuItem, order: 30 },
+    'user.name.decorations': { component: NameDecoration, order: 20 },
   },
   routes: [
     { path: '/p/medals/*', component: Mine },

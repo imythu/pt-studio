@@ -1,6 +1,7 @@
-// invite 前端：注册页邀请码输入（`?invite=` 预填、失焦校验）、用户菜单入口、“我的邀请”页面；
+// invite 前端：注册页邀请码输入（`?invite=` 预填、失焦校验）、用户菜单入口、“我的邀请”页面（统计、邀请树、名额明细、连带处罚）；
+// 个人页“邀请树”标签（邀请链与下级，本人或 invite.tree.read）；
 // 后台用户详情页“邀请”标签（名额调整、暂停邀请权）、后台邀请管理（/admin/p/invite/：邀请码列表与撤销、发放系统 / 活动码、连带处罚复核）。
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
@@ -53,6 +54,41 @@ registerMessages('zh-CN', {
   'invite.outstanding_limit_reached': '未使用的邀请已达上限，请等待被使用或撤销后再发',
   'invite.daily_limit_reached': '今天的发邀次数已用完',
   'invite.quota_exhausted': '邀请名额已用完',
+  'invite.ui.stats_issued': '累计发出',
+  'invite.ui.stats_expired': '已过期',
+  'invite.ui.stats_revoked': '已撤销',
+  'invite.ui.stats_invitees': '已注册',
+  'invite.ui.tree': '邀请树',
+  'invite.ui.tree_levels': '各层人数：{levels}',
+  'invite.ui.chain': '邀请链',
+  'invite.ui.chain_none': '注册时未使用个人邀请',
+  'invite.ui.direct': '直接邀请 {n} 人',
+  'invite.ui.purged': '（已注销）',
+  'invite.ui.denied': '只有本人和管理员可以查看邀请树',
+  'invite.ui.ledger': '名额明细',
+  'invite.ui.delta_col': '变化',
+  'invite.ui.after': '余额',
+  'invite.ui.my_penalties': '连带处罚',
+  'invite.ui.no_penalties': '没有连带处罚',
+  'invite.ui.penalty_desc': '被邀请人 #{invitee} 触发 {trigger}（第 {depth} 层）',
+  'invite.ui.empty': '暂无记录',
+  'invite.reason.issue': '生成邀请',
+  'invite.reason.lot_expired': '名额过期',
+  'invite.reason.initial': '初始名额',
+  'invite.reason.level_promotion': '等级提升奖励',
+  'invite.reason.periodic': '定期发放',
+  'invite.reason.admin': '管理员发放',
+  'invite.reason.deduct': '管理员扣除',
+  'invite.reason.penalty': '连带处罚扣除',
+  'invite.reason.penalty_refund': '处罚撤销退还',
+  'invite.reason.revoked': '撤销邀请退还',
+  'invite.reason.expired': '邀请过期退还',
+  'invite.reason.shop': '商店购买',
+  'invite.state.applied': '已执行',
+  'invite.state.pending_review': '待复核',
+  'invite.state.confirmed': '已确认',
+  'invite.state.reversed': '已撤销',
+  'invite.state.exempt': '已豁免',
 });
 registerMessages('en', {
   'invite.ui.tab': 'Invites',
@@ -101,6 +137,41 @@ registerMessages('en', {
   'invite.outstanding_limit_reached': 'You have too many unused invitations',
   'invite.daily_limit_reached': 'Daily invitation limit reached',
   'invite.quota_exhausted': 'No invitation quota left',
+  'invite.ui.stats_issued': 'Issued',
+  'invite.ui.stats_expired': 'Expired',
+  'invite.ui.stats_revoked': 'Revoked',
+  'invite.ui.stats_invitees': 'Registered',
+  'invite.ui.tree': 'Invite tree',
+  'invite.ui.tree_levels': 'Per level: {levels}',
+  'invite.ui.chain': 'Invited by',
+  'invite.ui.chain_none': 'Did not register with a personal invite',
+  'invite.ui.direct': '{n} direct invitees',
+  'invite.ui.purged': '(deleted)',
+  'invite.ui.denied': 'Only the user and staff can see the invite tree',
+  'invite.ui.ledger': 'Quota history',
+  'invite.ui.delta_col': 'Change',
+  'invite.ui.after': 'Balance',
+  'invite.ui.my_penalties': 'Penalties',
+  'invite.ui.no_penalties': 'No penalties',
+  'invite.ui.penalty_desc': 'Invitee #{invitee} triggered {trigger} (level {depth})',
+  'invite.ui.empty': 'Nothing yet',
+  'invite.reason.issue': 'Invite created',
+  'invite.reason.lot_expired': 'Quota expired',
+  'invite.reason.initial': 'Initial quota',
+  'invite.reason.level_promotion': 'Promotion reward',
+  'invite.reason.periodic': 'Periodic grant',
+  'invite.reason.admin': 'Granted by staff',
+  'invite.reason.deduct': 'Deducted by staff',
+  'invite.reason.penalty': 'Penalty',
+  'invite.reason.penalty_refund': 'Penalty reversed',
+  'invite.reason.revoked': 'Refund (revoked)',
+  'invite.reason.expired': 'Refund (expired)',
+  'invite.reason.shop': 'Shop purchase',
+  'invite.state.applied': 'applied',
+  'invite.state.pending_review': 'pending review',
+  'invite.state.confirmed': 'confirmed',
+  'invite.state.reversed': 'reversed',
+  'invite.state.exempt': 'exempt',
 });
 
 interface FormBinding {
@@ -194,7 +265,10 @@ function MyInvites({ api }: { api: PluginApi; path: string }) {
   const [email, setEmail] = useState('');
   const [note, setNote] = useState('');
   const [issued, setIssued] = useState<string | null>(null);
+  const [stats, setStats] = useState<InviteStats | null>(null);
+  const [tab, setTab] = useState('tree');
   const reload = async () => {
+    void api.json<InviteStats>('/api/p/invite/v1/users/me/stats').then(setStats).catch(() => undefined);
     const [q, e, l, t] = await Promise.all([
       api.json<Quota>('/api/p/invite/v1/users/me/quota'),
       api.json<Eligibility>('/api/p/invite/v1/users/me/eligibility').catch(() => null),
@@ -236,8 +310,18 @@ function MyInvites({ api }: { api: PluginApi; path: string }) {
     <div>
       <h1>{api.t('invite.ui.title')}</h1>
       <Card>
-        <Stat label={api.t('invite.ui.balance')} value={quota?.balance ?? '…'} />
-        <Stat label={api.t('invite.ui.outstanding')} value={quota ? `${quota.outstanding} / ${quota.max_outstanding}` : '…'} />
+        <div className="pt-row stats-row">
+          <Stat label={api.t('invite.ui.balance')} value={quota?.balance ?? '…'} />
+          <Stat label={api.t('invite.ui.outstanding')} value={quota ? `${quota.outstanding} / ${quota.max_outstanding}` : '…'} />
+          {stats && (
+            <>
+              <Stat label={api.t('invite.ui.stats_issued')} value={stats.issued} />
+              <Stat label={api.t('invite.ui.stats_invitees')} value={stats.invitees} />
+              <Stat label={api.t('invite.ui.stats_expired')} value={stats.expired} />
+              <Stat label={api.t('invite.ui.stats_revoked')} value={stats.revoked} />
+            </>
+          )}
+        </div>
       </Card>
       <Card title={api.t('invite.ui.issue')}>
         {blocker && <p className="pt-field-error">{api.t('invite.ui.not_eligible', { reason: api.t(blocker.code ?? blocker.name) })}</p>}
@@ -303,7 +387,205 @@ function MyInvites({ api }: { api: PluginApi; path: string }) {
           ]}
         />
       </Card>
+      <Card>
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { id: 'tree', label: api.t('invite.ui.tree') },
+            { id: 'ledger', label: api.t('invite.ui.ledger') },
+            { id: 'penalties', label: api.t('invite.ui.my_penalties') },
+          ]}
+        />
+        {tab === 'tree' ? <Tree api={api} uid={api.user()?.id ?? 0} /> : tab === 'ledger' ? <QuotaLedger api={api} /> : <MyPenalties api={api} />}
+      </Card>
     </div>
+  );
+}
+
+interface InviteStats {
+  issued: number;
+  outstanding: number;
+  expired: number;
+  revoked: number;
+  invitees: number;
+}
+
+function UserLink({ api, id, name }: { api: PluginApi; id: number; name: string | null }) {
+  return (
+    <a
+      href={`/users/${id}`}
+      onClick={(e) => {
+        e.preventDefault();
+        api.navigate(`/users/${id}`);
+      }}
+    >
+      {name ?? `#${id}`}
+    </a>
+  );
+}
+
+interface TreeNode {
+  user_id: number;
+  depth: number;
+  inviter_id: number;
+  username: string | null;
+  status: string | null;
+  purged: boolean;
+  direct_count: number;
+  registered_at: string;
+}
+
+/** 邀请树：按层加载（深度 3），以邀请人归组成嵌套列表 */
+function Tree({ api, uid }: { api: PluginApi; uid: number }) {
+  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const [levels, setLevels] = useState<number[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
+  const load = async (cursor: string | null) => {
+    const q = new URLSearchParams({ depth: '3' });
+    if (cursor) q.set('cursor', cursor);
+    try {
+      const r = await api.json<{ level_counts: number[]; items: TreeNode[]; next_cursor: string | null }>(`/api/p/invite/v1/users/${uid}/tree?${q.toString()}`);
+      setNodes((old) => (cursor ? [...old, ...r.items] : r.items));
+      setLevels(r.level_counts);
+      setNext(r.next_cursor);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403) setDenied(true);
+    }
+  };
+  useEffect(() => {
+    if (uid) void load(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid]);
+  if (denied) return <p className="pt-muted">{api.t('invite.ui.denied')}</p>;
+  const children = (parent: number) => nodes.filter((n) => n.inviter_id === parent);
+  const render = (parent: number): ReactNode => {
+    const kids = children(parent);
+    if (kids.length === 0) return null;
+    return (
+      <ul className="invite-tree">
+        {kids.map((n) => (
+          <li key={n.user_id}>
+            {n.purged ? <span className="pt-muted">{`#${n.user_id} ${api.t('invite.ui.purged')}`}</span> : <UserLink api={api} id={n.user_id} name={n.username} />}{' '}
+            {n.status && n.status !== 'active' && <Badge tone="danger">{n.status}</Badge>}{' '}
+            <span className="pt-muted small">
+              {new Date(n.registered_at).toLocaleDateString()}
+              {n.direct_count > 0 && ` · ${api.t('invite.ui.direct', { n: n.direct_count })}`}
+            </span>
+            {render(n.user_id)}
+          </li>
+        ))}
+      </ul>
+    );
+  };
+  return (
+    <div className="invite-tree-wrap">
+      {levels.length > 0 && <p className="pt-muted small">{api.t('invite.ui.tree_levels', { levels: levels.join(' / ') })}</p>}
+      {nodes.length === 0 ? <p className="pt-muted">{api.t('invite.ui.empty')}</p> : render(uid)}
+      {next && <Button onClick={() => void load(next)}>{api.t('invite.ui.more')}</Button>}
+    </div>
+  );
+}
+
+/** 个人页“邀请树”标签：邀请链（上级）与下级 */
+function ProfileTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
+  const uid = ctx.profile.id;
+  const [chain, setChain] = useState<{ user_id: number; depth: number; username: string | null }[] | null>(null);
+  const [denied, setDenied] = useState(false);
+  useEffect(() => {
+    setDenied(false);
+    void api
+      .json<{ items: { user_id: number; depth: number; username: string | null }[] }>(`/api/p/invite/v1/users/${uid}/ancestors`)
+      .then((r) => setChain(r.items))
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 403) setDenied(true);
+      });
+  }, [api, uid]);
+  if (denied) return <p className="pt-muted">{api.t('invite.ui.denied')}</p>;
+  return (
+    <div className="pt-stack">
+      <p>
+        <strong>{api.t('invite.ui.chain')}</strong>:{' '}
+        {chain === null ? '…' : chain.length === 0 ? (
+          <span className="pt-muted">{api.t('invite.ui.chain_none')}</span>
+        ) : (
+          [...chain].reverse().map((a, i) => (
+            <span key={a.user_id}>
+              {i > 0 && ' → '}
+              <UserLink api={api} id={a.user_id} name={a.username} />
+            </span>
+          ))
+        )}
+      </p>
+      <Tree key={uid} api={api} uid={uid} />
+    </div>
+  );
+}
+
+interface LedgerRow {
+  id: number;
+  delta: number;
+  reason: string;
+  ref: string | null;
+  balance_after: number;
+  note: string | null;
+  created_at: string;
+}
+
+function QuotaLedger({ api }: { api: PluginApi }) {
+  const [rows, setRows] = useState<LedgerRow[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const load = async (cursor: string | null) => {
+    const r = await api.json<{ items: LedgerRow[]; next_cursor: string | null }>(`/api/p/invite/v1/users/me/quota/ledger${cursor ? `?cursor=${cursor}` : ''}`);
+    setRows((old) => (cursor ? [...old, ...r.items] : r.items));
+    setNext(r.next_cursor);
+  };
+  useEffect(() => {
+    void load(null).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const reason = (r: string) => {
+    const k = `invite.reason.${r}`;
+    return api.t(k) === k ? r : api.t(k);
+  };
+  return (
+    <>
+      <Table
+        rows={rows}
+        rowKey={(r) => r.id}
+        empty={api.t('invite.ui.empty')}
+        columns={[
+          { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
+          { key: 'r', header: '', render: (r) => <>{reason(r.reason)}{r.note && <div className="pt-muted small">{r.note}</div>}</> },
+          { key: 'd', header: api.t('invite.ui.delta_col'), render: (r) => <span className={r.delta >= 0 ? 'ledger-in' : 'ledger-out'}>{r.delta >= 0 ? `+${r.delta}` : r.delta}</span> },
+          { key: 'b', header: api.t('invite.ui.after'), render: (r) => r.balance_after },
+        ]}
+      />
+      {next && <Button onClick={() => void load(next)}>{api.t('invite.ui.more')}</Button>}
+    </>
+  );
+}
+
+function MyPenalties({ api }: { api: PluginApi }) {
+  const [rows, setRows] = useState<Penalty[]>([]);
+  useEffect(() => {
+    void api
+      .json<{ items: Penalty[] }>('/api/p/invite/v1/users/me/penalties')
+      .then((r) => setRows(r.items))
+      .catch(() => undefined);
+  }, [api]);
+  return (
+    <Table
+      rows={rows}
+      rowKey={(r) => r.id}
+      empty={api.t('invite.ui.no_penalties')}
+      columns={[
+        { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
+        { key: 'd', header: '', render: (r) => api.t('invite.ui.penalty_desc', { invitee: r.invitee_id, trigger: r.trigger, depth: r.depth }) },
+        { key: 's', header: '', render: (r) => <Badge tone={r.state === 'reversed' || r.state === 'exempt' ? 'muted' : 'danger'}>{api.t(`invite.state.${r.state}`)}</Badge> },
+      ]}
+    />
   );
 }
 
@@ -601,6 +883,7 @@ export default {
     'auth.register.form_extra': { component: CodeField, order: 10 },
     'admin.user.tabs': { component: UserTab, order: 30, title_term: 'invite.ui.tab' },
     'nav.user_menu': { component: MenuItem, order: 50 },
+    'user.profile.tabs': { component: ProfileTab, order: 20, title_term: 'invite.ui.tree' },
   },
   routes: [
     { path: '/p/invite/*', component: MyInvites },

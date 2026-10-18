@@ -7,6 +7,7 @@ import { Badge, Button, Card, Stat, Table, Tabs } from '@pt-studio/ui-kit';
 registerMessages('zh-CN', {
   'bonus.ui.menu': '魔力值',
   'bonus.ui.history': '魔力值流水',
+  'bonus.ui.transfer': '转账',
   'bonus.ui.available': '可用 {n}',
   'bonus.ui.all': '全部',
   'bonus.ui.more': '加载更多',
@@ -23,11 +24,14 @@ registerMessages('zh-CN', {
   'bonus.reason.lottery.refund': '彩票退款',
   'bonus.reason.ledger.admin_adjust': '管理员调整',
   'bonus.reason.ledger.transfer': '用户转账',
+  'bonus.reason.ledger.user_gift': '用户转账',
+  'bonus.reason.ledger.admin_reversal': '管理员冲正',
   'bonus.reason.donations.reward': '捐赠奖励',
 });
 registerMessages('en', {
   'bonus.ui.menu': 'Bonus',
   'bonus.ui.history': 'Bonus history',
+  'bonus.ui.transfer': 'Transfer',
   'bonus.ui.available': '{n} available',
   'bonus.ui.all': 'All',
   'bonus.ui.more': 'Load more',
@@ -44,6 +48,8 @@ registerMessages('en', {
   'bonus.reason.lottery.refund': 'Lottery refund',
   'bonus.reason.ledger.admin_adjust': 'Staff adjustment',
   'bonus.reason.ledger.transfer': 'Transfer',
+  'bonus.reason.ledger.user_gift': 'Transfer',
+  'bonus.reason.ledger.admin_reversal': 'Staff reversal',
   'bonus.reason.donations.reward': 'Donation reward',
 });
 
@@ -123,7 +129,19 @@ function History({ api }: { api: PluginApi }) {
   const scaleOf = (c: string) => s?.balances.find((b) => b.currency === c)?.scale ?? 0;
   return (
     <div className="pt-stack">
-      <h1 className="page-title">{api.t('bonus.ui.history')}</h1>
+      <div className="page-head">
+        <h1 className="page-title">{api.t('bonus.ui.history')}</h1>
+        <a
+          className="pt-btn"
+          href="/p/ledger/transfer"
+          onClick={(e) => {
+            e.preventDefault();
+            api.navigate('/p/ledger/transfer');
+          }}
+        >
+          {api.t('bonus.ui.transfer')}
+        </a>
+      </div>
       {s && (
         <Card>
           <div className="pt-row stats-row">

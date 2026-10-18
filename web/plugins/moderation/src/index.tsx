@@ -1,10 +1,10 @@
-// moderation 前端：员工菜单的队列数、种子页侧栏的审核面板（状态、AI 结论、通过 / 拒绝 / 退回）、审核队列（/admin/p/moderation/）、
-// 候选区投票（/p/moderation/candidates）。
+// moderation 前端：员工菜单的队列数、种子页侧栏的审核面板（状态、AI 结论、认领 / 释放、通过 / 拒绝 / 退回）、
+// 后台（/admin/p/moderation/：审核队列、审核记录、敏感词、敏感词命中）、候选区投票（/p/moderation/candidates）。
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Empty, Input, Table } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, Empty, Field, Input, Table, Tabs } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'moderation.ui.menu': '审核队列（{n}）',
@@ -25,6 +25,31 @@ registerMessages('zh-CN', {
   'moderation.ui.candidates': '候选区',
   'moderation.ui.up': '赞成（{n}）',
   'moderation.ui.down': '反对（{n}）',
+  'moderation.ui.release': '释放认领',
+  'moderation.ui.claimed_by': '已被 #{id} 认领',
+  'moderation.ui.history': '审核记录',
+  'moderation.ui.decision': '结论',
+  'moderation.ui.moderator': '审核员',
+  'moderation.ui.time': '时间',
+  'moderation.ui.filter_target': '对象（如 torrent:123）',
+  'moderation.ui.filter_moderator': '审核员 ID',
+  'moderation.ui.filter': '筛选',
+  'moderation.ui.words': '敏感词',
+  'moderation.ui.words_hint': '命中时：拦截（不允许发布）、打码（替换为 *）或送审（照常发布并记录命中）。目前对评论生效。',
+  'moderation.ui.pattern': '词语',
+  'moderation.ui.action': '处理方式',
+  'moderation.ui.action.block': '拦截',
+  'moderation.ui.action.mask': '打码',
+  'moderation.ui.action.review': '送审',
+  'moderation.ui.add': '添加',
+  'moderation.ui.delete': '删除',
+  'moderation.ui.inactive': '已停用',
+  'moderation.ui.hits': '命中记录',
+  'moderation.ui.scope': '位置',
+  'moderation.ui.author': '作者',
+  'moderation.ui.excerpt': '片段',
+  'moderation.ui.saved': '已保存',
+  'moderation.ui.scope.comment': '评论',
 });
 registerMessages('en', {
   'moderation.ui.menu': 'Review queue ({n})',
@@ -45,6 +70,31 @@ registerMessages('en', {
   'moderation.ui.candidates': 'Candidates',
   'moderation.ui.up': 'Up ({n})',
   'moderation.ui.down': 'Down ({n})',
+  'moderation.ui.release': 'Release claim',
+  'moderation.ui.claimed_by': 'Claimed by #{id}',
+  'moderation.ui.history': 'Decisions',
+  'moderation.ui.decision': 'Decision',
+  'moderation.ui.moderator': 'Moderator',
+  'moderation.ui.time': 'Time',
+  'moderation.ui.filter_target': 'Target (e.g. torrent:123)',
+  'moderation.ui.filter_moderator': 'Moderator ID',
+  'moderation.ui.filter': 'Filter',
+  'moderation.ui.words': 'Word filter',
+  'moderation.ui.words_hint': 'On a match: block (reject the text), mask (replace with *) or review (publish and record the hit). Applies to comments for now.',
+  'moderation.ui.pattern': 'Word',
+  'moderation.ui.action': 'Action',
+  'moderation.ui.action.block': 'Block',
+  'moderation.ui.action.mask': 'Mask',
+  'moderation.ui.action.review': 'Review',
+  'moderation.ui.add': 'Add',
+  'moderation.ui.delete': 'Delete',
+  'moderation.ui.inactive': 'inactive',
+  'moderation.ui.hits': 'Word hits',
+  'moderation.ui.scope': 'Where',
+  'moderation.ui.author': 'Author',
+  'moderation.ui.excerpt': 'Excerpt',
+  'moderation.ui.saved': 'Saved',
+  'moderation.ui.scope.comment': 'Comment',
 });
 
 function errText(api: PluginApi, e: unknown): string {
@@ -112,9 +162,9 @@ function Panel({ api, ctx }: SlotProps<{ torrent: { id: number } }>) {
       setErr(errText(api, e));
     }
   }
-  async function claim() {
+  async function claim(release = false) {
     try {
-      await api.fetch(`/api/p/moderation/v1/queue/${target}/claim`, { method: 'POST', json: {} });
+      await api.json(`/api/p/moderation/v1/queue/${target}/claim`, release ? { method: 'DELETE' } : { method: 'POST', json: {} });
       await load();
     } catch (e) {
       setErr(errText(api, e));
@@ -131,10 +181,16 @@ function Panel({ api, ctx }: SlotProps<{ torrent: { id: number } }>) {
         <p>{api.t('moderation.ui.done', { d: done })}</p>
       ) : (
         <div className="pt-stack">
-          {item.claimed_by === null && (
+          {item.claimed_by === null ? (
             <Button variant="ghost" onClick={() => void claim()}>
               {api.t('moderation.ui.claim')}
             </Button>
+          ) : item.claimed_by === api.user()?.id ? (
+            <Button variant="ghost" onClick={() => void claim(true)}>
+              {api.t('moderation.ui.release')}
+            </Button>
+          ) : (
+            <span className="pt-muted small">{api.t('moderation.ui.claimed_by', { id: item.claimed_by })}</span>
           )}
           <Input aria-label={api.t('moderation.ui.note')} placeholder={api.t('moderation.ui.note')} value={note} onChange={(e) => setNote(e.target.value)} />
           <span className="pt-row">
@@ -237,8 +293,194 @@ function Candidates({ api }: { api: PluginApi }) {
   );
 }
 
+interface Decision {
+  target: string;
+  decision: string;
+  note: string | null;
+  moderator_id: number | null;
+  actor: string | null;
+  created_at: number;
+}
+
+function History({ api }: { api: PluginApi }) {
+  const [rows, setRows] = useState<Decision[]>([]);
+  const [f, setF] = useState({ target: '', moderator: '' });
+  const load = useCallback(
+    async (target: string, moderator: string) => {
+      const q = new URLSearchParams();
+      if (target.trim()) q.set('target', target.trim());
+      if (moderator.trim()) q.set('moderator_id', moderator.trim());
+      try {
+        setRows((await api.json<{ items: Decision[] }>(`/api/p/moderation/v1/history?${q.toString()}`)).items);
+      } catch (e) {
+        api.toast(errText(api, e), 'error');
+      }
+    },
+    [api],
+  );
+  useEffect(() => {
+    void load('', '');
+  }, [load]);
+  const targetLink = (t: string) => (t.startsWith('torrent:') ? link(api, `/torrents/${t.slice(8)}`, t) : t);
+  return (
+    <Card title={api.t('moderation.ui.history')}>
+      <form
+        className="searchbar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void load(f.target, f.moderator);
+        }}
+      >
+        <Input name="history_target" aria-label={api.t('moderation.ui.filter_target')} placeholder={api.t('moderation.ui.filter_target')} value={f.target} onChange={(e) => setF({ ...f, target: e.target.value })} />
+        <Input name="history_moderator" type="number" aria-label={api.t('moderation.ui.filter_moderator')} placeholder={api.t('moderation.ui.filter_moderator')} value={f.moderator} onChange={(e) => setF({ ...f, moderator: e.target.value })} />
+        <Button type="submit">{api.t('moderation.ui.filter')}</Button>
+      </form>
+      <Table
+        rows={rows}
+        rowKey={(r) => `${r.target}:${r.created_at}:${r.decision}`}
+        empty={<Empty>—</Empty>}
+        columns={[
+          { key: 't', header: api.t('moderation.ui.time'), render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
+          { key: 'o', header: api.t('moderation.ui.title'), render: (r) => targetLink(r.target) },
+          {
+            key: 'd',
+            header: api.t('moderation.ui.decision'),
+            render: (r) => (
+              <>
+                <Badge tone={r.decision === 'approve' ? 'success' : r.decision === 'reject' ? 'danger' : 'muted'}>{api.t(`moderation.ui.${r.decision}`)}</Badge>
+                {r.note && <div className="pt-muted small">{r.note}</div>}
+              </>
+            ),
+          },
+          { key: 'm', header: api.t('moderation.ui.moderator'), render: (r) => (r.moderator_id ? link(api, `/users/${r.moderator_id}`, `#${r.moderator_id}`) : (r.actor ?? '—')) },
+        ]}
+      />
+    </Card>
+  );
+}
+
+interface Word {
+  id: number;
+  pattern: string;
+  action: string;
+  scopes: string;
+  active: boolean;
+}
+
+function Words({ api }: { api: PluginApi }) {
+  const [rows, setRows] = useState<Word[]>([]);
+  const [f, setF] = useState({ pattern: '', action: 'review' });
+  const load = useCallback(async () => setRows((await api.json<{ items: Word[] }>('/api/p/moderation/v1/admin/words')).items), [api]);
+  useEffect(() => {
+    void load().catch(() => undefined);
+  }, [load]);
+  const act = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+      api.toast(api.t('moderation.ui.saved'), 'success');
+      await load();
+    } catch (e) {
+      api.toast(errText(api, e), 'error');
+    }
+  };
+  return (
+    <Card title={api.t('moderation.ui.words')}>
+      <p className="pt-muted small">{api.t('moderation.ui.words_hint')}</p>
+      <form
+        className="upload-grid"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act(async () => {
+            await api.json('/api/p/moderation/v1/admin/words', { json: { pattern: f.pattern.trim(), action: f.action, scopes: ['comment'] } });
+            setF({ ...f, pattern: '' });
+          });
+        }}
+      >
+        <Field label={api.t('moderation.ui.pattern')}>
+          <Input name="word_pattern" required maxLength={100} value={f.pattern} onChange={(e) => setF({ ...f, pattern: e.target.value })} />
+        </Field>
+        <Field label={api.t('moderation.ui.action')}>
+          <select className="pt-input" name="word_action" value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })}>
+            {['block', 'mask', 'review'].map((a) => (
+              <option key={a} value={a}>
+                {api.t(`moderation.ui.action.${a}`)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="span2">
+          <Button type="submit" variant="primary" disabled={!f.pattern.trim()}>
+            {api.t('moderation.ui.add')}
+          </Button>
+        </div>
+      </form>
+      <Table
+        rows={rows}
+        rowKey={(r) => r.id}
+        empty={<Empty>—</Empty>}
+        columns={[
+          { key: 'p', header: api.t('moderation.ui.pattern'), render: (r) => <code>{r.pattern}</code> },
+          { key: 'a', header: api.t('moderation.ui.action'), render: (r) => <Badge tone={r.action === 'block' ? 'danger' : 'muted'}>{api.t(`moderation.ui.action.${r.action}`)}</Badge> },
+          { key: 's', header: api.t('moderation.ui.scope'), render: (r) => <span className="pt-muted small">{r.scopes.replace(/[{}]/g, '')}</span> },
+          {
+            key: 'x',
+            header: '',
+            render: (r) => (
+              <>
+                {!r.active && <Badge>{api.t('moderation.ui.inactive')}</Badge>}{' '}
+                <Button variant="ghost" onClick={() => void act(() => api.json(`/api/p/moderation/v1/admin/words/${r.id}`, { method: 'DELETE' }))}>
+                  {api.t('moderation.ui.delete')}
+                </Button>
+              </>
+            ),
+          },
+        ]}
+      />
+    </Card>
+  );
+}
+
+function Hits({ api }: { api: PluginApi }) {
+  const [rows, setRows] = useState<{ id: number; scope: string; author_id: number; excerpt: string; created_at: number }[]>([]);
+  useEffect(() => {
+    void api
+      .json<{ items: typeof rows }>('/api/p/moderation/v1/admin/word-hits')
+      .then((r) => setRows(r.items))
+      .catch(() => undefined);
+  }, [api]);
+  return (
+    <Card title={api.t('moderation.ui.hits')}>
+      <Table
+        rows={rows}
+        rowKey={(r) => r.id}
+        empty={<Empty>—</Empty>}
+        columns={[
+          { key: 't', header: api.t('moderation.ui.time'), render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
+          { key: 's', header: api.t('moderation.ui.scope'), render: (r) => (api.t(`moderation.ui.scope.${r.scope}`) === `moderation.ui.scope.${r.scope}` ? r.scope : api.t(`moderation.ui.scope.${r.scope}`)) },
+          { key: 'a', header: api.t('moderation.ui.author'), render: (r) => link(api, `/users/${r.author_id}`, `#${r.author_id}`) },
+          { key: 'e', header: api.t('moderation.ui.excerpt'), render: (r) => <span className="pt-prewrap">{r.excerpt}</span> },
+        ]}
+      />
+    </Card>
+  );
+}
+
+function Admin({ api }: { api: PluginApi }) {
+  const [tab, setTab] = useState('queue');
+  return (
+    <div className="pt-stack">
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={['queue', 'history', 'words', 'hits'].map((id) => ({ id, label: api.t(`moderation.ui.${id}`) }))}
+      />
+      {tab === 'queue' ? <Queue api={api} /> : tab === 'history' ? <History api={api} /> : tab === 'words' ? <Words api={api} /> : <Hits api={api} />}
+    </div>
+  );
+}
+
 function Pages({ api, path }: { api: PluginApi; path: string }) {
-  if (path.startsWith('/admin/p/moderation')) return <Queue api={api} />;
+  if (path.startsWith('/admin/p/moderation')) return <Admin api={api} />;
   return <Candidates api={api} />;
 }
 

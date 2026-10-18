@@ -432,6 +432,34 @@ async fn ledger_end_to_end() {
     )
     .await;
     assert_eq!(r.body["code"], "ledger.already_reversed");
+    // 后台流水列表：能看到已冲正的那笔转账（冲正按钮依赖 entry_id）
+    let mg = [("cookie", m_cookie.as_str()), ("sec-fetch-site", "same-origin")];
+    let r = call(
+        &app,
+        "GET",
+        &format!("/api/p/ledger/v1/admin/users/{alice}/entries?limit=200"),
+        None,
+        &mg,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let items = r.body["items"].as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|e| e["entry_id"] == json!(transfer_entry) && e["reversed"] == true),
+        "{items:?}"
+    );
+    let ag = [("cookie", a_cookie.as_str()), ("sec-fetch-site", "same-origin")];
+    let r = call(
+        &app,
+        "GET",
+        &format!("/api/p/ledger/v1/admin/users/{alice}/entries"),
+        None,
+        &ag,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
     // 普通用户不能调用管理接口
     let h = [
         ("cookie", a_cookie.as_str()),

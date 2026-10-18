@@ -128,7 +128,7 @@ premake = 3
 [frontend]
 entry = "index.js"
 slots = ["user.profile.stats", "nav.user_menu", "admin.user.tabs"]
-routes = ["/p/levels/*"]
+routes = ["/p/levels/*", "/admin/p/levels/*"]
 settings_ui = "schema"
 
 # 运行时设置（后台“插件设置”）。等级列表的顺序即等级高低（从低到高）；key 是等级的唯一标识

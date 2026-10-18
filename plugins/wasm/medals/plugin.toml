@@ -187,7 +187,7 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["user.profile.header", "user.profile.badges", "nav.user_menu"]
+slots = ["user.profile.header", "user.profile.badges", "nav.user_menu", "user.name.decorations"]
 routes = ["/p/medals/*", "/admin/p/medals/*"]
 settings_ui = "schema"
 

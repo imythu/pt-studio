@@ -363,6 +363,51 @@ try {
   await a.goto(`${BASE}/admin/p/ai-moderation/`);
   await a.getByRole('heading', { name: 'AI 内容审核' }).waitFor();
 
+  // 6d'''. 补齐的界面：等级总览、流量信号、货币设置、敏感词；种子页员工区手动促销（设置 → 取消）
+  step('more admin pages');
+  await a.goto(`${BASE}/admin/p/levels/`);
+  await a.getByRole('heading', { name: '等级总览' }).waitFor();
+  await a.getByRole('cell', { name: 'levels:class_20', exact: true }).waitFor();
+  await a.goto(`${BASE}/admin/p/accounting/`);
+  await a.getByRole('heading', { name: '流量异常信号' }).waitFor();
+  await a.goto(`${BASE}/admin/p/ledger/`);
+  await a.getByRole('heading', { name: '货币设置' }).waitFor();
+  await a.goto(`${BASE}/admin/p/moderation/`);
+  await a.getByRole('tab', { name: '敏感词' }).click();
+  await a.locator('input[name=word_pattern]').fill('网页违禁词');
+  await a.getByRole('button', { name: '添加', exact: true }).click();
+  await a.getByRole('cell', { name: '网页违禁词' }).waitFor();
+  await a.getByRole('tab', { name: '审核记录' }).click();
+  await a.getByRole('button', { name: '筛选' }).waitFor();
+  await a.goto(`${BASE}/torrents/${TID}`);
+  await a.getByRole('tab', { name: '促销', exact: true }).click();
+  await a.locator('select[name=manual_kind]').selectOption('free');
+  await a.getByRole('button', { name: '设置', exact: true }).click();
+  await a.getByRole('tabpanel').locator('.pt-badge', { hasText: '免费' }).first().waitFor();
+  await a.getByRole('button', { name: '取消手动促销' }).click();
+  await a.getByRole('tabpanel').getByText(/当前促销: 无/).waitFor();
+
+  // 6d''''. 用户侧补齐的页面：我的 H&R、转账、个人页标签、站内信设置（接收范围）
+  step('more user pages');
+  await p.goto(`${BASE}/p/hnr/`);
+  await p.getByRole('heading', { name: '我的 H&R' }).waitFor();
+  await p.goto(`${BASE}/p/ledger/transfer`);
+  await p.getByRole('heading', { name: '转账给其他用户' }).waitFor();
+  await openMenu(p);
+  await p.getByRole('menuitem', { name: '个人主页' }).click();
+  await p.getByRole('tab', { name: '评论' }).click();
+  await p.getByText('好资源').waitFor();
+  await p.getByRole('tab', { name: '邀请树' }).click();
+  await p.getByText('邀请链').waitFor();
+  await p.goto(`${BASE}/settings`);
+  await p.getByRole('tab', { name: '更多' }).click();
+  await p.getByRole('tab', { name: '站内信' }).click();
+  await p.getByRole('radio', { name: '仅管理组' }).check();
+  await p.getByText('已保存').first().waitFor();
+  await p.waitForFunction(async () => (await (await fetch('/api/p/messages/v1/settings')).json()).accept === 'staff_only');
+  await p.getByRole('radio', { name: '所有用户' }).check();
+  await p.waitForFunction(async () => (await (await fetch('/api/p/messages/v1/settings')).json()).accept === 'all');
+
   // 6e. 种子审核：管理员设为 disabled
   step('torrent moderation');
   await a.goto(`${BASE}/torrents/${TID}`);
@@ -581,11 +626,11 @@ try {
   const mp = await mobile(p);
   const ma = await mobile(a);
   const mobileProblems = [];
-  for (const path of ['/', '/torrents', `/torrents/${TID}`, '/upload', '/me', '/settings', '/p/forum/', '/p/messages/', '/p/tickets/', '/p/shop/', '/p/medals/', '/p/lottery/', '/p/bonus/', '/p/donations/', '/p/levels/', '/p/invite/']) {
+  for (const path of ['/', '/torrents', `/torrents/${TID}`, '/upload', '/me', '/settings', '/p/forum/', '/p/messages/', '/p/tickets/', '/p/shop/', '/p/medals/', '/p/lottery/', '/p/bonus/', '/p/donations/', '/p/levels/', '/p/invite/', '/p/hnr/', '/p/ledger/transfer']) {
     const bad = await overflowAt(mp, path);
     if (bad.length) mobileProblems.push(`${path}: ${bad.join(', ')}`);
   }
-  for (const path of ['/admin', `/admin/users/${bobId}`, '/admin/audit', '/admin/p/invite/', '/admin/p/promotion/', '/admin/p/shop/', '/admin/p/medals/', '/admin/p/donations/', '/admin/p/tickets/', '/admin/p/messages/', '/admin/p/lottery/']) {
+  for (const path of ['/admin', `/admin/users/${bobId}`, '/admin/audit', '/admin/p/invite/', '/admin/p/promotion/', '/admin/p/shop/', '/admin/p/medals/', '/admin/p/donations/', '/admin/p/tickets/', '/admin/p/messages/', '/admin/p/lottery/', '/admin/p/levels/', '/admin/p/accounting/', '/admin/p/ledger/', '/admin/p/moderation/']) {
     const bad = await overflowAt(ma, path);
     if (bad.length) mobileProblems.push(`${path}: ${bad.join(', ')}`);
   }

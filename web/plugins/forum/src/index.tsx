@@ -1,8 +1,8 @@
-// forum 前端：版块首页、主题列表与发主题（可带投票）、主题页（分页、引用、感谢、编辑 / 删除、投票、订阅、版主工具栏）、
-// 首页公告（home.announcements）、主导航入口、后台版块管理。
+// forum 前端：版块首页、主题列表与发主题（可带投票）、主题页（分页、引用、感谢、编辑 / 删除、投票、订阅、版主工具栏、
+// 帖子编辑历史）、首页公告（home.announcements）、主导航入口、后台版块管理（新建、编辑、停用、增删版主）。
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError, renderPreview } from '@pt-studio/sdk';
-import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
+import { Slot, type PluginApi, type PluginFrontend, type SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
 import { Badge, Button, Card, Field, Input, MarkdownEditor, Table, UserContent } from '@pt-studio/ui-kit';
 
@@ -56,6 +56,14 @@ registerMessages('zh-CN', {
   'forum.ui.min_create': '发主题最低等级 ID',
   'forum.ui.moderators': '版主（用户 ID）',
   'forum.ui.add_moderator': '添加版主',
+  'forum.ui.remove_moderator': '移除版主 #{id}',
+  'forum.ui.edit_board': '编辑版块：{name}',
+  'forum.ui.board_active': '启用',
+  'forum.ui.inactive': '已停用',
+  'forum.ui.saved': '已保存',
+  'forum.ui.history': '编辑历史',
+  'forum.ui.history_item': '{at} · {editor} 修改前：',
+  'forum.ui.hide': '收起',
   'forum.board_not_found': '版块不存在',
   'forum.topic_not_found': '主题不存在',
   'forum.post_not_found': '帖子不存在',
@@ -119,6 +127,14 @@ registerMessages('en', {
   'forum.ui.min_create': 'Min class ID to start topics',
   'forum.ui.moderators': 'Moderators (user IDs)',
   'forum.ui.add_moderator': 'Add moderator',
+  'forum.ui.remove_moderator': 'Remove moderator #{id}',
+  'forum.ui.edit_board': 'Edit board: {name}',
+  'forum.ui.board_active': 'Active',
+  'forum.ui.inactive': 'inactive',
+  'forum.ui.saved': 'Saved',
+  'forum.ui.history': 'Edit history',
+  'forum.ui.history_item': '{at} · {editor}, before:',
+  'forum.ui.hide': 'Hide',
   'forum.board_not_found': 'Board not found',
   'forum.topic_not_found': 'Topic not found',
   'forum.post_not_found': 'Post not found',
@@ -518,7 +534,23 @@ function TopicPage({ api, id }: { api: PluginApi; id: number }) {
       )}
       {d.poll && <PollBox api={api} tid={id} poll={d.poll} reload={load} />}
       {d.posts.map((p) => (
-        <Card key={p.id} title={`${api.t('forum.ui.floor', { n: p.floor })} · ${p.author ?? '—'} · ${when(p.created_at)}${p.edited_at ? ' *' : ''}`}>
+        <Card
+          key={p.id}
+          title={
+            <>
+              {`${api.t('forum.ui.floor', { n: p.floor })} · `}
+              {p.author_id !== null ? (
+                <A api={api} to={`/users/${p.author_id}`}>
+                  {p.author ?? `#${p.author_id}`}
+                </A>
+              ) : (
+                (p.author ?? '—')
+              )}
+              {p.author_id !== null && <Slot name="user.name.decorations" ctx={{ user_id: p.author_id, size: 'sm' }} className="user-deco" />}
+              {` · ${when(p.created_at)}${p.edited_at ? ' *' : ''}`}
+            </>
+          }
+        >
           {editing?.id === p.id ? (
             <form
               onSubmit={(e) => {
@@ -565,6 +597,7 @@ function TopicPage({ api, id }: { api: PluginApi; id: number }) {
                   {api.t('forum.ui.delete')}
                 </Button>
               )}
+              {t.moderator && p.edited_at && <PostHistory api={api} id={p.id} />}
             </p>
           )}
         </Card>
@@ -634,11 +667,44 @@ function NavItem({ api }: SlotProps) {
   );
 }
 
+/** 帖子编辑历史（版主） */
+function PostHistory({ api, id }: { api: PluginApi; id: number }) {
+  const [items, setItems] = useState<{ editor_id: number; editor: string | null; source: string; edited_at: number }[] | null>(null);
+  const toggle = async () => {
+    if (items) {
+      setItems(null);
+      return;
+    }
+    try {
+      setItems((await api.json<{ items: NonNullable<typeof items> }>(`/api/p/forum/v1/posts/${id}/history`)).items);
+    } catch (e) {
+      api.toast(errText(api, e), 'error');
+    }
+  };
+  return (
+    <>
+      <Button variant="ghost" onClick={() => void toggle()}>
+        {api.t(items ? 'forum.ui.hide' : 'forum.ui.history')}
+      </Button>
+      {items && (
+        <span className="pt-stack pt-muted small" style={{ flexBasis: '100%' }}>
+          {items.map((h, i) => (
+            <span key={i}>
+              {api.t('forum.ui.history_item', { at: new Date(h.edited_at).toLocaleString(), editor: h.editor ?? `#${h.editor_id}` })}
+              <pre className="pt-mono pt-prewrap">{h.source}</pre>
+            </span>
+          ))}
+        </span>
+      )}
+    </>
+  );
+}
+
 // ---------------- 后台 ----------------
 
 interface AdminData {
   categories: { id: number; name: string }[];
-  boards: { id: number; category_id: number; name: string; description: string | null; acl: Record<string, { min_class: number | null }>; active: boolean; moderators: number[] }[];
+  boards: { id: number; category_id: number; name: string; description: string | null; acl: Record<string, { min_class: number | null; roles?: string[] }>; active: boolean; moderators: number[] }[];
 }
 
 function Admin({ api }: { api: PluginApi }) {
@@ -646,6 +712,7 @@ function Admin({ api }: { api: PluginApi }) {
   const [cat, setCat] = useState('');
   const [f, setF] = useState({ category_id: '', name: '', description: '', read: '', reply: '', create: '' });
   const [modIds, setModIds] = useState<Record<number, string>>({});
+  const [editing, setEditing] = useState<number | null>(null);
   const load = () => api.json<AdminData>('/api/p/forum/v1/admin/boards').then(setD);
   useEffect(() => {
     void load();
@@ -670,14 +737,29 @@ function Admin({ api }: { api: PluginApi }) {
           columns={[
             { key: 'id', header: 'ID', render: (b) => b.id },
             { key: 'c', header: api.t('forum.ui.category'), render: (b) => d.categories.find((c) => c.id === b.category_id)?.name ?? '' },
-            { key: 'n', header: api.t('forum.ui.board'), render: (b) => b.name },
+            {
+              key: 'n',
+              header: api.t('forum.ui.board'),
+              render: (b) => (
+                <>
+                  {b.name} {!b.active && <Badge>{api.t('forum.ui.inactive')}</Badge>}{' '}
+                  <Button variant="ghost" onClick={() => setEditing(b.id)}>
+                    {api.t('forum.ui.edit')}
+                  </Button>
+                </>
+              ),
+            },
             { key: 'a', header: 'ACL', render: (b) => <code className="small">{['read', 'reply', 'create'].map((k) => `${k}≥${b.acl?.[k]?.min_class ?? '-'}`).join(' ')}</code> },
             {
               key: 'm',
               header: api.t('forum.ui.moderators'),
               render: (b) => (
                 <span className="searchbar">
-                  {b.moderators.join(', ')}
+                  {b.moderators.map((m) => (
+                    <Button key={m} variant="ghost" title={api.t('forum.ui.remove_moderator', { id: m })} onClick={() => void act(() => api.json(`/api/p/forum/v1/admin/boards/${b.id}/moderators/${m}`, { method: 'DELETE' }))}>
+                      {`#${m} ✕`}
+                    </Button>
+                  ))}
                   <Input name={`mod_${b.id}`} type="number" value={modIds[b.id] ?? ''} onChange={(e) => setModIds({ ...modIds, [b.id]: e.target.value })} />
                   <Button disabled={!modIds[b.id]} onClick={() => void act(() => api.json(`/api/p/forum/v1/admin/boards/${b.id}/moderators`, { json: { user_id: Number(modIds[b.id]) } }))}>
                     +
@@ -688,6 +770,18 @@ function Admin({ api }: { api: PluginApi }) {
           ]}
         />
       </Card>
+      {editing !== null && d.boards.some((b) => b.id === editing) && (
+        <BoardEdit
+          key={editing}
+          api={api}
+          board={d.boards.find((b) => b.id === editing) as AdminData['boards'][number]}
+          categories={d.categories}
+          onDone={() => {
+            setEditing(null);
+            void load();
+          }}
+        />
+      )}
       <Card title={api.t('forum.ui.add_category')}>
         <form
           className="searchbar"
@@ -751,6 +845,83 @@ function Admin({ api }: { api: PluginApi }) {
         </form>
       </Card>
     </div>
+  );
+}
+
+function BoardEdit({ api, board, categories, onDone }: { api: PluginApi; board: AdminData['boards'][number]; categories: AdminData['categories']; onDone(): void }) {
+  const s = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
+  const [f, setF] = useState({
+    category_id: String(board.category_id),
+    name: board.name,
+    description: board.description ?? '',
+    read: s(board.acl?.read?.min_class),
+    reply: s(board.acl?.reply?.min_class),
+    create: s(board.acl?.create?.min_class),
+    active: board.active,
+  });
+  const num = (v: string) => (v.trim() === '' ? null : Number(v));
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.json(`/api/p/forum/v1/admin/boards/${board.id}`, {
+        method: 'PATCH',
+        json: {
+          category_id: Number(f.category_id),
+          name: f.name,
+          description: f.description,
+          active: f.active,
+          // 只编辑最低等级；按角色的放行规则原样保留
+          acl: Object.fromEntries((['read', 'reply', 'create'] as const).map((k) => [k, { min_class: num(f[k]), roles: board.acl?.[k]?.roles ?? [] }])),
+        },
+      });
+      api.toast(api.t('forum.ui.saved'), 'success');
+      onDone();
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
+    }
+  };
+  return (
+    <Card title={api.t('forum.ui.edit_board', { name: board.name })}>
+      <form onSubmit={(e) => void save(e)} className="upload-grid">
+        <Field label={api.t('forum.ui.category')}>
+          <select className="pt-input" name="edit_board_category" value={f.category_id} onChange={(e) => setF({ ...f, category_id: e.target.value })}>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={api.t('forum.ui.board')}>
+          <Input name="edit_board_name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={60} />
+        </Field>
+        <div className="span2">
+          <Field label="">
+            <Input name="edit_board_description" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} maxLength={300} />
+          </Field>
+        </div>
+        <Field label={api.t('forum.ui.min_read')}>
+          <Input name="edit_acl_read" type="number" value={f.read} onChange={(e) => setF({ ...f, read: e.target.value })} />
+        </Field>
+        <Field label={api.t('forum.ui.min_reply')}>
+          <Input name="edit_acl_reply" type="number" value={f.reply} onChange={(e) => setF({ ...f, reply: e.target.value })} />
+        </Field>
+        <Field label={api.t('forum.ui.min_create')}>
+          <Input name="edit_acl_create" type="number" value={f.create} onChange={(e) => setF({ ...f, create: e.target.value })} />
+        </Field>
+        <label className="pt-check">
+          <input type="checkbox" name="edit_board_active" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> {api.t('forum.ui.board_active')}
+        </label>
+        <div className="span2">
+          <Button type="submit" variant="primary">
+            {api.t('forum.ui.save')}
+          </Button>{' '}
+          <Button type="button" onClick={onDone}>
+            {api.t('forum.ui.cancel')}
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }
 

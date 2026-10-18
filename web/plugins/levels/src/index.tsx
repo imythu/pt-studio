@@ -1,5 +1,6 @@
 // levels 前端：个人页的等级（任何人的个人页都显示等级；本人另显示升级进度与保级警告）、
-// 等级说明页（/p/levels/：全部等级、说明、升级与保级条件、我的进度）、用户菜单入口。
+// 等级说明页（/p/levels/：全部等级、说明、升级与保级条件、我的进度）、用户菜单入口；
+// 后台等级总览（/admin/p/levels/：设置同步状态与错误、每个等级对应的权限角色）。
 // 等级的名称 / 说明可在插件设置中修改；为空时用内置术语（随界面语言）。
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@pt-studio/sdk';
@@ -85,6 +86,18 @@ registerMessages('zh-CN', {
   'levels.ui.protect': '保号',
   'levels.ui.protected_until': '保号至 {t}',
   'levels.ui.done': '已保存',
+  'levels.ui.admin': '等级总览',
+  'levels.ui.synced': '设置最近一次生效于 {t}',
+  'levels.ui.sync_error': '最新的等级设置未能生效：{e}',
+  'levels.ui.edit_settings': '编辑等级',
+  'levels.ui.role_hint': '每个等级有自己的角色 levels:class_<id>，可在角色管理中为它配置权限。把用户设为管理组类型的等级（如“管理员”）只改变头衔与颜色，内置角色（moderator / admin）需要另外授予。',
+  'levels.ui.type': '类型',
+  'levels.ui.type.normal': '普通',
+  'levels.ui.type.vip': 'VIP',
+  'levels.ui.type.honor': '荣誉',
+  'levels.ui.type.staff': '管理组',
+  'levels.ui.role': '角色',
+  'levels.ui.flags': '属性',
 });
 registerMessages('en', {
   'levels.ui.class': 'Class',
@@ -128,6 +141,18 @@ registerMessages('en', {
   'levels.ui.protect': 'Protect',
   'levels.ui.protected_until': 'Protected until {t}',
   'levels.ui.done': 'Saved',
+  'levels.ui.admin': 'Classes',
+  'levels.ui.synced': 'Settings last applied {t}',
+  'levels.ui.sync_error': 'The latest class settings could not be applied: {e}',
+  'levels.ui.edit_settings': 'Edit classes',
+  'levels.ui.role_hint': 'Each class has its own role levels:class_<id>; configure its permissions under roles. Setting a staff-type class (e.g. Administrator) only changes the title and colour — grant the built-in roles (moderator / admin) separately.',
+  'levels.ui.type': 'Type',
+  'levels.ui.type.normal': 'regular',
+  'levels.ui.type.vip': 'VIP',
+  'levels.ui.type.honor': 'honour',
+  'levels.ui.type.staff': 'staff',
+  'levels.ui.role': 'Role',
+  'levels.ui.flags': 'Flags',
 });
 
 const OPS: Record<string, string> = { gte: '≥', gt: '>', lte: '≤', lt: '<' };
@@ -385,11 +410,65 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   );
 }
 
+/** 后台等级总览（/admin/p/levels/） */
+function Admin({ api }: { api: PluginApi }) {
+  const [d, setD] = useState<{ items: ClassInfo[]; settings_error: string | null; synced_at: number | null } | null>(null);
+  useEffect(() => {
+    void api.json<NonNullable<typeof d>>('/api/p/levels/v1/admin/classes').then(setD);
+  }, [api]);
+  if (!d) return null;
+  return (
+    <div className="pt-stack">
+      <div className="page-head">
+        <h1 className="page-title">{api.t('levels.ui.admin')}</h1>
+        <a
+          className="pt-btn"
+          href="/admin/p/levels/settings"
+          onClick={(e) => {
+            e.preventDefault();
+            api.navigate('/admin/p/levels/settings');
+          }}
+        >
+          {api.t('levels.ui.edit_settings')}
+        </a>
+      </div>
+      {d.settings_error && <p className="pt-error">{api.t('levels.ui.sync_error', { e: d.settings_error })}</p>}
+      <Card>
+        {d.synced_at && <p className="pt-muted small">{api.t('levels.ui.synced', { t: new Date(d.synced_at).toLocaleString() })}</p>}
+        <p className="pt-muted small">{api.t('levels.ui.role_hint')}</p>
+        <Table
+          rows={d.items}
+          rowKey={(c) => c.key}
+          columns={[
+            { key: 'n', header: api.t('levels.ui.name'), render: (c) => <ClassName api={api} c={c} /> },
+            { key: 'k', header: 'key', render: (c) => <code className="small">{c.key}</code> },
+            { key: 't', header: api.t('levels.ui.type'), render: (c) => api.t(`levels.ui.type.${c.type}`) },
+            {
+              key: 'f',
+              header: api.t('levels.ui.flags'),
+              render: (c) => (
+                <>
+                  {c.is_default && <Badge>{api.t('levels.ui.default')}</Badge>} {!c.can_invite && <Badge>{api.t('levels.ui.no_invite')}</Badge>}{' '}
+                  {c.protected && <Badge>{api.t('levels.ui.never_demoted')}</Badge>}
+                </>
+              ),
+            },
+            { key: 'r', header: api.t('levels.ui.role'), render: (c) => <code className="small">{`levels:class_${c.id}`}</code> },
+          ]}
+        />
+      </Card>
+    </div>
+  );
+}
+
 export default {
   slots: {
     'admin.user.tabs': { component: UserTab, order: 5, title_term: 'levels.ui.tab' },
     'user.profile.stats': { component: LevelStat, order: 10 },
     'nav.user_menu': { component: MenuItem, order: 30 },
   },
-  routes: [{ path: '/p/levels/*', component: Page }],
+  routes: [
+    { path: '/p/levels/*', component: Page },
+    { path: '/admin/p/levels/*', component: Admin },
+  ],
 } satisfies PluginFrontend;

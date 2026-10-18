@@ -333,6 +333,14 @@ async fn hnr_end_to_end() {
     )
     .await;
     assert_eq!(r.body["items"][0]["id"], rid);
+    // 记录带种子标题（我的 H&R 页直接显示）
+    assert!(
+        r.body["items"][0]["title"]
+            .as_str()
+            .is_some_and(|t| !t.is_empty()),
+        "{:?}",
+        r.body
+    );
     let r = call(
         &app,
         "GET",

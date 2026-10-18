@@ -523,10 +523,11 @@ fn records(uid: i64, state: Option<&str>, cursor: Option<&str>) -> R<Value> {
     let before = cursor.and_then(|c| c.parse::<i64>().ok()).unwrap_or(i64::MAX);
     let rows = q(
         &format!(
-            "SELECT id, torrent_id, state, {}, {}, seed_secs_snapshot, ratio_snapshot, exempt_rule
-               FROM records WHERE user_id = $1 AND ($2::text IS NULL OR state = $2) AND id < $3 ORDER BY id DESC LIMIT 51",
-            ms("completed_at"),
-            ms("deadline")
+            "SELECT r.id, r.torrent_id, r.state, {}, {}, r.seed_secs_snapshot, r.ratio_snapshot, r.exempt_rule, t.title
+               FROM records r LEFT JOIN torrent.v_torrent_public t ON t.id = r.torrent_id
+              WHERE r.user_id = $1 AND ($2::text IS NULL OR r.state = $2) AND r.id < $3 ORDER BY r.id DESC LIMIT 51",
+            ms("r.completed_at"),
+            ms("r.deadline")
         ),
         &[i(uid), state.map_or(SqlValue::Null, t), i(before)],
     )?;
@@ -537,7 +538,7 @@ fn records(uid: i64, state: Option<&str>, cursor: Option<&str>) -> R<Value> {
             json!({ "id": int(&r[0]), "torrent_id": int(&r[1]), "state": text(&r[2]), "completed_at": int(&r[3]),
                     "deadline": int(&r[4]), "seed_secs": int(&r[5]), "required_seed_secs": s.min_seed_hours * 3600,
                     "ratio": num(&r[6]), "required_ratio": (s.min_torrent_ratio > 0.0).then_some(s.min_torrent_ratio),
-                    "exempt_rule": otext(&r[7]) })
+                    "exempt_rule": otext(&r[7]), "title": otext(&r[8]) })
         })
         .collect();
     let next = (rows.len() > 50)

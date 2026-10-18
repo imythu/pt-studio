@@ -174,7 +174,7 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["nav.user_menu", "home.announcements"]
+slots = ["nav.user_menu", "home.announcements", "user.settings.tabs"]
 routes = ["/p/messages/*", "/admin/p/messages/*"]
 settings_ui = "schema"
 

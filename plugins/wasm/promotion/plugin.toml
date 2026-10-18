@@ -152,8 +152,8 @@ premake = 3
 
 [frontend]
 entry = "index.js"
-slots = ["torrent.list.row_badges", "torrent.detail.header", "admin.user.tabs"]
-routes = ["/admin/p/promotion/*"]
+slots = ["torrent.list.row_badges", "torrent.detail.header", "torrent.detail.actions", "nav.user_menu", "admin.user.tabs", "admin.torrent.tabs"]
+routes = ["/p/promotion/*", "/admin/p/promotion/*"]
 settings_ui = "schema"
 
 [terms]

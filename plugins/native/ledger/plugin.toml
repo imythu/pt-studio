@@ -88,6 +88,13 @@ path = "/v1/admin/users/{id}/balances"
 auth = "admin"
 permission = "ledger.balance.read"
 
+[[http.routes]]
+id = "admin_user_entries"
+method = "GET"
+path = "/v1/admin/users/{id}/entries"
+auth = "admin"
+permission = "ledger.balance.read"
+
 [[permissions]]
 name = "ledger.balance.read"
 description_term = "ledger.perm.balance_read"
@@ -125,4 +132,4 @@ premake = 2
 [frontend]
 entry = "index.js"
 slots = ["admin.user.tabs"]
-routes = []
+routes = ["/p/ledger/*", "/admin/p/ledger/*"]

@@ -8,6 +8,7 @@ import { api } from '@pt-studio/sdk';
 import { Icon, Logo, type IconName } from '../art';
 import { useSession } from '../session';
 import { useInstalled, useManifest } from '../manifest';
+import { SuggestInput } from '../suggest';
 
 function currentTheme(): 'dark' | 'light' {
   const set = document.documentElement.dataset.theme;
@@ -59,7 +60,7 @@ function NavSearch() {
       }}
     >
       <Icon name="search" size={16} />
-      <input type="search" name="nav_q" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('ui.torrent.search')} aria-label={t('ui.torrent.search')} />
+      <SuggestInput type="search" name="nav_q" value={q} onValue={setQ} placeholder={t('ui.torrent.search')} aria-label={t('ui.torrent.search')} />
     </form>
   );
 }

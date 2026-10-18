@@ -1,6 +1,6 @@
 # 前端插槽目录
 
-> 版本 0.1 · 2026-10-04 · 机制见 design/06 §3
+> 版本 0.1 · 2026-10-04（2026-10-18 更新预期使用者） · 机制见 design/06 §3
 
 ## 1. 规则
 
@@ -32,7 +32,7 @@ export default {
 |---|---|---|---|
 | `app.head` | list | `{}` | 主题、统计脚本（受 CSP 限制） |
 | `nav.main` | list | `{ user? }` | forum、requests、shop、lottery、checkin |
-| `nav.user_menu` | list | `{ user }` | bonus、messages、invite、seedbox、shop |
+| `nav.user_menu` | list | `{ user }` | bonus、messages、invite、seedbox、shop、hnr、promotion（持有促销卡时） |
 | `nav.admin` | list | `{ user }` | 各插件后台入口 |
 | `home.announcements` | list | `{ user? }` | forum、promotion（全站活动横幅） |
 | `home.widgets` | list | `{ user? }` | checkin、lottery、requests、ai-assistant |
@@ -40,27 +40,27 @@ export default {
 | `user.profile.header` | list | `{ profile: UserSummary }` | medals、levels |
 | `user.profile.stats` | list | `{ profile }` | accounting、bonus、levels、hnr、ratio-policy、invite |
 | `user.profile.badges` | list | `{ profile }` | medals |
-| `user.profile.tabs` | tabs | `{ profile }` | accounting（做种/下载记录）、invite（邀请树）、hnr、comments |
-| `user.settings.tabs` | tabs | `{ user }` | identity（安全）、notify、rss、mcp（token）、seedbox |
+| `user.profile.tabs` | tabs | `{ profile }` | invite（邀请树）、hnr（H&R 记录）、comments（最近评论）；做种 / 下载记录由宿主直接渲染 |
+| `user.settings.tabs` | tabs | `{ user }` | identity（安全）、notify、rss、mcp（token）、seedbox、messages（接收范围、黑名单） |
 | `torrent.list.row_badges` | list | `{ torrent: TorrentSummary }` | promotion、torrent（标签）、hnr |
 | `torrent.list.columns` | columns | `{ torrent }` | accounting（做种数/完成数）、subtitles |
 | `torrent.list.filters` | list | `{ index_schema }` | search-meilisearch（自动筛选面板之外的扩展） |
 | `torrent.detail.header` | list | `{ torrent, group? }` | promotion、moderation |
 | `torrent.detail.info` | list | `{ torrent, group? }` | type-*、mediainfo |
 | `torrent.detail.sidebar` | list | `{ torrent, group? }` | metadata-*、requests、ai-upload-review（仅审核员） |
-| `torrent.detail.actions` | list | `{ torrent }` | reports、bonus（赠送）、subtitles |
+| `torrent.detail.actions` | list | `{ torrent }` | reports、bonus（赠送）、subtitles、promotion（使用促销卡） |
 | `torrent.detail.tabs` | tabs | `{ torrent }` | comments、subtitles、tracker-bridge（peer 列表）、accounting（完成者列表） |
 | `torrent.upload.type_form` | single | `{ type_id, schema }` | type-*（默认由 JSON Schema 自动生成，插件可替换） |
-| `torrent.upload.extra` | list | `{ draft, update(patch), afterUpload(cb) }`（`update` 回填 title / subtitle / description；`afterUpload` 登记发布成功后的回调 `cb(torrentId)`，返回取消登记函数，回调失败不影响跳转） | mediainfo、metadata-*（拉取信息按钮） |
+| `torrent.upload.extra` | list | `{ draft, update(patch), afterUpload(cb) }`（`update` 回填 title / subtitle / description；`afterUpload` 登记发布成功后的回调 `cb(torrentId)`，返回取消登记函数，回调失败不影响跳转） | mediainfo、metadata-*（拉取信息按钮）、type-music（抓轨日志预检） |
 | `group.detail.header` | list | `{ group }` | type-*、metadata-* |
 | `group.detail.tabs` | tabs | `{ group }` | comments、requests |
 | `request.detail.sidebar` | list | `{ request }` | requests、comments |
 | `forum.post.footer` | list | `{ post }` | medals（签名档勋章）、reports |
 | `messages.compose.extra` | list | `{ draft }` | 预留 |
 | `admin.dashboard.widgets` | list | `{ user }` | moderation（待审数）、reports、anticheat、accounting |
-| `admin.user.tabs` | tabs | `{ profile }` | levels、accounting、ledger、invite、promotion、ratio-policy、newbie-exam、anticheat（计划：hnr、seedbox） |
-| `admin.torrent.tabs` | tabs | `{ torrent }` | ai-upload-review、moderation、accounting |
-| `user.name.decorations` | list（行内，批量） | `{ user_id, size: "sm" \| "md" }` | medals、levels（评审 R1；列表中每个用户名一个实例，插件须用 `api.batch` 合并请求） |
+| `admin.user.tabs` | tabs | `{ profile }` | levels、accounting（含异常信号）、ledger（含流水与冲正）、invite、promotion、ratio-policy、newbie-exam、anticheat、hnr（计划：seedbox） |
+| `admin.torrent.tabs` | tabs | `{ torrent }` | ai-upload-review（预审报告、重审、反馈）、promotion（单种手动促销） |
+| `user.name.decorations` | list（行内，批量） | `{ user_id, size: "sm" \| "md" }` | medals（头衔、佩戴的勋章）；宿主在种子页上传者处渲染，comments / forum 在作者名旁渲染（评审 R1；列表中每个用户名一个实例，插件须用 `api.batch` 合并请求） |
 | `auth.register.form_extra` | list | `{ form: FormBinding, attempt: number }`（插件把字段写入注册请求的 `form{}` 或顶层 `invite_code` / `captcha_token`） | invite、registration-policy（问卷）、captcha |
 | `auth.login.extra` | list | `{ form: FormBinding, attempt: number }`（`attempt` 每次提交失败后加 1，验证码据此重置） | captcha（人机验证） |
 | `auth.reset.extra` | list | `{ form: FormBinding, attempt: number }`（找回密码申请表单） | captcha（人机验证） |

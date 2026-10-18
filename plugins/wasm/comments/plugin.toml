@@ -111,7 +111,7 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["torrent.detail.tabs", "group.detail.tabs", "request.detail.sidebar"]
+slots = ["torrent.detail.tabs", "group.detail.tabs", "request.detail.sidebar", "user.profile.tabs"]
 settings_ui = "schema"
 
 [settings_schema]

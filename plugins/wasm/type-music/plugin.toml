@@ -45,6 +45,11 @@ timeout_secs = 60
 [database]
 migrations = "migrations"
 
+[frontend]
+entry = "index.js"
+slots = ["torrent.upload.extra"]
+settings_ui = "schema"
+
 [settings_schema]
 type = "object"
 x-pt-order = ["title_template", "log_check_enabled"]

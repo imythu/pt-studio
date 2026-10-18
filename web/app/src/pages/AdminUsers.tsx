@@ -1,4 +1,4 @@
-// 后台用户管理：列表（筛选、游标）、详情（资料、角色、限制、会话）；插件经 admin.user.tabs 追加标签页。
+// 后台用户管理：列表（筛选、游标）、详情（资料、角色、限制、会话、安全记录）；插件经 admin.user.tabs 追加标签页。
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router';
@@ -163,6 +163,38 @@ function UserIps({ id }: { id: number }) {
   );
 }
 
+interface SecurityEvent {
+  id: number;
+  kind: string;
+  details: { ip_prefix?: string; ua?: string; method?: string; new_device?: boolean };
+  created_at: number;
+}
+
+/** 安全记录（登录、改密、两步验证、新设备等，最近 200 条） */
+function UserSecurityEvents({ id }: { id: number }) {
+  const t = useT();
+  const q = useQuery({ queryKey: ['admin-security-events', id], queryFn: () => api<{ items: SecurityEvent[] }>(`/api/p/identity/v1/admin/users/${id}/security-events`) });
+  return (
+    <Card title={t('ui.settings.security_events')}>
+      {q.error ? (
+        <ErrorText error={q.error} />
+      ) : (
+        <Table
+          rows={q.data?.items ?? []}
+          rowKey={(e) => e.id}
+          empty="—"
+          columns={[
+            { key: 'k', header: t('ui.admin.kind'), render: (e) => <>{t(`ui.security.${e.kind}`)} {e.details.new_device && <Badge tone="danger">{t('ui.security.new_device')}</Badge>}</> },
+            { key: 'ip', header: 'IP', render: (e) => e.details.ip_prefix ?? '—' },
+            { key: 'ua', header: t('ui.settings.device'), render: (e) => <span className="small">{e.details.ua ?? '—'}</span> },
+            { key: 't', header: t('ui.settings.time'), render: (e) => new Date(e.created_at).toLocaleString() },
+          ]}
+        />
+      )}
+    </Card>
+  );
+}
+
 /** 按 IP / CIDR 查账户 */
 export function IpLookup() {
   const t = useT();
@@ -307,6 +339,7 @@ export function AdminUser() {
           </Button>
         </form>
       </Card>
+      {s.can('identity.users.read') && <UserSecurityEvents id={d.id} />}
       {s.can('identity.users.read_sensitive') && <UserIps id={d.id} />}
       <Slot name="admin.user.tabs" ctx={{ profile: d, user: s.me }} />
     </div>

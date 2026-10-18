@@ -575,6 +575,27 @@ async fn http_admin_balances(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Re
     Ok(Json(json!({ "items": balances(&ctx, id).await? })).into_response())
 }
 
+/// 后台用户详情页的流水列表（冲正需要流水 ID）
+async fn http_admin_entries(
+    ctx: RequestCtx,
+    Path(id): Path<i64>,
+    Query(q): Query<EntriesQuery>,
+) -> PResult<Response> {
+    let page = history(
+        &ctx,
+        q.currency.as_deref(),
+        id,
+        q.cursor.as_deref(),
+        q.limit.unwrap_or(50),
+    )
+    .await?;
+    let more = page.next_cursor.is_some();
+    Ok(
+        Json(json!({ "items": page.items, "next_cursor": page.next_cursor, "has_more": more }))
+            .into_response(),
+    )
+}
+
 struct Routes;
 
 impl pt_plugin_api::HttpRoutes for Routes {
@@ -588,6 +609,7 @@ impl pt_plugin_api::HttpRoutes for Routes {
             .route("/v1/admin/entries/{id}/reversals", post(http_reverse))
             .route("/v1/admin/currencies/{code}", patch(http_settings))
             .route("/v1/admin/users/{id}/balances", get(http_admin_balances))
+            .route("/v1/admin/users/{id}/entries", get(http_admin_entries))
     }
 }
 

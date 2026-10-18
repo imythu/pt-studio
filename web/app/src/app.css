@@ -19,6 +19,12 @@ h1, h2, .brand, .page-title, .step-h, .greeting h1, .hero h1 { font-family: var(
 .nav-search:focus-within { background: var(--pt-color-surface); border-color: var(--pt-color-accent); box-shadow: var(--pt-ring); }
 .nav-search input { border: 0; background: transparent; outline: none; font: inherit; color: var(--pt-color-fg); width: 100%; min-width: 0; }
 .nav-search input::-webkit-search-cancel-button { display: none; }
+.suggest { position: relative; display: block; flex: 1; min-width: 0; }
+.nav-search .suggest input { width: 100%; }
+.suggest-list { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0; min-width: min(320px, 90vw); margin: 0; padding: 4px; list-style: none;
+  background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); box-shadow: var(--pt-shadow-lg); }
+.suggest-list li { padding: 6px 10px; border-radius: calc(var(--pt-radius) - 2px); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pt-color-fg); }
+.suggest-list li:hover, .suggest-list li[aria-selected=true] { background: var(--pt-color-surface-2); }
 .usernav { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .nav-upload, .nav-cta { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; padding: 8px 16px; border-radius: 10px; background: var(--pt-color-primary-solid);
   color: #fff !important; margin-right: 6px; white-space: nowrap; box-shadow: 0 2px 8px rgb(42 122 107 / .28); transition: background .15s; }
@@ -520,6 +526,8 @@ html, body { overflow-x: clip; }
 .shop-buy input[type=number] { width: 80px; }
 .medal-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
 .medal-icon { object-fit: contain; vertical-align: middle; }
+.user-deco { display: inline-flex; align-items: center; gap: 3px; margin-left: 4px; vertical-align: middle; }
+.user-deco .pt-badge { font-size: 11px; padding: 0 6px; }
 .medal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px; margin-bottom: 12px; }
 .medal-pick { display: flex; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); cursor: pointer; }
 .medal-ach { display: flex; gap: 10px; align-items: flex-start; }
@@ -531,6 +539,9 @@ html, body { overflow-x: clip; }
 .broadcast + .broadcast { margin-top: 8px; }
 .ledger-in { color: var(--pt-color-accent); font-variant-numeric: tabular-nums; }
 .ledger-out { color: var(--pt-color-muted); font-variant-numeric: tabular-nums; }
+.invite-tree { list-style: none; margin: 4px 0; padding-left: 18px; border-left: 1px solid var(--pt-color-border); }
+.invite-tree li { margin: 4px 0; overflow-wrap: anywhere; }
+.invite-tree-wrap > .invite-tree { padding-left: 0; border-left: 0; }
 .mediainfo-text { max-height: 480px; overflow: auto; white-space: pre; padding: 10px 12px; background: var(--pt-color-surface); border: 1px solid var(--pt-color-border); border-radius: var(--pt-radius); }
 .bookmarks-action select.pt-input { width: auto; display: inline-block; }
 .attachments-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 12px; }
