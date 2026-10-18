@@ -113,3 +113,8 @@ export interface FrontendManifest {
   installed: string[];
   features: Record<string, boolean>;
 }
+
+/** 服务端渲染预览（与最终显示一致）：Markdown / BBCode → 安全 HTML；需登录 */
+export async function renderPreview(body: string, markup: 'markdown' | 'bbcode' = 'markdown'): Promise<string> {
+  return (await api<{ html: string }>('/api/kernel/v1/markup/preview', { json: { body, markup } })).html;
+}

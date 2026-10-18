@@ -117,7 +117,7 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 550; bord
 .pt-side { flex: 0 0 16rem; max-width: 100%; }
 .pt-list { list-style: none; padding: 0; margin: 0.5rem 0 0; display: grid; gap: 0.25rem; }
 .pt-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
-.pt-stack { display: grid; gap: 0.75rem; }
+.pt-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
 .pt-comment { border-top: 1px solid var(--pt-color-border); padding: 0.9rem 0; display: grid; gap: 0.5rem; }
 .pt-replies { margin-left: 1.5rem; border-left: 2px solid var(--pt-color-border); padding-left: 0.9rem; }
 .pt-preview { border: 1.5px dashed var(--pt-color-border); border-radius: var(--pt-radius); padding: 0.75rem; }
@@ -173,3 +173,16 @@ select.pt-input { appearance: none; -webkit-appearance: none; padding-right: 36p
 .pt-map-add { display: flex; gap: 8px; }
 .pt-map-add .pt-input { max-width: 220px; }
 .pt-nullable > .pt-fieldset { margin-left: 12px; padding-left: 12px; border: 0; border-left: 2px solid var(--pt-color-border); }
+
+/* Markdown 编辑器 */
+.pt-md-editor { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pt-md-bar { order: -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; }
+.pt-md-tabs { display: flex; gap: 2px; }
+.pt-md-tabs .pt-tab { padding: 4px 10px; }
+.pt-md-tools { display: flex; flex-wrap: wrap; gap: 2px; }
+.pt-md-tool { font: inherit; font-size: 13px; min-width: 30px; height: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--pt-radius); background: none; color: var(--pt-color-muted); cursor: pointer; }
+.pt-md-tool:hover { color: var(--pt-color-fg); border-color: var(--pt-color-border); background: var(--pt-color-surface-2); }
+.pt-md-tool code { font-family: var(--pt-mono); font-size: 11px; }
+.pt-md-editor textarea.pt-input { width: 100%; }
+.pt-md-preview { min-height: 90px; padding: 8px 10px; border: 1px dashed var(--pt-color-border-strong); border-radius: var(--pt-radius); overflow-wrap: anywhere; }
+.pt-md-editor textarea[hidden] { display: none; }

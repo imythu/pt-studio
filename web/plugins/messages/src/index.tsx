@@ -1,7 +1,7 @@
 // messages 前端：用户菜单的未读站内信数、收件箱 / 已发送 / 系统（/p/messages/）、写信（/p/messages/new?to=）、会话（/p/messages/<id>：
 // 回复、举报某条消息、拉黑、删除会话）、群发公告（“公告”页签、首页未读公告横幅、后台 /admin/p/messages/ 发布与撤回）。
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "@pt-studio/sdk";
+import { ApiError, renderPreview } from "@pt-studio/sdk";
 import type { PluginApi, PluginFrontend, SlotProps } from "@pt-studio/slots";
 import { registerMessages } from "@pt-studio/terms";
 import {
@@ -14,6 +14,7 @@ import {
   Table,
   Tabs,
   UserContent,
+  MarkdownEditor,
 } from "@pt-studio/ui-kit";
 
 registerMessages("zh-CN", {
@@ -278,14 +279,7 @@ function Admin({ api }: { api: PluginApi }) {
             />
           </Field>
           <Field label={api.t("messages.ui.body")}>
-            <textarea
-              className="pt-input"
-              name="broadcast_body"
-              rows={6}
-              value={f.body}
-              required
-              onChange={(e) => setF({ ...f, body: e.target.value })}
-            />
+            <MarkdownEditor name="broadcast_body" rows={6} value={f.body} required onChange={(body) => setF({ ...f, body })} preview={renderPreview} />
           </Field>
           <Field label={api.t("messages.ui.min_class")}>
             <Input
@@ -477,12 +471,7 @@ function Compose({ api }: { api: PluginApi }) {
           />
         </Field>
         <Field label={api.t("messages.ui.body")}>
-          <textarea
-            className="pt-input"
-            rows={8}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
+          <MarkdownEditor name="message_body" rows={8} value={body} onChange={setBody} preview={renderPreview} />
         </Field>
         <Button
           variant="primary"
@@ -641,13 +630,7 @@ function Conversation({ api, id }: { api: PluginApi; id: number }) {
       ))}
       {c.kind === "user" && (
         <div className="pt-stack">
-          <textarea
-            className="pt-input"
-            rows={4}
-            aria-label={api.t("messages.ui.reply")}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
+          <MarkdownEditor name="message_reply" rows={4} ariaLabel={api.t("messages.ui.reply")} value={body} onChange={setBody} preview={renderPreview} />
           <Button
             variant="primary"
             disabled={!body.trim()}

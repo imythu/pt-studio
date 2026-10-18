@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use pt_plugin_api::{
     Actor, InvocationKind, Json, PResult, PluginError, Principal,
@@ -38,6 +38,7 @@ pub fn routes(shared: Arc<Shared>) -> Router {
             get(get_settings).put(put_settings),
         )
         .route("/api/kernel/v1/admin/audit", get(audit_log))
+        .route("/api/kernel/v1/markup/preview", post(markup_preview))
         .with_state(shared)
 }
 
@@ -122,6 +123,40 @@ async fn terms(State(sh): State<Arc<Shared>>, Query(q): Query<TermsQuery>, heade
 }
 
 /// 内核接口的会话鉴权与权限检查（与插件路由相同的规则：会话写请求需 CSRF）
+#[derive(Deserialize)]
+struct PreviewBody {
+    body: String,
+    #[serde(default)]
+    markup: Option<String>,
+}
+
+/// 用户内容预览（编辑器“预览”页签）：与插件保存时相同的 pt-markup 渲染；需登录，每用户每分钟 60 次，正文 ≤ 100000 字
+async fn markup_preview(
+    State(sh): State<Arc<Shared>>,
+    method: Method,
+    headers: HeaderMap,
+    AxJson(b): AxJson<PreviewBody>,
+) -> PResult<Response> {
+    let (kctx, kuow) = sh.make_ctx("kernel", CallSpec::new(InvocationKind::Http, Actor::anonymous(), 5_000))?;
+    let cred = credential(&headers).ok_or_else(PluginError::unauthenticated)?;
+    let session = matches!(cred, pt_plugin_api::Credential::Session(_));
+    let principal = kctx.authenticate(cred).await?.ok_or_else(PluginError::unauthenticated)?;
+    kuow.finish(true).await?;
+    if session && !matches!(method, Method::GET | Method::HEAD) && !csrf_ok(&headers, &sh.cfg.site.base_url) {
+        return Err(PluginError::new("kernel.csrf_failed", "CSRF check failed"));
+    }
+    if let Some(redis) = sh.redis.get("main") {
+        let rules = crate::limits::parse("user:60/m").map_err(PluginError::internal)?;
+        crate::limits::check(redis, "kernel.markup_preview", &rules, None, Some(principal.user_id), None).await?;
+    }
+    if b.body.chars().count() > 100_000 {
+        return Err(PluginError::validation("body is too long"));
+    }
+    let markup = pt_markup::Markup::parse(b.markup.as_deref().unwrap_or("markdown")).unwrap_or(pt_markup::Markup::Markdown);
+    let r = pt_markup::render(&b.body, markup, &pt_markup::RenderOptions::default());
+    Ok(AxJson(json!({ "html": r.html })).into_response())
+}
+
 async fn authorize(
     sh: &Shared,
     headers: &HeaderMap,

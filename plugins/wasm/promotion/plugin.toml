@@ -73,6 +73,34 @@ rate_limit = "user:30/m"
 idempotent = true
 
 [[http.routes]]
+id = "admin_events"
+method = "GET"
+path = "/v1/admin/events"
+auth = "admin"
+permission = "promotion.manage"
+
+[[http.routes]]
+id = "end_event"
+method = "DELETE"
+path = "/v1/admin/events/{id}"
+auth = "admin"
+permission = "promotion.manage"
+
+[[http.routes]]
+id = "admin_rules"
+method = "GET"
+path = "/v1/admin/rules"
+auth = "admin"
+permission = "promotion.manage"
+
+[[http.routes]]
+id = "update_rule"
+method = "PATCH"
+path = "/v1/admin/rules/{id}"
+auth = "admin"
+permission = "promotion.manage"
+
+[[http.routes]]
 id = "create_rule"
 method = "POST"
 path = "/v1/admin/rules"
@@ -124,8 +152,8 @@ premake = 3
 
 [frontend]
 entry = "index.js"
-slots = ["torrent.list.row_badges", "torrent.detail.header"]
-routes = []
+slots = ["torrent.list.row_badges", "torrent.detail.header", "admin.user.tabs"]
+routes = ["/admin/p/promotion/*"]
 settings_ui = "schema"
 
 [terms]

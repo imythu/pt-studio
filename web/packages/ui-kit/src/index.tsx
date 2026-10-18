@@ -1,7 +1,7 @@
 // @pt-studio/ui-kit：基础组件（样式见 styles.css，全部基于主题令牌）。
 
 import DOMPurify from 'dompurify';
-import { createContext, isValidElement, useCallback, useContext, useMemo, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import { createContext, isValidElement, useCallback, useContext, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from 'react';
 
 export function cx(...xs: (string | false | null | undefined)[]): string {
   return xs.filter(Boolean).join(' ');
@@ -209,6 +209,133 @@ export function UserContent({ html, text, className }: { html?: string; text?: s
   if (safe === null) return <div className={cx('pt-user-content', 'pt-pre', className)}>{text ?? ''}</div>;
   // eslint-disable-next-line react/no-danger -- 唯一允许的 HTML 出口
   return <div className={cx('pt-user-content', className)} dangerouslySetInnerHTML={{ __html: safe }} />;
+}
+
+// ---------------- Markdown 编辑器 ----------------
+
+const MD_LABELS = {
+  'zh-CN': { write: '编辑', preview: '预览', bold: '粗体（Ctrl+B）', italic: '斜体（Ctrl+I）', strike: '删除线', link: '链接（Ctrl+K）', image: '图片', quote: '引用', code: '代码', ul: '无序列表', ol: '有序列表', table: '表格', empty: '没有可预览的内容', hint: '支持 Markdown' },
+  en: { write: 'Write', preview: 'Preview', bold: 'Bold (Ctrl+B)', italic: 'Italic (Ctrl+I)', strike: 'Strikethrough', link: 'Link (Ctrl+K)', image: 'Image', quote: 'Quote', code: 'Code', ul: 'Bulleted list', ol: 'Numbered list', table: 'Table', empty: 'Nothing to preview', hint: 'Markdown supported' },
+};
+type MdLabels = (typeof MD_LABELS)['en'];
+
+/** 在选区两侧加标记；无选区时插入占位文字并选中 */
+export function mdWrap(v: string, start: number, end: number, before: string, after: string, placeholder: string): [string, number, number] {
+  const sel = v.slice(start, end) || placeholder;
+  const out = v.slice(0, start) + before + sel + after + v.slice(end);
+  return [out, start + before.length, start + before.length + sel.length];
+}
+
+/** 给选区涉及的每一行加前缀（引用、列表）；有序列表逐行编号 */
+export function mdPrefix(v: string, start: number, end: number, prefix: (i: number) => string): [string, number, number] {
+  const ls = v.lastIndexOf('\n', start - 1) + 1;
+  const le = v.indexOf('\n', end) === -1 ? v.length : v.indexOf('\n', end);
+  const lines = v.slice(ls, le).split('\n').map((l, i) => prefix(i) + l);
+  const block = lines.join('\n');
+  return [v.slice(0, ls) + block + v.slice(le), ls, ls + block.length];
+}
+
+/**
+ * Markdown 编辑器：工具栏（粗体、斜体、删除线、链接、图片、引用、代码、列表、表格）、快捷键、编辑 / 预览切换。
+ * 预览由调用方提供（通常调用服务端渲染接口，与最终显示一致）；不提供时不显示预览页签。
+ */
+export function MarkdownEditor({
+  value,
+  onChange,
+  preview,
+  name,
+  rows = 8,
+  placeholder,
+  required,
+  maxLength,
+  labels,
+  ariaLabel,
+}: {
+  value: string;
+  onChange(v: string): void;
+  preview?: (src: string) => Promise<string>;
+  name?: string;
+  rows?: number;
+  placeholder?: string;
+  required?: boolean;
+  maxLength?: number;
+  labels?: Partial<MdLabels>;
+  ariaLabel?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [tab, setTab] = useState<'write' | 'preview'>('write');
+  const [html, setHtml] = useState<string | null>(null);
+  const lang = typeof document !== 'undefined' && document.documentElement.lang.startsWith('en') ? 'en' : 'zh-CN';
+  const L: MdLabels = { ...MD_LABELS[lang], ...labels };
+  const apply = (fn: (v: string, s: number, e: number) => [string, number, number]) => {
+    const ta = ref.current;
+    if (!ta) return;
+    const [out, s, e] = fn(value, ta.selectionStart, ta.selectionEnd);
+    onChange(out);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(s, e);
+    });
+  };
+  const tools: { key: keyof MdLabels; icon: ReactNode; run(): void }[] = [
+    { key: 'bold', icon: <b>B</b>, run: () => apply((v, s, e) => mdWrap(v, s, e, '**', '**', 'text')) },
+    { key: 'italic', icon: <i>I</i>, run: () => apply((v, s, e) => mdWrap(v, s, e, '*', '*', 'text')) },
+    { key: 'strike', icon: <s>S</s>, run: () => apply((v, s, e) => mdWrap(v, s, e, '~~', '~~', 'text')) },
+    { key: 'link', icon: '🔗', run: () => apply((v, s, e) => mdWrap(v, s, e, '[', '](https://)', 'link')) },
+    { key: 'image', icon: '🖼', run: () => apply((v, s, e) => mdWrap(v, s, e, '![', '](https://)', 'image')) },
+    { key: 'quote', icon: '❝', run: () => apply((v, s, e) => mdPrefix(v, s, e, () => '> ')) },
+    { key: 'code', icon: <code>{'</>'}</code>, run: () => apply((v, s, e) => (v.slice(s, e).includes('\n') ? mdWrap(v, s, e, '```\n', '\n```', 'code') : mdWrap(v, s, e, '`', '`', 'code'))) },
+    { key: 'ul', icon: '•', run: () => apply((v, s, e) => mdPrefix(v, s, e, () => '- ')) },
+    { key: 'ol', icon: '1.', run: () => apply((v, s, e) => mdPrefix(v, s, e, (i) => `${i + 1}. `)) },
+    { key: 'table', icon: '▦', run: () => apply((v, s, e) => mdWrap(v, s, e, '\n| A | B |\n| --- | --- |\n| ', ' |  |\n', '1')) },
+  ];
+  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = { b: 'bold', i: 'italic', k: 'link' }[e.key.toLowerCase()];
+    const t = tools.find((x) => x.key === k);
+    if (t) {
+      e.preventDefault();
+      t.run();
+    }
+  };
+  const showPreview = () => {
+    setTab('preview');
+    setHtml(null);
+    if (preview && value.trim()) void preview(value).then(setHtml, (err: unknown) => setHtml(`<p>${String(err).replace(/[<>&]/g, '')}</p>`));
+  };
+  return (
+    // 输入区在 DOM 中排在工具栏之前：外层 <label>（Field）点击时聚焦输入框而不是第一个工具按钮；工具栏用 CSS order 显示在上方
+    <div className="pt-md-editor">
+      {/* 预览时输入框保持挂载（隐藏）：外层 <label> 始终关联到它，页签按钮不会被当作被标注的控件 */}
+      <textarea ref={ref} className="pt-input" name={name} aria-label={ariaLabel} hidden={tab !== 'write'} rows={rows} placeholder={placeholder ?? L.hint} required={required && tab === 'write'} maxLength={maxLength} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} />
+      {tab === 'preview' && (
+        <div className="pt-md-preview" data-testid="md-preview">
+          {!value.trim() ? <span className="pt-muted">{L.empty}</span> : html === null ? <Spinner /> : <UserContent html={html} />}
+        </div>
+      )}
+      <div className="pt-md-bar">
+        {preview && (
+          <div role="tablist" className="pt-md-tabs">
+            <button type="button" role="tab" aria-selected={tab === 'write'} className="pt-tab" onClick={() => setTab('write')}>
+              {L.write}
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'preview'} className="pt-tab" onClick={showPreview}>
+              {L.preview}
+            </button>
+          </div>
+        )}
+        {tab === 'write' && (
+          <div className="pt-md-tools" role="toolbar">
+            {tools.map((t) => (
+              <button key={t.key} type="button" className="pt-md-tool" title={L[t.key]} aria-label={L[t.key]} onClick={t.run}>
+                {t.icon}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ---------------- 提示 ----------------

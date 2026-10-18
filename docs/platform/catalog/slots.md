@@ -58,7 +58,7 @@ export default {
 | `forum.post.footer` | list | `{ post }` | medals（签名档勋章）、reports |
 | `messages.compose.extra` | list | `{ draft }` | 预留 |
 | `admin.dashboard.widgets` | list | `{ user }` | moderation（待审数）、reports、anticheat、accounting |
-| `admin.user.tabs` | tabs | `{ profile }` | anticheat、accounting、ledger、hnr、invite、seedbox |
+| `admin.user.tabs` | tabs | `{ profile }` | levels、accounting、ledger、invite、promotion、ratio-policy、newbie-exam、anticheat（计划：hnr、seedbox） |
 | `admin.torrent.tabs` | tabs | `{ torrent }` | ai-upload-review、moderation、accounting |
 | `user.name.decorations` | list（行内，批量） | `{ user_id, size: "sm" \| "md" }` | medals、levels（评审 R1；列表中每个用户名一个实例，插件须用 `api.batch` 合并请求） |
 | `auth.register.form_extra` | list | `{ form: FormBinding, attempt: number }`（插件把字段写入注册请求的 `form{}` 或顶层 `invite_code` / `captcha_token`） | invite、registration-policy（问卷）、captcha |

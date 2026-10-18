@@ -1,10 +1,11 @@
 // levels 前端：个人页的等级（任何人的个人页都显示等级；本人另显示升级进度与保级警告）、
 // 等级说明页（/p/levels/：全部等级、说明、升级与保级条件、我的进度）、用户菜单入口。
 // 等级的名称 / 说明可在插件设置中修改；为空时用内置术语（随界面语言）。
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { ApiError } from '@pt-studio/sdk';
 import { registerMessages } from '@pt-studio/terms';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
-import { Badge, Card, Progress, Stat, Table } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, Field, Input, Progress, Stat, Table } from '@pt-studio/ui-kit';
 
 interface Cond {
   metric: string;
@@ -70,6 +71,20 @@ registerMessages('zh-CN', {
   'levels.metric.avg_seed_hours': '平均做种时长（小时）',
   'levels.metric.seeding_size_gib': '做种体积（GiB）',
   'levels.metric.uploads_count': '发布数',
+  'levels.ui.tab': '等级',
+  'levels.ui.source': '来源：{s}',
+  'levels.ui.overrides': '生效中的覆盖',
+  'levels.ui.until': '至 {t}',
+  'levels.ui.forever': '永久',
+  'levels.ui.set_class': '设置等级',
+  'levels.ui.lock_days': '锁定天数（留空为永久）',
+  'levels.ui.reason': '原因',
+  'levels.ui.apply': '设置',
+  'levels.ui.unlock': '解除手动锁定',
+  'levels.ui.protect_days': '保号天数（0 取消）',
+  'levels.ui.protect': '保号',
+  'levels.ui.protected_until': '保号至 {t}',
+  'levels.ui.done': '已保存',
 });
 registerMessages('en', {
   'levels.ui.class': 'Class',
@@ -99,6 +114,20 @@ registerMessages('en', {
   'levels.metric.avg_seed_hours': 'Average seeding time (hours)',
   'levels.metric.seeding_size_gib': 'Seeding size (GiB)',
   'levels.metric.uploads_count': 'Uploads',
+  'levels.ui.tab': 'Class',
+  'levels.ui.source': 'Source: {s}',
+  'levels.ui.overrides': 'Active overrides',
+  'levels.ui.until': 'until {t}',
+  'levels.ui.forever': 'permanent',
+  'levels.ui.set_class': 'Set class',
+  'levels.ui.lock_days': 'Lock for days (blank = permanent)',
+  'levels.ui.reason': 'Reason',
+  'levels.ui.apply': 'Set',
+  'levels.ui.unlock': 'Remove manual lock',
+  'levels.ui.protect_days': 'Protect for days (0 removes)',
+  'levels.ui.protect': 'Protect',
+  'levels.ui.protected_until': 'Protected until {t}',
+  'levels.ui.done': 'Saved',
 });
 
 const OPS: Record<string, string> = { gte: '≥', gt: '>', lte: '≤', lt: '<' };
@@ -264,8 +293,101 @@ function Page({ api }: { api: PluginApi }) {
   );
 }
 
+interface AdminUser extends Me {
+  overrides: { id: number; kind: string; class_id: number; until: number | null; reason: string; created_by: string }[];
+  protected_until: number | null;
+}
+
+const errText = (api: PluginApi, e: unknown) =>
+  e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e);
+
+/** 后台用户详情页“等级”标签：当前等级与来源、生效中的覆盖、手动设置 / 锁定、解除、保号 */
+function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
+  const uid = ctx.profile.id;
+  const classes = useClasses(api);
+  const [d, setD] = useState<AdminUser | null>(null);
+  const [f, setF] = useState({ class: '', days: '', reason: '', protect: '30' });
+  const base = `/api/p/levels/v1/admin/users/${uid}` as const;
+  const load = () => void api.json<AdminUser>(base).then(setD);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [uid]);
+  const act = async (path: `/api/${string}`, init: { method?: string; json?: unknown }) => {
+    try {
+      await api.json(path, init);
+      api.toast(api.t('levels.ui.done'), 'success');
+      load();
+    } catch (e) {
+      api.toast(errText(api, e), 'error');
+    }
+  };
+  const setClass = (e: FormEvent) => {
+    e.preventDefault();
+    const lock = f.days.trim() ? Date.now() + Number(f.days) * 86_400_000 : null;
+    void act(`${base}/class`, { json: { class: f.class, lock_until_ms: lock, reason: f.reason } });
+  };
+  if (!d || !classes) return null;
+  const byId = (id: number) => classes.find((c) => c.id === id);
+  return (
+    <Card>
+      <p>
+        <ClassName api={api} c={d.class} /> <span className="pt-muted small">{api.t('levels.ui.source', { s: d.class.source })}</span>{' '}
+        {d.protected_until && <Badge tone="success">{api.t('levels.ui.protected_until', { t: new Date(d.protected_until).toLocaleDateString() })}</Badge>}{' '}
+        {d.warning && <Badge tone="danger">{api.t('levels.ui.warning', { date: new Date(d.warning.deadline).toLocaleDateString() })}</Badge>}
+      </p>
+      {d.overrides.length > 0 && (
+        <Table
+          rows={d.overrides}
+          rowKey={(o) => o.id}
+          columns={[
+            { key: 'k', header: api.t('levels.ui.overrides'), render: (o) => <Badge>{o.kind}</Badge> },
+            { key: 'c', header: '', render: (o) => (byId(o.class_id) ? <ClassName api={api} c={byId(o.class_id) as Brief} /> : `#${o.class_id}`) },
+            { key: 'u', header: '', render: (o) => (o.until ? api.t('levels.ui.until', { t: new Date(o.until).toLocaleString() }) : api.t('levels.ui.forever')) },
+            { key: 'r', header: '', render: (o) => <span className="pt-muted small">{o.reason} · {o.created_by}</span> },
+          ]}
+        />
+      )}
+      <form onSubmit={setClass} className="upload-grid">
+        <Field label={api.t('levels.ui.set_class')}>
+          <select className="pt-input" name="level_class" value={f.class} onChange={(e) => setF({ ...f, class: e.target.value })}>
+            <option value="" />
+            {classes.map((c) => (
+              <option key={c.id} value={c.key}>
+                {className(api, c)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={api.t('levels.ui.lock_days')}>
+          <Input name="level_days" type="number" min={1} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
+        </Field>
+        <div className="span2">
+          <Field label={api.t('levels.ui.reason')}>
+            <Input name="level_reason" maxLength={200} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
+          </Field>
+          <Button type="submit" variant="primary" disabled={!f.class}>
+            {api.t('levels.ui.apply')}
+          </Button>{' '}
+          <Button type="button" onClick={() => void act(`${base}/class`, { method: 'DELETE' })}>
+            {api.t('levels.ui.unlock')}
+          </Button>
+        </div>
+      </form>
+      <div className="searchbar">
+        <Input name="level_protect" type="number" min={0} aria-label={api.t('levels.ui.protect_days')} title={api.t('levels.ui.protect_days')} value={f.protect} onChange={(e) => setF({ ...f, protect: e.target.value })} />
+        <Button
+          type="button"
+          onClick={() => void act(`${base}/protect`, { json: { until_ms: Number(f.protect) > 0 ? Date.now() + Number(f.protect) * 86_400_000 : null } })}
+        >
+          {api.t('levels.ui.protect')}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export default {
   slots: {
+    'admin.user.tabs': { component: UserTab, order: 5, title_term: 'levels.ui.tab' },
     'user.profile.stats': { component: LevelStat, order: 10 },
     'nav.user_menu': { component: MenuItem, order: 30 },
   },

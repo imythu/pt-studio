@@ -1,10 +1,10 @@
 // forum 前端：版块首页、主题列表与发主题（可带投票）、主题页（分页、引用、感谢、编辑 / 删除、投票、订阅、版主工具栏）、
 // 首页公告（home.announcements）、主导航入口、后台版块管理。
 import { useEffect, useState, type FormEvent } from 'react';
-import { ApiError } from '@pt-studio/sdk';
+import { ApiError, renderPreview } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Table, UserContent } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, Field, Input, MarkdownEditor, Table, UserContent } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'forum.ui.nav': '论坛',
@@ -290,7 +290,7 @@ function Composer({ api, onSubmit, withTitle, initial }: { api: PluginApi; onSub
         </Field>
       )}
       <Field label={api.t('forum.ui.body')}>
-        <textarea className="pt-input" name="post_body" rows={6} value={body} onChange={(e) => setBody(e.target.value)} required />
+        <MarkdownEditor name="post_body" rows={6} value={body} onChange={setBody} required preview={renderPreview} />
       </Field>
       {withTitle &&
         (poll ? (
@@ -529,7 +529,7 @@ function TopicPage({ api, id }: { api: PluginApi; id: number }) {
                 });
               }}
             >
-              <textarea className="pt-input" rows={6} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} />
+              <MarkdownEditor name="post_edit" rows={6} value={editing.body} onChange={(b) => setEditing({ ...editing, body: b })} preview={renderPreview} />
               <Button type="submit" variant="primary">
                 {api.t('forum.ui.save')}
               </Button>{' '}

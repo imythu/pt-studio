@@ -358,5 +358,24 @@ async fn promotion_end_to_end() {
     let causes: Vec<&str> = ended.iter().filter_map(|p| p["cause"].as_str()).collect();
     assert_eq!(causes, vec!["cancelled", "expired", "expired"]);
 
+    // 后台列表：全站活动（含已结束）、提前结束；自动规则停用 / 启用
+    let admin_h = admin.headers();
+    let ah = hv(&admin_h);
+    let ev = call(&app, "GET", "/api/p/promotion/v1/admin/events", None, &ah).await.body;
+    assert_eq!(ev["items"][0]["title"]["zh-CN"], "测试全站免费", "{ev:?}");
+    let r = call(&app, "POST", "/api/p/promotion/v1/admin/events",
+                 Some(json!({"kind": "double_up", "ends_at_ms": chrono::Utc::now().timestamp_millis() + 3_600_000})), &ah).await;
+    let eid = r.body["id"].as_i64().unwrap();
+    assert_eq!(call(&app, "DELETE", &format!("/api/p/promotion/v1/admin/events/{eid}"), None, &ah).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(call(&app, "DELETE", &format!("/api/p/promotion/v1/admin/events/{eid}"), None, &ah).await.body["code"], "promotion.not_found");
+    let ev = call(&app, "GET", "/api/p/promotion/v1/admin/events", None, &ah).await.body;
+    assert_eq!((ev["items"][0]["id"].as_i64(), ev["items"][0]["state"].as_str()), (Some(eid), Some("ended")), "{ev:?}");
+    let rules = call(&app, "GET", "/api/p/promotion/v1/admin/rules", None, &ah).await.body;
+    let rid = rules["items"][0]["id"].as_i64().unwrap();
+    assert_eq!((rules["items"][0]["active"].as_bool(), rules["items"][0]["definition"]["kind"].as_str()), (Some(true), Some("half_down")));
+    assert_eq!(call(&app, "PATCH", &format!("/api/p/promotion/v1/admin/rules/{rid}"), Some(json!({"active": false})), &ah).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(call(&app, "GET", "/api/p/promotion/v1/admin/rules", None, &ah).await.body["items"][0]["active"], false);
+    assert_eq!(call(&app, "GET", "/api/p/promotion/v1/admin/rules", None, &hv(&user.headers())).await.status, StatusCode::FORBIDDEN);
+
     kernel.shutdown().await;
 }

@@ -984,6 +984,47 @@ impl http_handler::Guest for Promotion {
                 })?;
                 return Ok(json_response(201, &json!({ "id": p.id })));
             }
+            "admin_events" => {
+                let r = sql::query(
+                    "SELECT id, kind, up_permille, down_permille, (extract(epoch FROM starts_at) * 1000)::bigint,
+                            (extract(epoch FROM ends_at) * 1000)::bigint, title::text, state, created_by
+                       FROM promotions WHERE source = 'global' AND (state = 'active' OR ended_at > now() - interval '30 days')
+                      ORDER BY id DESC LIMIT 100",
+                    &[],
+                )?;
+                let oi = |v: &SqlValue| match v { SqlValue::Int(i) => Some(*i), _ => None };
+                json!({ "items": r.rows.iter().map(|row| json!({ "id": int(&row[0]), "kind": text(&row[1]), "up_permille": oi(&row[2]),
+                    "down_permille": oi(&row[3]), "starts_at": int(&row[4]), "ends_at": oi(&row[5]),
+                    "title": serde_json::from_str::<Value>(&text(&row[6])).unwrap_or(Value::Null),
+                    "state": text(&row[7]), "created_by": text(&row[8]) })).collect::<Vec<_>>() })
+            }
+            "end_event" => {
+                let id = param(&req, "id")?;
+                let global = sql::query("SELECT 1 FROM promotions WHERE id = $1 AND source = 'global'", &[SqlValue::Int(id)])?;
+                if global.rows.is_empty() || !end_internal(id, "cancelled", &format!("user:{}", me()?))? {
+                    return Err(err("promotion.not_found", "no active site event with this id"));
+                }
+                return Ok(http_handler::Response { status: 204, headers: vec![], body: vec![] });
+            }
+            "admin_rules" => {
+                let r = sql::query(
+                    "SELECT id, definition::text, priority, active, (extract(epoch FROM created_at) * 1000)::bigint FROM auto_rules ORDER BY priority DESC, id",
+                    &[],
+                )?;
+                json!({ "items": r.rows.iter().map(|row| json!({ "id": int(&row[0]),
+                    "definition": serde_json::from_str::<Value>(&text(&row[1])).unwrap_or(Value::Null), "priority": int(&row[2]),
+                    "active": matches!(row[3], SqlValue::Boolean(true)), "created_at": int(&row[4]) })).collect::<Vec<_>>() })
+            }
+            "update_rule" => {
+                // 停用 / 启用：停用后不再匹配新种子，已生效的自动促销按各自的退出条件或到期结束
+                let (id, b) = (param(&req, "id")?, body(&req)?);
+                let active = b["active"].as_bool().ok_or_else(|| err("kernel.validation_failed", "active is required"))?;
+                let n = sql::execute("UPDATE auto_rules SET active = $2, updated_at = now() WHERE id = $1", &[SqlValue::Int(id), SqlValue::Boolean(active)])?;
+                if n == 0 {
+                    return Err(err("kernel.not_found", "rule not found"));
+                }
+                return Ok(http_handler::Response { status: 204, headers: vec![], body: vec![] });
+            }
             "create_rule" => {
                 let def = body(&req)?;
                 let pr = validate_rule(&def)?;

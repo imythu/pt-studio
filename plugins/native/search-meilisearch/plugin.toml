@@ -181,3 +181,8 @@ migrations = "migrations"
 "search-meilisearch.field.rel_hdr" = { zh-CN = "HDR", en = "HDR" }
 "search-meilisearch.field.rel_group" = { zh-CN = "发布组", en = "Release group" }
 "search-meilisearch.field.rel_year" = { zh-CN = "年份", en = "Year" }
+
+[frontend]
+entry = "index.js"
+slots = []
+routes = ["/admin/p/search-meilisearch/*"]

@@ -539,3 +539,11 @@ html, body { overflow-x: clip; }
 .attachments-item figcaption { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
 .attachments-picker { cursor: pointer; display: inline-flex; align-items: center; }
 .donor-list { flex-wrap: wrap; gap: 6px 14px; }
+
+/* ============ 手机：表单与后台页 ============ */
+@media (max-width: 720px) {
+  .upload-grid { grid-template-columns: minmax(0, 1fr); }
+  .upload-grid .span2 { grid-column: auto; }
+  .stats-row { flex-wrap: wrap; }
+  .searchbar > * { min-width: 0; }
+}

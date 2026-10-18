@@ -139,3 +139,8 @@ title = "追加到系统提示的站点说明"
 [terms]
 "ai-moderation.name" = { zh-CN = "AI 内容审核", en = "AI moderation" }
 "ai-moderation.perm.manage" = { zh-CN = "配置 AI 内容审核", en = "Configure AI moderation" }
+
+[frontend]
+entry = "index.js"
+slots = []
+routes = ["/admin/p/ai-moderation/*"]

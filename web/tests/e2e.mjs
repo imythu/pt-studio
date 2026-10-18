@@ -310,8 +310,58 @@ try {
   await a.locator('select[name=kind]').selectOption('leech_disabled');
   await a.getByRole('button', { name: '施加限制' }).click();
   await a.getByRole('heading', { name: /leech_disabled/ }).waitFor();
-  await a.getByRole('button', { name: '解除' }).click();
+  await a.getByRole('button', { name: '解除', exact: true }).click();
   await a.getByRole('heading', { name: /active/ }).waitFor();
+
+  // 6d'. 后台用户详情页的插件标签：流量、余额、等级（保号）、邀请名额、促销卡
+  step('admin user tabs');
+  const bobId = Number(a.url().split('/').pop());
+  const getJson = (path) => a.evaluate(async (u) => (await fetch(u)).json(), path);
+  await a.getByRole('tab', { name: '流量' }).click();
+  const upBefore = (await getJson(`/api/p/accounting/v1/users/${bobId}/stats`)).uploaded;
+  await a.locator('input[name=traffic_up]').fill('1');
+  await a.locator('input[name=traffic_note]').fill('e2e 补偿');
+  await a.getByRole('button', { name: '调整流量' }).click();
+  await a.waitForFunction(async ([u, before]) => (await (await fetch(u)).json()).uploaded === before + 1024 ** 3, [`/api/p/accounting/v1/users/${bobId}/stats`, upBefore]);
+  await a.getByRole('tab', { name: '余额' }).click();
+  const balUrl = `/api/p/ledger/v1/admin/users/${bobId}/balances`;
+  const bonusOf = (r) => r.items.find((x) => x.currency === 'bonus') ?? { balance: 0, scale: 0 };
+  const balBefore = bonusOf(await getJson(balUrl));
+  await a.locator('input[name=ledger_amount]').fill('7');
+  await a.locator('input[name=ledger_note]').fill('e2e 奖励');
+  await a.getByRole('button', { name: '调整余额' }).click();
+  await a.waitForFunction(
+    async ([u, want]) => ((await (await fetch(u)).json()).items.find((x) => x.currency === 'bonus')?.balance ?? 0) === want,
+    [balUrl, balBefore.balance + 7 * 10 ** balBefore.scale],
+  );
+  await a.getByRole('tab', { name: '等级' }).click();
+  await a.getByRole('button', { name: '保号' }).click();
+  await a.getByText(/保号至/).waitFor();
+  await a.getByRole('tab', { name: '邀请' }).click();
+  const quotaBefore = (await getJson(`/api/p/invite/v1/admin/users/${bobId}/quota`)).balance;
+  await a.locator('input[name=invite_delta]').fill('2');
+  await a.locator('input[name=invite_reason]').fill('e2e 活动');
+  await a.getByRole('button', { name: '调整名额' }).click();
+  await a.getByText(`邀请名额 ${quotaBefore + 2}`, { exact: false }).waitFor();
+  await a.getByRole('tab', { name: '促销卡' }).click();
+  await a.getByRole('button', { name: '调整' }).click();
+  await a.getByText('当前余额 1').waitFor();
+
+  // 6d''. 插件后台页：发放邀请码、发起并结束全站活动、AI 审核统计
+  step('plugin admin pages');
+  await a.goto(`${BASE}/admin/p/invite/`);
+  await a.getByRole('button', { name: '生成邀请' }).click();
+  await a.getByTestId('issued-invite').waitFor();
+  await a.goto(`${BASE}/admin/p/promotion/`);
+  await a.locator('select[name=event_kind]').selectOption('double_up');
+  await a.locator('input[name=event_ends]').fill(new Date(Date.now() + 3_600_000 - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
+  await a.locator('input[name=event_title_zh]').fill('网页 2x 活动');
+  await a.getByRole('button', { name: '创建' }).click();
+  await a.getByRole('cell', { name: '网页 2x 活动' }).waitFor();
+  await a.getByRole('button', { name: '提前结束' }).click();
+  await a.getByText('已结束', { exact: true }).waitFor();
+  await a.goto(`${BASE}/admin/p/ai-moderation/`);
+  await a.getByRole('heading', { name: 'AI 内容审核' }).waitFor();
 
   // 6e. 种子审核：管理员设为 disabled
   step('torrent moderation');
@@ -359,6 +409,9 @@ try {
   await p.getByRole('link', { name: '综合讨论' }).click();
   await p.locator('input[name=topic_title]').fill('第一次发帖');
   await p.locator('textarea[name=post_body]').fill('大家好，**请多关照**');
+  await p.getByRole('tab', { name: '预览' }).click();
+  await p.getByTestId('md-preview').locator('strong', { hasText: '请多关照' }).waitFor();
+  await p.getByRole('tab', { name: '编辑' }).click();
   await p.getByRole('button', { name: '发表' }).click();
   await p.getByRole('heading', { name: /第一次发帖/ }).waitFor();
   await p.locator('strong', { hasText: '请多关照' }).waitFor();
@@ -496,6 +549,49 @@ try {
   await p.locator('[data-testid=donation-goal]', { hasText: '¥50' }).waitFor();
   await p.goto(`${BASE}/p/bonus/`);
   await p.getByText('捐赠奖励').first().waitFor();
+
+  // 6z. 手机宽度（390px）：主要页面没有超出视口的元素（滚动容器内的除外，如宽表格）
+  step('mobile layout');
+  const overflowAt = async (pg, path) => {
+    await pg.goto(`${BASE}${path}`);
+    await pg.waitForLoadState('networkidle');
+    return pg.evaluate(() => {
+      const vw = document.documentElement.clientWidth;
+      const scrolls = (el) => {
+        for (let e = el.parentElement; e && e !== document.body; e = e.parentElement) {
+          const o = getComputedStyle(e).overflowX;
+          if (o === 'auto' || o === 'scroll' || o === 'hidden') return true;
+        }
+        return false;
+      };
+      const bad = [];
+      for (const el of document.body.querySelectorAll('*')) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.right > vw + 1 && getComputedStyle(el).position !== 'fixed' && !scrolls(el)) {
+          bad.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 2).join('.')} right=${Math.round(r.right)}`);
+        }
+      }
+      return bad.slice(0, 5);
+    });
+  };
+  const mobile = async (from) => {
+    const ctx = await browser.newContext({ locale: 'zh-CN', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await from.context().storageState() });
+    return ctx.newPage();
+  };
+  const mp = await mobile(p);
+  const ma = await mobile(a);
+  const mobileProblems = [];
+  for (const path of ['/', '/torrents', `/torrents/${TID}`, '/upload', '/me', '/settings', '/p/forum/', '/p/messages/', '/p/tickets/', '/p/shop/', '/p/medals/', '/p/lottery/', '/p/bonus/', '/p/donations/', '/p/levels/', '/p/invite/']) {
+    const bad = await overflowAt(mp, path);
+    if (bad.length) mobileProblems.push(`${path}: ${bad.join(', ')}`);
+  }
+  for (const path of ['/admin', `/admin/users/${bobId}`, '/admin/audit', '/admin/p/invite/', '/admin/p/promotion/', '/admin/p/shop/', '/admin/p/medals/', '/admin/p/donations/', '/admin/p/tickets/', '/admin/p/messages/', '/admin/p/lottery/']) {
+    const bad = await overflowAt(ma, path);
+    if (bad.length) mobileProblems.push(`${path}: ${bad.join(', ')}`);
+  }
+  await mp.context().close();
+  await ma.context().close();
+  if (mobileProblems.length) throw new Error(`mobile overflow:\n${mobileProblems.join('\n')}`);
 
   // 7. 普通用户进不了后台
   step('non-staff admin access');

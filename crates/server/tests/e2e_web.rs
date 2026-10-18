@@ -128,7 +128,7 @@ async fn web_end_to_end() {
         .unwrap()
         .clone();
     let entry = invite["entry"].as_str().unwrap().to_owned();
-    assert_eq!(invite["routes"], json!(["/p/invite/*"]));
+    assert_eq!(invite["routes"], json!(["/p/invite/*", "/admin/p/invite/*"]));
     let js = call(&app, "GET", &entry, None, &[]).await;
     assert_eq!(js.status, StatusCode::OK);
     assert!(

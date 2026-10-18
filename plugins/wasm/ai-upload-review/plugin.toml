@@ -107,3 +107,8 @@ default = []
 "ai-upload-review.name" = { zh-CN = "AI 上传预审", en = "AI upload review" }
 "ai-upload-review.perm.read" = { zh-CN = "查看 AI 预审报告", en = "Read AI upload reviews" }
 "ai-upload-review.perm.manage" = { zh-CN = "配置 AI 上传预审", en = "Configure AI upload review" }
+
+[frontend]
+entry = "index.js"
+slots = []
+routes = ["/admin/p/ai-upload-review/*"]

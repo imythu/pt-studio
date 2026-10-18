@@ -121,3 +121,8 @@ premake = 3
 table = "checkpoints"
 by = "range_month"
 premake = 2
+
+[frontend]
+entry = "index.js"
+slots = ["admin.user.tabs"]
+routes = []

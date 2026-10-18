@@ -281,8 +281,8 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["auth.register.form_extra", "nav.user_menu"]
-routes = ["/p/invite/*"]
+slots = ["auth.register.form_extra", "nav.user_menu", "admin.user.tabs"]
+routes = ["/p/invite/*", "/admin/p/invite/*"]
 settings_ui = "schema"
 
 [settings_schema]

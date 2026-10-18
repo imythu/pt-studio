@@ -43,3 +43,8 @@ migrations = "migrations"
 [terms]
 "llm-claude.name" = { zh-CN = "Claude", en = "Claude" }
 "llm-claude.perm.manage" = { zh-CN = "管理大模型配置与用量", en = "Manage the LLM provider" }
+
+[frontend]
+entry = "index.js"
+slots = []
+routes = ["/admin/p/llm-claude/*"]

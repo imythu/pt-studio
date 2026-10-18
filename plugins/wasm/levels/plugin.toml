@@ -76,6 +76,14 @@ permission = "levels.manage"
 rate_limit = "user:60/m"
 
 [[http.routes]]
+id = "admin_user"
+method = "GET"
+path = "/v1/admin/users/{user_id}"
+auth = "admin"
+permission = "levels.manage"
+rate_limit = "user:60/m"
+
+[[http.routes]]
 id = "set_user_class"
 method = "POST"
 path = "/v1/admin/users/{user_id}/class"
@@ -119,7 +127,7 @@ premake = 3
 
 [frontend]
 entry = "index.js"
-slots = ["user.profile.stats", "nav.user_menu"]
+slots = ["user.profile.stats", "nav.user_menu", "admin.user.tabs"]
 routes = ["/p/levels/*"]
 settings_ui = "schema"
 

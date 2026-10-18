@@ -1,10 +1,10 @@
 // requests 前端：用户菜单入口、求种列表（/p/requests/）、发布（/p/requests/new）、详情（/p/requests/<id>：悬赏、投票、应求、
 // 确认 / 驳回、撤回，request.detail.sidebar 插槽供评论区使用）。
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError } from '@pt-studio/sdk';
+import { ApiError, renderPreview } from '@pt-studio/sdk';
 import { Slot, type PluginApi, type PluginFrontend, type SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Empty, Field, Input, Table, UserContent } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, Empty, Field, Input, MarkdownEditor, Table, UserContent } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'requests.ui.menu': '求种',
@@ -187,7 +187,7 @@ function New({ api }: { api: PluginApi }) {
           <Input value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
         </Field>
         <Field label={api.t('requests.ui.description')}>
-          <textarea className="pt-input" rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <MarkdownEditor name="request_description" rows={6} value={description} onChange={setDescription} preview={renderPreview} />
         </Field>
         <Field label={api.t('requests.ui.bounty')}>
           <Input type="number" min={1} value={bounty} onChange={(e) => setBounty(Number(e.target.value) || 0)} />

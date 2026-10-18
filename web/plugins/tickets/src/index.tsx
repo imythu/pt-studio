@@ -1,7 +1,7 @@
 // tickets 前端：用户菜单“联系管理组”、我的工单与新建（/p/tickets/）、工单详情（/p/tickets/<id>：回复、关闭、重新打开；员工可写内部备注、认领）、
 // 后台工单队列（/admin/p/tickets/）、仪表盘待处理数。
 import { useEffect, useState, type ReactNode } from "react";
-import { ApiError } from "@pt-studio/sdk";
+import { ApiError, renderPreview } from "@pt-studio/sdk";
 import type { PluginApi, PluginFrontend, SlotProps } from "@pt-studio/slots";
 import { registerMessages } from "@pt-studio/terms";
 import {
@@ -13,6 +13,7 @@ import {
   Table,
   Tabs,
   UserContent,
+  MarkdownEditor,
 } from "@pt-studio/ui-kit";
 
 registerMessages("zh-CN", {
@@ -223,15 +224,7 @@ function List({ api }: { api: PluginApi }) {
             />
           </Field>
           <Field label={api.t("tickets.ui.body")}>
-            <textarea
-              className="pt-input"
-              name="ticket_body"
-              rows={6}
-              value={f.body}
-              maxLength={20000}
-              required
-              onChange={(e) => setF({ ...f, body: e.target.value })}
-            />
+            <MarkdownEditor name="ticket_body" rows={6} value={f.body} maxLength={20000} required onChange={(body) => setF({ ...f, body })} preview={renderPreview} />
           </Field>
           <Button
             type="submit"
@@ -326,14 +319,7 @@ function TicketPage({ api, id }: { api: PluginApi; id: number }) {
       ))}
       {(d.state !== "closed" || staffView) && (
         <Card title={api.t("tickets.ui.reply")}>
-          <textarea
-            className="pt-input"
-            name="ticket_reply"
-            rows={4}
-            aria-label={api.t("tickets.ui.reply")}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
+          <MarkdownEditor name="ticket_reply" rows={4} ariaLabel={api.t("tickets.ui.reply")} value={body} onChange={setBody} preview={renderPreview} />
           {staffView && (
             <label className="pt-check">
               <input

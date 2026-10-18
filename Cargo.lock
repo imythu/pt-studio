@@ -2206,6 +2206,7 @@ dependencies = [
  "http",
  "json-patch",
  "minisign",
+ "pt-markup",
  "pt-plugin-api",
  "rand 0.9.5",
  "redis",

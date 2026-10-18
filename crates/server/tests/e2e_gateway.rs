@@ -152,5 +152,17 @@ async fn gateway_limits_and_idempotency() {
             >= 1
     );
 
+    // 编辑器预览：需登录；与保存时相同的安全渲染
+    let r = call(&app, "POST", "/api/kernel/v1/markup/preview", Some(json!({"body": "**x**"})), &[]).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let u = common::register_login(&app, "gw_preview").await;
+    let uh = u.headers();
+    let r = call(&app, "POST", "/api/kernel/v1/markup/preview", Some(json!({"body": "**粗** <script>x</script>"})), &common::hv(&uh)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let html = r.body["html"].as_str().unwrap();
+    assert!(html.contains("<strong>粗</strong>") && !html.contains("<script"), "{html}");
+    let r = call(&app, "POST", "/api/kernel/v1/markup/preview", Some(json!({"body": "[b]b[/b]", "markup": "bbcode"})), &common::hv(&uh)).await;
+    assert!(r.body["html"].as_str().unwrap().contains("<strong>b</strong>"), "{:?}", r.body);
+
     kernel.shutdown().await;
 }

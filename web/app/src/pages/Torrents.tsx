@@ -2,11 +2,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, apiFetch, parse } from '@pt-studio/sdk';
+import { api, apiFetch, parse, renderPreview } from '@pt-studio/sdk';
 import { Slot, useSlotColumns } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
 import { SchemaForm, serverErrors, validate, withDefaults, type Errors, type Schema } from '@pt-studio/schema-form';
-import { Badge, Button, Card, Empty, Field, Input, SkeletonRows, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, Empty, Field, Input, MarkdownEditor, SkeletonRows, Spinner, Table, UserContent, type Column } from '@pt-studio/ui-kit';
 import { HeroArt, Icon, Logo } from '../art';
 import { Hint, DownloadGuide, GettingStarted, useFirstTime } from '../help';
 import { ApiError } from '@pt-studio/sdk';
@@ -494,7 +494,7 @@ function ManageTorrent({ d }: { d: TorrentDetail }) {
               <Input value={edit.subtitle} maxLength={300} onChange={(e) => setEdit({ ...edit, subtitle: e.target.value })} />
             </Field>
             <Field label={t('ui.torrent.description')}>
-              <textarea className="pt-input" rows={6} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
+              <MarkdownEditor name="edit_description" rows={6} value={edit.description} onChange={(d) => setEdit({ ...edit, description: d })} preview={renderPreview} />
             </Field>
             <Button type="submit" variant="primary">
               {t('ui.admin.save')}
@@ -1070,7 +1070,7 @@ export function Upload() {
         <section className="step">
           {step(4, t('ui.upload.step_more'))}
           <Field label={t('ui.torrent.description')}>
-            <textarea className="pt-input" rows={6} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
+            <MarkdownEditor name="description" rows={10} value={meta.description} onChange={(d) => setMeta({ ...meta, description: d })} preview={renderPreview} />
           </Field>
           <label className="pt-check">
             <input type="checkbox" checked={meta.anonymous} onChange={(e) => setMeta({ ...meta, anonymous: e.target.checked })} /> {t('ui.upload.anonymous')}

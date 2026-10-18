@@ -138,3 +138,8 @@ premake = 3
 table = "traffic_segments"
 by = "range_month"
 premake = 3
+
+[frontend]
+entry = "index.js"
+slots = ["admin.user.tabs"]
+routes = []

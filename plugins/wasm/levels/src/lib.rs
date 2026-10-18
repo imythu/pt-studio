@@ -957,6 +957,25 @@ impl http_handler::Guest for Levels {
                         "settings_error": row.and_then(|r| match &r[0] { SqlValue::Text(t) => Some(t.clone()), _ => None }),
                         "synced_at": row.map(|r| int(&r[1])) })
             }
+            "admin_user" => {
+                let uid = param(&req, "user_id")?;
+                let mut v = level_info(uid)?;
+                let o = sql::query(
+                    "SELECT o.id, o.kind, o.class_id, (extract(epoch FROM o.until) * 1000)::bigint, o.reason, o.created_by,
+                            (extract(epoch FROM o.created_at) * 1000)::bigint
+                       FROM overrides o WHERE o.user_id = $1 AND o.ended_at IS NULL AND (o.until IS NULL OR o.until > now()) ORDER BY o.id DESC",
+                    &[SqlValue::Int(uid)],
+                )?;
+                v["overrides"] = json!(o.rows.iter().map(|r| json!({ "id": int(&r[0]), "kind": text(&r[1]), "class_id": int(&r[2]),
+                    "until": match r[3] { SqlValue::Int(t) => Some(t), _ => None }, "reason": text(&r[4]), "created_by": text(&r[5]),
+                    "created_at": int(&r[6]) })).collect::<Vec<_>>());
+                let p = sql::query(
+                    "SELECT (extract(epoch FROM protected_until) * 1000)::bigint FROM user_levels WHERE user_id = $1 AND protected_until > now()",
+                    &[SqlValue::Int(uid)],
+                )?;
+                v["protected_until"] = json!(p.rows.first().and_then(|r| match r[0] { SqlValue::Int(t) => Some(t), _ => None }));
+                v
+            }
             "set_user_class" => {
                 let (uid, b) = (param(&req, "user_id")?, body()?);
                 // 等级以 key（如 "vip"）或数字 id 指定

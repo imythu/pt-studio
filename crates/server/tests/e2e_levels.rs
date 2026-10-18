@@ -229,6 +229,14 @@ async fn levels_end_to_end() {
     .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
     assert_eq!(class_of(&mut db, user.id).await, (10, 10));
+    // 后台用户等级详情：当前等级、生效中的手动覆盖
+    let d = call(&app, "GET", &format!("/api/p/levels/v1/admin/users/{}", user.id), None, &hv(&admin.headers())).await.body;
+    assert_eq!(
+        (d["class"]["id"].as_i64(), d["overrides"][0]["kind"].as_str(), d["overrides"][0]["reason"].as_str(), d["overrides"][0]["until"].is_null()),
+        (Some(10), Some("manual"), Some("test"), true),
+        "{d:?}"
+    );
+    assert_eq!(call(&app, "GET", &format!("/api/p/levels/v1/admin/users/{}", user.id), None, &hv(&user.headers())).await.status, StatusCode::FORBIDDEN);
     kernel
         .run_job_now("levels", "daily_evaluate", json!({}))
         .await
