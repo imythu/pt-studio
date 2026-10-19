@@ -1,5 +1,5 @@
-//! 端到端：抽奖（lottery，WASM）—— 默认关闭、注册天数限制、开期、购票（扣款、限购、票号连续）、立即开奖（奖金与抽水、
-//! commit 校验）、管理员取消退款、到期票数不足自动取消、停售后不能买。
+//! 端到端：幸运转盘（lottery，WASM）—— 默认关闭、注册天数限制、奖品与概率校验、各类奖品发放（魔力值、上传量、
+//! VIP 天数、永久 VIP）、库存、每日次数、魔力值不足、未中奖、删除奖品。
 //!
 //! 运行：`cargo test -p pt-server --test e2e_lottery -- --test-threads=1`
 
@@ -10,7 +10,6 @@ mod common;
 use axum::http::StatusCode;
 use pt_kernel::{Kernel, config::SiteConfig};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use sqlx::{Connection, PgConnection};
 
 use common::{User, call, env, grant_role, hv, register_login, reset};
@@ -31,10 +30,6 @@ async fn put_settings(app: &axum::Router, admin: &User, settings: Value) {
     assert!(r.status.is_success(), "{:?}", r.body);
 }
 
-fn now_ms() -> i64 {
-    i64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()).unwrap()
-}
-
 #[tokio::test]
 async fn lottery_end_to_end() {
     let _guard = common::LOCK.lock().await;
@@ -46,121 +41,134 @@ async fn lottery_end_to_end() {
         .await
         .unwrap_or_else(|e| panic!("{e}"));
     let app = kernel.router();
-    let users = [register_login(&app, "lot_alice").await, register_login(&app, "lot_bob").await, register_login(&app, "lot_carol").await];
+    let alice = register_login(&app, "lot_alice").await;
+    let carol = register_login(&app, "lot_carol").await;
     let admin = register_login(&app, "lot_admin").await;
     grant_role(admin.id, "admin").await;
-    let post = |u: &User, path: String, body: Value| {
+    let r = call(
+        &app,
+        "POST",
+        "/api/p/ledger/v1/admin/adjustments",
+        Some(json!({ "user_id": alice.id, "currency": "bonus", "amount": 1000, "reason_note": "lottery test" })),
+        &hv(&[admin.headers(), vec![("idempotency-key", "lot-fund-alice".to_owned())]].concat()),
+    )
+    .await;
+    assert!(r.status.is_success(), "{:?}", r.body);
+
+    let spin = |u: &User| {
         let app = app.clone();
         let h = u.headers();
-        async move { call(&app, "POST", &path, Some(body), &hv(&h)).await }
+        async move { call(&app, "POST", "/api/p/lottery/v1/wheel/spin", Some(json!({})), &hv(&h)).await }
     };
-    for (i, u) in users.iter().enumerate() {
-        let r = call(
-            &app,
-            "POST",
-            "/api/p/ledger/v1/admin/adjustments",
-            Some(json!({ "user_id": u.id, "currency": "bonus", "amount": 1000, "reason_note": "lottery test" })),
-            &hv(&[admin.headers(), vec![("idempotency-key", format!("lot-fund-{i}"))]].concat()),
-        )
-        .await;
-        assert!(r.status.is_success(), "{:?}", r.body);
-    }
-    let [alice, bob, carol] = &users;
+    let save = |u: &User, prizes: Value| {
+        let app = app.clone();
+        let h = u.headers();
+        async move { call(&app, "PUT", "/api/p/lottery/v1/admin/wheel/prizes", Some(json!({ "prizes": prizes })), &hv(&h)).await }
+    };
 
-    // 开期：参数校验
-    let mk = |body: Value| post(&admin, "/api/p/lottery/v1/admin/rounds".into(), body);
-    let base = json!({ "title": "第一期", "ticket_price": 10, "max_per_user": 5, "min_tickets": 3, "house_cut_pct": 10,
-                       "tiers": [{ "count": 1, "pct": 50 }, { "count": 1, "pct": 20 }], "closes_at": now_ms() + 3_600_000 });
-    let mut bad = base.clone();
-    bad["tiers"] = json!([{ "count": 1, "pct": 80 }, { "count": 1, "pct": 30 }]);
-    assert_eq!(mk(bad).await.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(post(alice, "/api/p/lottery/v1/admin/rounds".into(), base.clone()).await.status, StatusCode::FORBIDDEN);
-    let r = mk(base.clone()).await;
-    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
-    let rid = r.body["id"].as_i64().unwrap();
-    let commit = r.body["commit"].as_str().unwrap().to_owned();
-    let buy = |u: &User, rid: i64, count: i64| post(u, format!("/api/p/lottery/v1/rounds/{rid}/tickets"), json!({ "count": count }));
+    // 迁移带默认奖品；用户看到的转盘不含库存等后台字段
+    let w = call(&app, "GET", "/api/p/lottery/v1/wheel", None, &hv(&alice.headers())).await.body;
+    assert_eq!(w["enabled"], false);
+    assert_eq!(w["prizes"].as_array().unwrap().len(), 7, "{w:?}");
+    assert!(w["prizes"][0].get("stock").is_none());
+    assert!(w["none_chance_ppm"].as_i64().unwrap() > 0);
 
     // 默认关闭；开启后仍有注册天数限制
-    assert_eq!(buy(alice, rid, 1).await.body["code"], "lottery.disabled");
-    put_settings(&app, &admin, json!({ "enabled": true })).await;
-    assert_eq!(buy(alice, rid, 1).await.body["code"], "lottery.not_eligible");
-    put_settings(&app, &admin, json!({ "enabled": true, "min_account_days": 0 })).await;
+    assert_eq!(spin(&alice).await.body["code"], "lottery.disabled");
+    put_settings(&app, &admin, json!({ "enabled": true, "spin_cost": 50, "daily_limit": 10 })).await;
+    assert_eq!(spin(&alice).await.body["code"], "lottery.not_eligible");
+    put_settings(&app, &admin, json!({ "enabled": true, "spin_cost": 50, "daily_limit": 10, "min_account_days": 0 })).await;
 
-    // 购票：扣款、票号连续、限购
-    let start = balance(&app, alice).await;
-    let r = buy(alice, rid, 2).await;
-    assert_eq!((r.status, r.body["first_no"].clone(), r.body["cost"].clone()), (StatusCode::CREATED, json!(1), json!(20)), "{:?}", r.body);
-    assert_eq!(balance(&app, alice).await, start - 20);
-    assert_eq!(buy(bob, rid, 3).await.body["first_no"], 3);
-    assert_eq!(buy(bob, rid, 3).await.body["code"], "lottery.limit_reached");
-    assert_eq!(buy(carol, rid, 1).await.body["first_no"], 6);
-    let d = call(&app, "GET", &format!("/api/p/lottery/v1/rounds/{rid}"), None, &hv(&bob.headers())).await.body;
-    assert_eq!((d["total_tickets"].as_i64(), d["pool"].as_i64()), (Some(6), Some(60)), "{d:?}");
-    assert_eq!(d["my_tickets"], json!([{ "first_no": 3, "count": 3, "cost": 30, "refunded": false }]));
-    assert_eq!(d["tiers"][0]["amount"], 27);
-    // 开奖前不公开 seed
-    let v = call(&app, "GET", &format!("/api/p/lottery/v1/rounds/{rid}/verify"), None, &hv(&bob.headers())).await.body;
-    assert_eq!((v["seed"].clone(), v["commit"].clone()), (Value::Null, json!(commit)));
+    // 奖品校验：概率之和不超过 100%、数量范围、仅管理员
+    let over = json!([{ "kind": "bonus", "amount": 1, "chance_ppm": 600_000 }, { "kind": "bonus", "amount": 2, "chance_ppm": 500_000 }]);
+    assert_eq!(save(&admin, over).await.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let bad = json!([{ "kind": "vip_days", "amount": 0, "chance_ppm": 1 }]);
+    assert_eq!(save(&admin, bad).await.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(save(&alice, json!([])).await.status, StatusCode::FORBIDDEN);
 
-    // 立即开奖：两个不同的中奖票号，奖金 ⌊60 × 90% × 50%⌋ = 27、⌊60 × 90% × 20%⌋ = 10
-    let before: Vec<i64> = balances_of(&app, &users).await;
-    let r = post(&admin, format!("/api/p/lottery/v1/admin/rounds/{rid}/draw"), json!({})).await;
+    // 魔力值：扣 50、得 300
+    let r = save(&admin, json!([{ "kind": "bonus", "amount": 300, "chance_ppm": 1_000_000 }])).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
-    let winners = r.body["winners"].as_array().unwrap().clone();
-    assert_eq!(winners.len(), 2, "{winners:?}");
-    assert_ne!(winners[0]["ticket_no"], winners[1]["ticket_no"]);
-    assert_eq!((winners[0]["prize"].as_i64(), winners[1]["prize"].as_i64()), (Some(27), Some(10)));
-    let after: Vec<i64> = balances_of(&app, &users).await;
-    let gained: i64 = before.iter().zip(&after).map(|(b, a)| a - b).sum();
-    assert_eq!(gained, 37);
-    let v = call(&app, "GET", &format!("/api/p/lottery/v1/rounds/{rid}/verify"), None, &hv(&bob.headers())).await.body;
-    let seed: Vec<u8> = (0..32).map(|i| u8::from_str_radix(&v["seed"].as_str().unwrap()[i * 2..i * 2 + 2], 16).unwrap()).collect();
-    let digest: String = Sha256::digest(&seed).iter().map(|b| format!("{b:02x}")).collect();
-    assert_eq!(digest, commit);
-    assert_eq!(v["batches"].as_array().unwrap().len(), 3);
-    assert_eq!(buy(alice, rid, 1).await.body["code"], "lottery.closed");
-    assert_eq!(post(&admin, format!("/api/p/lottery/v1/admin/rounds/{rid}/draw"), json!({})).await.body["code"], "lottery.closed");
+    assert_eq!(r.body["prizes"].as_array().unwrap().len(), 1, "old prizes are removed");
+    let b0 = balance(&app, &alice).await;
+    let r = spin(&alice).await;
+    assert_eq!((r.status, r.body["kind"].clone(), r.body["amount"].clone()), (StatusCode::CREATED, json!("bonus"), json!(300)), "{:?}", r.body);
+    assert_eq!(balance(&app, &alice).await, b0 + 250);
 
-    // 管理员取消：退款
-    let mut second = base.clone();
-    second["title"] = json!("第二期");
-    let r2 = mk(second).await.body["id"].as_i64().unwrap();
-    let b0 = balance(&app, alice).await;
-    buy(alice, r2, 4).await;
-    assert_eq!(balance(&app, alice).await, b0 - 40);
-    assert_eq!(post(&admin, format!("/api/p/lottery/v1/admin/rounds/{r2}/cancel"), json!({ "reason": "" })).await.status, StatusCode::UNPROCESSABLE_ENTITY);
-    let r = post(&admin, format!("/api/p/lottery/v1/admin/rounds/{r2}/cancel"), json!({ "reason": "测试取消" })).await;
-    assert_eq!(r.body["refunded_batches"], 1, "{:?}", r.body);
-    assert_eq!(balance(&app, alice).await, b0);
-
-    // 到期票数不足：定时任务取消并退款
-    let mut third = base.clone();
-    third["title"] = json!("第三期");
-    let r3 = mk(third).await.body["id"].as_i64().unwrap();
-    buy(carol, r3, 1).await;
-    sqlx::query("UPDATE lottery.rounds SET closes_at = now() - interval '1 second', opens_at = now() - interval '1 hour' WHERE id = $1")
-        .bind(r3)
-        .execute(&mut db().await)
+    // 上传量
+    let gib = 1_i64 << 30;
+    let bonus_id = r.body["prize_id"].as_i64().unwrap();
+    save(&admin, json!([{ "id": bonus_id, "kind": "bonus", "amount": 300, "chance_ppm": 0 }, { "kind": "upload", "amount": gib, "chance_ppm": 1_000_000 }])).await;
+    let r = spin(&alice).await;
+    assert_eq!(r.body["kind"], "upload", "{:?}", r.body);
+    let up: i64 = sqlx::query_scalar("SELECT uploaded_adjust FROM accounting.user_totals WHERE user_id = $1")
+        .bind(i64::try_from(alice.id).unwrap())
+        .fetch_one(&mut db().await)
         .await
         .unwrap();
-    assert_eq!(buy(alice, r3, 1).await.body["code"], "lottery.closed");
-    kernel.run_job_now("lottery", "tick", json!({})).await.unwrap();
-    let d = call(&app, "GET", &format!("/api/p/lottery/v1/rounds/{r3}"), None, &hv(&carol.headers())).await.body;
-    assert_eq!((d["state"].clone(), d["cancel_reason"].clone()), (json!("cancelled"), json!("not_enough_tickets")), "{d:?}");
-    assert_eq!(d["my_tickets"][0]["refunded"], true);
+    assert_eq!(up, gib);
 
-    // 我的中奖与列表
-    let rounds = call(&app, "GET", "/api/p/lottery/v1/rounds", None, &hv(&alice.headers())).await.body;
-    assert_eq!(rounds["items"].as_array().unwrap().len(), 3);
-    let audit: i64 = sqlx::query_scalar("SELECT count(*) FROM kernel.audit_log WHERE action LIKE 'lottery.round_%'").fetch_one(&mut db().await).await.unwrap();
+    // VIP 天数（顺延），之后永久 VIP（限量 1）
+    save(&admin, json!([{ "kind": "vip_days", "amount": 7, "chance_ppm": 1_000_000 }])).await;
+    assert_eq!(spin(&alice).await.body["kind"], "vip_days");
+    let days: f64 = sqlx::query_scalar(
+        "SELECT extract(epoch FROM until - now())::float8 / 86400 FROM levels.overrides WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL",
+    )
+    .bind(i64::try_from(alice.id).unwrap())
+    .fetch_one(&mut db().await)
+    .await
+    .unwrap();
+    assert!((6.9..7.1).contains(&days), "{days}");
+    let r = save(&admin, json!([{ "kind": "vip_permanent", "amount": 0, "chance_ppm": 1_000_000, "stock": 1 }])).await;
+    let perm_id = r.body["prizes"][0]["id"].as_i64().unwrap();
+    assert_eq!(spin(&alice).await.body["kind"], "vip_permanent");
+    let open: Vec<Option<f64>> = sqlx::query_scalar(
+        "SELECT extract(epoch FROM until)::float8 FROM levels.overrides WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL",
+    )
+    .bind(i64::try_from(alice.id).unwrap())
+    .fetch_all(&mut db().await)
+    .await
+    .unwrap();
+    assert_eq!(open, vec![None], "the timed VIP is replaced by a permanent one");
+    let a = call(&app, "GET", "/api/p/lottery/v1/admin/wheel", None, &hv(&admin.headers())).await.body;
+    assert_eq!(a["prizes"][0]["stock"], 0, "{a:?}");
+    // 库存用完：转盘上不再出现，抽到的是“谢谢参与”，仍然扣费
+    let w = call(&app, "GET", "/api/p/lottery/v1/wheel", None, &hv(&alice.headers())).await.body;
+    assert_eq!(w["prizes"].as_array().unwrap().len(), 0);
+    assert_eq!(w["none_chance_ppm"], 1_000_000);
+    let b1 = balance(&app, &alice).await;
+    let r = spin(&alice).await;
+    assert_eq!((r.status, r.body["prize_id"].clone()), (StatusCode::CREATED, Value::Null), "{:?}", r.body);
+    assert_eq!(balance(&app, &alice).await, b1 - 50);
+
+    // 每日次数
+    let today = r.body["spins_today"].as_i64().unwrap();
+    assert_eq!(today, 5);
+    put_settings(&app, &admin, json!({ "enabled": true, "spin_cost": 50, "daily_limit": 5, "min_account_days": 0 })).await;
+    assert_eq!(spin(&alice).await.body["code"], "lottery.limit_reached");
+
+    // 魔力值不足：不扣费、无记录
+    assert_eq!(spin(&carol).await.body["code"], "lottery.insufficient_funds");
+    let w = call(&app, "GET", "/api/p/lottery/v1/wheel", None, &hv(&carol.headers())).await.body;
+    assert_eq!(w["spins_today"], 0);
+
+    // 我的记录、最近中奖、删除奖品
+    let me = call(&app, "GET", "/api/p/lottery/v1/me", None, &hv(&alice.headers())).await.body;
+    assert_eq!(me["items"].as_array().unwrap().len(), 5);
+    let w = call(&app, "GET", "/api/p/lottery/v1/wheel", None, &hv(&carol.headers())).await.body;
+    assert_eq!(w["recent_wins"].as_array().unwrap().len(), 4);
+    assert_eq!(w["recent_wins"][0]["username"], "lot_alice");
+    let r = save(&admin, json!([])).await;
+    assert_eq!(r.body["prizes"], json!([]));
+    let deleted: Option<bool> = sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM lottery.wheel_prizes WHERE id = $1")
+        .bind(perm_id)
+        .fetch_optional(&mut db().await)
+        .await
+        .unwrap();
+    assert_eq!(deleted, Some(true));
+    let audit: i64 = sqlx::query_scalar("SELECT count(*) FROM kernel.audit_log WHERE action = 'lottery.prizes_update'")
+        .fetch_one(&mut db().await)
+        .await
+        .unwrap();
     assert!(audit >= 5, "{audit}");
-}
-
-async fn balances_of(app: &axum::Router, users: &[User]) -> Vec<i64> {
-    let mut v = Vec::new();
-    for u in users {
-        v.push(balance(app, u).await);
-    }
-    v
 }

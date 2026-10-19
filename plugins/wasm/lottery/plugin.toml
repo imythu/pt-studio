@@ -1,16 +1,16 @@
 id = "lottery"
 name = "抽奖"
-version = "0.1.0"
+version = "0.2.0"
 kind = "wasm"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "抽奖：管理员开期，用户用魔力值买票，到期按 commit-reveal 开奖（结果由公开前承诺的种子与全部票据的哈希链决定，可验证），奖池扣除抽水后按奖级派奖；票数不足自动取消并退款。默认关闭"
+description = "幸运转盘：用户消耗魔力值转动转盘，奖品可为魔力值、上传量、VIP 天数或永久 VIP；奖品、中奖概率与库存在后台设置，开关、每次消耗、每日次数与注册天数门槛在插件设置里。默认关闭"
 
-provides = ["ctx.lottery@0.1.0"]
+provides = ["ctx.lottery@0.2.0"]
 requires = ["ctx.ledger@^0.1"]
-optional_requires = ["ctx.notify@^0.1"]
-publishes = ["lottery.ticket_bought", "lottery.round_drawn", "lottery.round_cancelled"]
+optional_requires = ["ctx.accounting@^0.1", "ctx.levels@^0.1"]
+publishes = ["lottery.spun"]
 
 [capabilities]
 sql = true
@@ -18,39 +18,22 @@ views = ["identity.v_user_public"]
 
 [capabilities.scopes]
 "ctx.ledger" = ["currency:bonus"]
-"ctx.notify" = ["send"]
-
-[[cron]]
-name = "tick"
-schedule = "* * * * *"
-timeout_secs = 300
-tx = "manual"
+"ctx.accounting" = ["write:adjust"]
+"ctx.levels" = ["grant"]
 
 [[http.routes]]
-id = "rounds"
+id = "wheel"
 method = "GET"
-path = "/v1/rounds"
+path = "/v1/wheel"
 auth = "user"
 
 [[http.routes]]
-id = "round"
-method = "GET"
-path = "/v1/rounds/{id}"
-auth = "user"
-
-[[http.routes]]
-id = "buy"
+id = "spin"
 method = "POST"
-path = "/v1/rounds/{id}/tickets"
+path = "/v1/wheel/spin"
 auth = "user"
 permission = "lottery.use"
 rate_limit = "user:30/m"
-
-[[http.routes]]
-id = "verify"
-method = "GET"
-path = "/v1/rounds/{id}/verify"
-auth = "user"
 
 [[http.routes]]
 id = "me"
@@ -59,30 +42,16 @@ path = "/v1/me"
 auth = "user"
 
 [[http.routes]]
-id = "admin_rounds"
+id = "admin_wheel"
 method = "GET"
-path = "/v1/admin/rounds"
+path = "/v1/admin/wheel"
 auth = "admin"
 permission = "lottery.manage"
 
 [[http.routes]]
-id = "admin_create"
-method = "POST"
-path = "/v1/admin/rounds"
-auth = "admin"
-permission = "lottery.manage"
-
-[[http.routes]]
-id = "admin_cancel"
-method = "POST"
-path = "/v1/admin/rounds/{id}/cancel"
-auth = "admin"
-permission = "lottery.manage"
-
-[[http.routes]]
-id = "admin_draw"
-method = "POST"
-path = "/v1/admin/rounds/{id}/draw"
+id = "admin_prizes"
+method = "PUT"
+path = "/v1/admin/wheel/prizes"
 auth = "admin"
 permission = "lottery.manage"
 
@@ -99,9 +68,10 @@ default_roles = ["admin"]
 [error_codes]
 "lottery.disabled" = 403
 "lottery.not_eligible" = 403
-"lottery.closed" = 409
 "lottery.limit_reached" = 409
 "lottery.insufficient_funds" = 402
+"lottery.grant_failed" = 503
+"lottery.unavailable" = 503
 
 [database]
 migrations = "migrations"
@@ -114,28 +84,35 @@ settings_ui = "schema"
 
 [settings_schema]
 type = "object"
-x-pt-order = ["enabled", "min_account_days", "max_tickets_per_buy"]
+x-pt-order = ["enabled", "spin_cost", "daily_limit", "min_account_days"]
 
 [settings_schema.properties.enabled]
 type = "boolean"
 default = false
-title = "开启抽奖（请确认符合当地法规与站点规则；关闭时不能买票，已开的期次照常开奖）"
+title = "开启幸运转盘（请确认符合当地法规与站点规则）"
+
+[settings_schema.properties.spin_cost]
+type = "integer"
+minimum = 0
+maximum = 1000000
+default = 50
+title = "每次抽奖消耗的魔力值（0 为免费）"
+
+[settings_schema.properties.daily_limit]
+type = "integer"
+minimum = 0
+maximum = 1000
+default = 10
+title = "每人每天最多抽几次（0 为不限）"
 
 [settings_schema.properties.min_account_days]
 type = "integer"
 minimum = 0
 maximum = 365
 default = 7
-title = "注册满多少天才能买票"
-
-[settings_schema.properties.max_tickets_per_buy]
-type = "integer"
-minimum = 1
-maximum = 1000
-default = 100
-title = "单次最多买几张"
+title = "注册满多少天才能抽奖"
 
 [terms]
 "lottery.name" = { zh-CN = "抽奖", en = "Lottery" }
-"lottery.perm.use" = { zh-CN = "购买彩票", en = "Buy lottery tickets" }
+"lottery.perm.use" = { zh-CN = "转动幸运转盘", en = "Spin the prize wheel" }
 "lottery.perm.manage" = { zh-CN = "管理抽奖", en = "Manage the lottery" }

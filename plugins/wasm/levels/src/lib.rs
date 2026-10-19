@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use exports::pt::plugin::{hooks, http_handler, lifecycle, mcp_tool, on_cron, on_event, service_provider};
 use pt_plugin_sdk::{
-    events, invocation, services,
+    RowExt, events, invocation, services,
     sql::{self, SqlValue},
     types::PluginError,
 };
@@ -712,21 +712,28 @@ fn full_evaluate() -> R<()> {
     }
 }
 
-/// VIP 授予（捐赠、商城等）：在当前有效的 VIP 覆盖之后顺延 days 天；source_ref 幂等（重复调用返回同一结果）
+/// VIP 授予（捐赠、商城、抽奖等）：在当前有效的 VIP 覆盖之后顺延 days 天；`permanent: true` 授予永久 VIP（覆盖无到期时间），
+/// 已是永久 VIP 时按天授予不再生效。source_ref 幂等（重复调用返回同一结果）
 fn grant_vip(user: i64, a: &Value) -> R<Value> {
-    let days = a["days"].as_i64().filter(|d| (1..=3650).contains(d))
-        .ok_or_else(|| err("kernel.validation_failed", "days must be 1..=3650"))?;
+    let permanent = a["permanent"].as_bool().unwrap_or(false);
+    let days = if permanent {
+        0
+    } else {
+        a["days"].as_i64().filter(|d| (1..=3650).contains(d))
+            .ok_or_else(|| err("kernel.validation_failed", "days must be 1..=3650"))?
+    };
     let source_ref = a["source_ref"].as_str().filter(|s| !s.is_empty() && s.len() <= 200)
         .ok_or_else(|| err("kernel.validation_failed", "source_ref is required"))?;
     if user <= 0 {
         return Err(err("kernel.validation_failed", "user is required"));
     }
     let done = sql::query(
-        "SELECT (extract(epoch FROM until) * 1000)::bigint FROM overrides WHERE source_ref = $1",
+        "SELECT (extract(epoch FROM until) * 1000)::bigint, until IS NULL FROM overrides WHERE source_ref = $1",
         &[SqlValue::Text(source_ref.into())],
     )?;
-    if let Some(until) = done.rows.first().map(|row| int(&row[0])) {
-        return Ok(json!({ "until_ms": until, "duplicate": true }));
+    if let Some(row) = done.rows.first() {
+        let until = match row[0] { SqlValue::Int(v) => Some(v), _ => None };
+        return Ok(json!({ "until_ms": until, "permanent": row.bool(1).unwrap_or(false), "duplicate": true }));
     }
     let cls = classes()?;
     let vip = cls
@@ -736,6 +743,15 @@ fn grant_vip(user: i64, a: &Value) -> R<Value> {
         .ok_or_else(|| err("levels.class_not_found", "no VIP class configured"))?
         .id;
     ensure_row(user, &cls)?;
+    let has_permanent = !sql::query(
+        "SELECT 1 FROM overrides WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL AND until IS NULL",
+        &[SqlValue::Int(user)],
+    )?
+    .rows
+    .is_empty();
+    if has_permanent {
+        return Ok(json!({ "until_ms": null, "permanent": true, "duplicate": false, "already_permanent": true }));
+    }
     let prev = sql::query(
         "UPDATE overrides SET ended_at = now() WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL AND until > now()
           RETURNING (extract(epoch FROM until) * 1000)::bigint",
@@ -744,7 +760,7 @@ fn grant_vip(user: i64, a: &Value) -> R<Value> {
     let start = prev.rows.iter().map(|row| int(&row[0])).max();
     let r = sql::query(
         "INSERT INTO overrides (user_id, kind, class_id, until, reason, created_by, source_ref)
-         VALUES ($1, 'vip', $2, coalesce(to_timestamp($3::float8 / 1000), now()) + make_interval(days => $4::int), $5, $6, $7)
+         VALUES ($1, 'vip', $2, CASE WHEN $8 THEN NULL ELSE coalesce(to_timestamp($3::float8 / 1000), now()) + make_interval(days => $4::int) END, $5, $6, $7)
          RETURNING (extract(epoch FROM until) * 1000)::bigint",
         &[
             SqlValue::Int(user),
@@ -754,10 +770,12 @@ fn grant_vip(user: i64, a: &Value) -> R<Value> {
             SqlValue::Text(a["reason"].as_str().unwrap_or("").chars().take(200).collect()),
             SqlValue::Text(format!("plugin:{}", invocation::current().caller_plugin)),
             SqlValue::Text(source_ref.into()),
+            SqlValue::Boolean(permanent),
         ],
     )?;
     evaluate_batch(&[user], Mode::Full)?;
-    Ok(json!({ "until_ms": r.rows.first().map(|row| int(&row[0])), "duplicate": false }))
+    let until = r.rows.first().and_then(|row| match row[0] { SqlValue::Int(v) => Some(v), _ => None });
+    Ok(json!({ "until_ms": until, "permanent": permanent, "duplicate": false }))
 }
 
 /// 已到期但未结束的覆盖：结束并重新评估这些用户（回到基线等级），由 incr_evaluate 执行
@@ -1067,11 +1085,13 @@ impl service_provider::Guest for Levels {
             "is_protected" => level_info(user)?["protected"].clone(),
             "vip_until" => {
                 let r = sql::query(
-                    "SELECT (extract(epoch FROM max(until)) * 1000)::bigint FROM overrides
-                      WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL AND until > now()",
+                    "SELECT (extract(epoch FROM max(until) FILTER (WHERE until > now())) * 1000)::bigint, bool_or(until IS NULL) FROM overrides
+                      WHERE user_id = $1 AND kind = 'vip' AND ended_at IS NULL AND (until IS NULL OR until > now())",
                     &[SqlValue::Int(user)],
                 )?;
-                json!({ "until_ms": r.rows.first().and_then(|row| match row[0] { SqlValue::Int(v) => Some(v), _ => None }) })
+                let row = r.rows.first();
+                let permanent = row.and_then(|row| row.bool(1)).unwrap_or(false);
+                json!({ "until_ms": if permanent { None } else { row.and_then(|row| match row[0] { SqlValue::Int(v) => Some(v), _ => None }) }, "permanent": permanent })
             }
             "grant_vip" => {
                 if !inv.caller_scopes.iter().any(|s| s == "grant") {

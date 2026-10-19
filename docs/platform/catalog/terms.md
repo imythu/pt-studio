@@ -110,8 +110,7 @@
 | `forum.name` | forum | 论坛 | Forums |
 | `forum.board.<board_id>` | forum | （管理员定义） | |
 | `checkin.name` | checkin | 签到 | Check-in |
-| `lottery.name` | lottery | 彩票 | Lottery |
-| `lottery.betting` | lottery | 竞猜 | Betting |
+| `lottery.name` | lottery | 抽奖 | Lottery |
 | `comments.name` | comments | 评论 | Comments |
 | `subtitles.name` | subtitles | 字幕 | Subtitles |
 | `reports.name` | reports | 举报 | Reports |

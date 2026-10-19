@@ -1,6 +1,6 @@
 [package]
 name = "pt-wasm-lottery"
-description = "PT Studio lottery (WASM): bonus-point raffles with commit-reveal draws and verifiable ticket chains"
+description = "PT Studio lottery (WASM): prize wheel paying bonus, upload credit, VIP days or permanent VIP"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,4 +11,3 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }
-sha2 = { version = "0.10", default-features = false }

@@ -38,7 +38,7 @@
 | G5 经济 | `bonus` | BONUS | WASM | `ctx.bonus` | 魔力值 / 做种积分 |
 | G5 经济 | `shop` | SHOP | WASM | `ctx.shop` | 商城 |
 | G5 经济 | `checkin` | CHKIN | WASM | `ctx.checkin` | 签到 |
-| G5 经济 | `lottery` | LOT | WASM | `ctx.lottery` | 彩票 / 竞猜 |
+| G5 经济 | `lottery` | LOT | WASM | `ctx.lottery` | 幸运转盘（魔力值、上传量、VIP 天数、永久 VIP） |
 | G5 经济 | `medals` | MEDAL | WASM | `ctx.medals` | 勋章、头衔、徽章 |
 | G6 规则 | `levels` | LVL | WASM | `ctx.levels` | 用户等级、升降级、保号 |
 | G6 规则 | `ratio-policy` | RATIO | WASM | `ctx.ratio` | 分享率要求、警告、限制 |

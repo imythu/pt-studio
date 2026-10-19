@@ -528,7 +528,8 @@ pub async fn fallback(sh: Arc<Shared>, method: Method, uri: Uri) -> Response {
             None => StatusCode::NOT_FOUND.into_response(),
         };
     }
-    if let Some(rel) = safe_rel(path).filter(|r| r.extension().is_some() && r.components().count() == 1)
+    // 站点静态文件（含子目录，如 /frieren/*.jpg）；插件包只经上面带版本、校验已安装的路径提供
+    if let Some(rel) = safe_rel(path).filter(|r| r.extension().is_some() && !r.starts_with("plugins"))
         && let Some(r) = serve_file(dir.join(rel), false).await
     {
         return r;

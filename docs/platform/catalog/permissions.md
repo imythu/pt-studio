@@ -66,8 +66,8 @@
 | `shop.use` | shop | 购买 | user |
 | `shop.items.manage` | shop | 商品管理 | admin |
 | `checkin.use` | checkin | 签到 | user |
-| `lottery.use` | lottery | 购买彩票 / 竞猜 | user |
-| `lottery.manage` | lottery | 开奖、配置 | admin |
+| `lottery.use` | lottery | 转动幸运转盘 | user |
+| `lottery.manage` | lottery | 管理奖品、概率与统计 | admin |
 | `medals.grant` | medals | 颁发 / 收回勋章 | admin |
 | `medals.manage` | medals | 勋章定义 | admin |
 | `levels.manage` | levels | 等级规则配置 | admin |

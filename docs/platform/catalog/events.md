@@ -141,9 +141,7 @@ JSON 示例：
 | `bonus.hourly_settled` | bonus | `user:<id>` | `user_id, period_start, amount, currency, breakdown{}` |
 | `shop.item_purchased` | shop | `user:<id>` | `order_id, user_id, item_id, kind, qty, price, currency` |
 | `checkin.checked_in` | checkin | `user:<id>` | `user_id, date, streak, reward` |
-| `lottery.ticket_bought` | lottery | `user:<id>` | `round_id, user_id, tickets, cost, first_no, currency` |
-| `lottery.round_drawn` | lottery | `global` | `round_id, winners[{user_id, tier, ticket_no, prize}]`（最多 100 条）、`winners_truncated` |
-| `lottery.round_cancelled` | lottery | `global` | `round_id, reason, refunded_batches` |
+| `lottery.spun` | lottery | `user:<id>` | `spin_id, user_id, cost, currency, prize_id, kind, amount`（未中奖时 `prize_id`、`kind` 为 null） |
 | `message.broadcast_sent` | messages | `global` | `broadcast_id, subject, min_class` |
 | `ticket.created` | tickets | `user:<id>` | `ticket_id, user_id, category` |
 | `ticket.closed` | tickets | `user:<id>` | `ticket_id, user_id, by` |
