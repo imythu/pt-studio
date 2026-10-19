@@ -136,6 +136,32 @@ fn path_of(f: &BValue<'_>) -> PResult<Vec<String>> {
         .collect()
 }
 
+/// BEP 47 符号链接目标：相对种子根目录的路径分量，与文件路径同样校验
+fn symlink_of(v: &BValue<'_>) -> PResult<Vec<String>> {
+    let list = v
+        .as_list()
+        .filter(|l| !l.is_empty())
+        .ok_or_else(|| invalid_path("symlink"))?;
+    list.iter()
+        .map(|p| {
+            let s = p
+                .as_bytes()
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .ok_or_else(|| invalid("path_encoding"))?;
+            check_component(s)?;
+            Ok(s.to_owned())
+        })
+        .collect()
+}
+
+fn encode_str_list(items: &[String], out: &mut Vec<u8>) {
+    out.push(b'l');
+    for s in items {
+        bencode::encode_bytes(s.as_bytes(), out);
+    }
+    out.push(b'e');
+}
+
 /// v2 file tree：叶子为键 "" 的字典 `{length, pieces root?}`。返回 (路径, 大小, pieces root)。
 /// (路径, 大小, pieces root)
 type V2File = (Vec<String>, u64, Option<Vec<u8>>);
@@ -344,14 +370,19 @@ pub fn normalize(root: &BValue<'_>, parsed: &Parsed, policy: &Policy) -> PResult
     let info = root.get("info").ok_or_else(|| invalid("no_info"))?;
     let with_v1 = matches!(target, MetaVersion::V1 | MetaVersion::Hybrid);
     let with_v2 = matches!(target, MetaVersion::V2 | MetaVersion::Hybrid);
-    let mut keep: Vec<&[u8]> = vec![b"name", b"name.utf-8", b"piece length"];
+    // name / path 只保留校验过的 UTF-8 值（写回 name / path，丢弃 *.utf-8）：
+    // 否则可用干净的 name.utf-8 / path.utf-8 通过校验，同时在原始 name / path 里夹带 `..` 等，
+    // 由只认原始字段的客户端落盘到种子目录之外
+    let mut keep: Vec<&[u8]> = vec![b"piece length"];
     if with_v1 {
         keep.extend([&b"pieces"[..], b"length", b"files", b"md5sum"]);
     }
     if with_v2 {
         keep.extend([&b"meta version"[..], b"file tree"]);
     }
-    let mut entries: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    let mut name = Vec::new();
+    bencode::encode_bytes(parsed.name.as_bytes(), &mut name);
+    let mut entries: Vec<(Vec<u8>, Vec<u8>)> = vec![(b"name".to_vec(), name)];
     for (k, v) in info.entries().unwrap_or_default() {
         if !keep.contains(k) {
             continue;
@@ -361,27 +392,18 @@ pub fn normalize(root: &BValue<'_>, parsed: &Parsed, policy: &Policy) -> PResult
             // 逐条只保留已知字段
             raw.push(b'l');
             for f in v.as_list().unwrap_or_default() {
-                let fe: Vec<(Vec<u8>, Vec<u8>)> = f
-                    .entries()
-                    .unwrap_or_default()
-                    .iter()
-                    .filter(|(fk, _)| {
-                        [
-                            &b"length"[..],
-                            b"path",
-                            b"path.utf-8",
-                            b"attr",
-                            b"symlink path",
-                            b"sha1",
-                        ]
-                        .contains(fk)
-                    })
-                    .map(|(fk, fv)| {
-                        let mut b = Vec::new();
-                        bencode::encode(fv, &mut b);
-                        (fk.to_vec(), b)
-                    })
-                    .collect();
+                let mut path = Vec::new();
+                encode_str_list(&path_of(f)?, &mut path);
+                let mut fe: Vec<(Vec<u8>, Vec<u8>)> = vec![(b"path".to_vec(), path)];
+                for (fk, fv) in f.entries().unwrap_or_default() {
+                    let mut b = Vec::new();
+                    match *fk {
+                        b"symlink path" => encode_str_list(&symlink_of(fv)?, &mut b),
+                        b"length" | b"attr" | b"sha1" => bencode::encode(fv, &mut b),
+                        _ => continue,
+                    }
+                    fe.push((fk.to_vec(), b));
+                }
                 raw.extend(bencode::encode_raw_dict(fe));
             }
             raw.push(b'e');
@@ -485,5 +507,89 @@ mod tests {
             Some("torrent.invalid_file".into())
         );
         assert!(check_component("CON.txt").is_err());
+    }
+
+    /// 手工拼一个单文件条目的多文件 v1 种子（name 与 files[0] 的键值原样写入）
+    fn raw_v1(name_keys: &[(&[u8], &[u8])], file_keys: &[(&[u8], Vec<u8>)]) -> Vec<u8> {
+        let mut fe = Vec::new();
+        let mut len = Vec::new();
+        bencode::encode_int(10, &mut len);
+        fe.push((b"length".to_vec(), len));
+        for (k, v) in file_keys {
+            fe.push((k.to_vec(), v.clone()));
+        }
+        let mut files = vec![b'l'];
+        files.extend(bencode::encode_raw_dict(fe));
+        files.push(b'e');
+        let mut info = vec![(b"files".to_vec(), files)];
+        for (k, v) in name_keys {
+            let mut b = Vec::new();
+            bencode::encode_bytes(v, &mut b);
+            info.push((k.to_vec(), b));
+        }
+        let mut pl = Vec::new();
+        bencode::encode_int(16_384, &mut pl);
+        info.push((b"piece length".to_vec(), pl));
+        let mut pc = Vec::new();
+        bencode::encode_bytes(&[7u8; 20], &mut pc);
+        info.push((b"pieces".to_vec(), pc));
+        bencode::encode_raw_dict(vec![(b"info".to_vec(), bencode::encode_raw_dict(info))])
+    }
+
+    fn list(items: &[&[u8]]) -> Vec<u8> {
+        let mut b = vec![b'l'];
+        for i in items {
+            bencode::encode_bytes(i, &mut b);
+        }
+        b.push(b'e');
+        b
+    }
+
+    #[test]
+    fn stored_paths_are_the_validated_utf8_ones() -> PResult<()> {
+        // 原始 name / path 夹带穿越，*.utf-8 是干净值：存储结果只能出现校验过的值
+        let t = raw_v1(
+            &[(b"name", b".."), (b"name.utf-8", b"Movie")],
+            &[
+                (b"path", list(&[b"..", b"..", b"evil.sh"])),
+                (b"path.utf-8", list(&[b"a.mkv"])),
+            ],
+        );
+        let (p, n) = process(&t, &Policy::default())?;
+        assert_eq!(p.files[0].path, vec!["Movie", "a.mkv"]);
+        let root = bencode::decode(&n.stored, &Limits::default())?;
+        let info = root.get("info").ok_or_else(|| invalid("x"))?;
+        assert_eq!(info.get("name").and_then(BValue::as_bytes), Some(&b"Movie"[..]));
+        assert!(info.get("name.utf-8").is_none());
+        let f = &info.get("files").and_then(BValue::as_list).unwrap_or_default()[0];
+        assert!(f.get("path.utf-8").is_none());
+        let path: Vec<&[u8]> = f
+            .get("path")
+            .and_then(BValue::as_list)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(BValue::as_bytes)
+            .collect();
+        assert_eq!(path, vec![&b"a.mkv"[..]]);
+        // 规范化幂等：再处理一次 info hash 不变
+        let (_, n2) = process(&n.stored, &Policy::default())?;
+        assert_eq!(n.ih_v1, n2.ih_v1);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_escaping_symlink() {
+        let t = raw_v1(
+            &[(b"name", b"Movie")],
+            &[
+                (b"path", list(&[b"link"])),
+                (b"attr", b"1:l".to_vec()),
+                (b"symlink path", list(&[b"..", b"etc", b"passwd"])),
+            ],
+        );
+        assert_eq!(
+            process(&t, &Policy::default()).err().map(|e| e.code),
+            Some("torrent.invalid_path".into())
+        );
     }
 }

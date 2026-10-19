@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError, renderPreview } from '@pt-studio/sdk';
 import { Slot, type PluginApi, type PluginFrontend, type SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, MarkdownEditor, Table, UserContent } from '@pt-studio/ui-kit';
+import { Badge, Button, Card, Empty, Field, Input, MarkdownEditor, Table, UserContent } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'forum.ui.nav': '论坛',
@@ -47,6 +47,9 @@ registerMessages('zh-CN', {
   'forum.ui.move_to': '移动到版块 ID',
   'forum.ui.announcements': '公告',
   'forum.ui.admin': '论坛管理',
+  'forum.ui.tagline': '旅人们的思想交汇所与魔法研讨地',
+  'forum.ui.no_boards': '论坛还没有任何版块。',
+  'forum.ui.no_boards_admin': '去论坛管理创建分区与版块 →',
   'forum.ui.category': '分区',
   'forum.ui.board': '版块',
   'forum.ui.add_category': '新建分区',
@@ -118,6 +121,9 @@ registerMessages('en', {
   'forum.ui.move_to': 'Move to board ID',
   'forum.ui.announcements': 'Announcements',
   'forum.ui.admin': 'Forum admin',
+  'forum.ui.tagline': 'Where travellers trade thoughts and study magic',
+  'forum.ui.no_boards': 'The forum has no boards yet.',
+  'forum.ui.no_boards_admin': 'Create categories and boards in forum admin →',
   'forum.ui.category': 'Category',
   'forum.ui.board': 'Board',
   'forum.ui.add_category': 'New category',
@@ -181,7 +187,15 @@ interface BoardRow {
 
 function Boards({ api }: { api: PluginApi }) {
   const [cats, setCats] = useState<{ id: number; name: string; boards: BoardRow[] }[] | null>(null);
-  const load = () => api.json<{ categories: { id: number; name: string; boards: BoardRow[] }[] }>('/api/p/forum/v1/boards').then((r) => setCats(r.categories));
+  const [err, setErr] = useState<string | null>(null);
+  const load = () =>
+    api
+      .json<{ categories: { id: number; name: string; boards: BoardRow[] }[] }>('/api/p/forum/v1/boards')
+      .then((r) => {
+        setCats(r.categories);
+        setErr(null);
+      })
+      .catch((e: unknown) => setErr(errText(api, e)));
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,6 +204,7 @@ function Boards({ api }: { api: PluginApi }) {
     await api.json('/api/p/forum/v1/catchup', { json: {} });
     await load();
   };
+  if (err && !cats) return <p className="pt-error">{err}</p>;
   if (!cats) return null;
   return (
     <div className="forum">
@@ -244,7 +259,7 @@ function Boards({ api }: { api: PluginApi }) {
               {api.t('forum.ui.boards')}
             </h1>
             <p style={{ margin: '4px 0 0', color: '#e2e8f0', fontSize: 13, textShadow: '0 1px 4px rgb(0 0 0 / .6)' }}>
-              旅人们的思想交汇所与魔法研讨地
+              {api.t('forum.ui.tagline')}
             </p>
           </div>
           {api.user() && (
@@ -258,6 +273,19 @@ function Boards({ api }: { api: PluginApi }) {
           )}
         </div>
       </div>
+      {cats.length === 0 && (
+        <Empty illustration>
+          {api.t('forum.ui.no_boards')}
+          {api.isStaff() && (
+            <>
+              {' '}
+              <A api={api} to="/admin/p/forum/">
+                {api.t('forum.ui.no_boards_admin')}
+              </A>
+            </>
+          )}
+        </Empty>
+      )}
       {cats.map((c) => (
         <Card key={c.id} title={c.name}>
           <Table

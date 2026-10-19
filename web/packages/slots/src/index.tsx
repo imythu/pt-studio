@@ -32,6 +32,8 @@ export interface PluginApi {
   navigate(to: string): void;
   toast(msg: string, kind?: 'info' | 'success' | 'error'): void;
   user(): Me | null;
+  /** 当前用户是否为管理人员（版主 / 管理员）：用于显示管理入口，权限仍以服务端为准 */
+  isStaff(): boolean;
   /** 同一微任务内的请求合并为一次（每批 ≤ 100 个键） */
   batch<K, V>(key: string, loader: (keys: K[]) => Promise<Map<K, V>>): (k: K) => Promise<V | undefined>;
   queryClient: QueryClient;
@@ -140,6 +142,7 @@ export function SlotsProvider({ host, children }: { host: HostServices; children
           navigate: host.navigate,
           toast: host.toast,
           user: host.user,
+          isStaff: () => host.isStaff(),
           batch: <K, V>(key: string, loader: (keys: K[]) => Promise<Map<K, V>>) => {
             const full = `${pluginId}:${key}`;
             let b = batchers.get(full);

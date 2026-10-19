@@ -372,6 +372,16 @@ export function Layout() {
           </div>
         </div>
       </header>
+      {s.me && (
+        <nav className="mobile-nav" aria-label={t('ui.nav.menu')}>
+          <NavLink to="/" end>
+            {t('ui.nav.home')}
+          </NavLink>
+          <NavLink to="/torrents">{t('ui.nav.torrents')}</NavLink>
+          <Slot name="nav.main" ctx={{ user: s.me }} />
+          {s.isStaff && <NavLink to="/admin">{t('ui.nav.admin')}</NavLink>}
+        </nav>
+      )}
       <main id="main-content" className={`content${bare ? ' content-bare' : ''}`}>
         {s.me && !s.emailVerified && <VerifyBanner />}
         {s.me && s.twoFactorNeeded && (

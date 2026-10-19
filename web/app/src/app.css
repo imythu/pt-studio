@@ -13,8 +13,8 @@ h1, h2, .brand, .page-title, .step-h, .greeting h1, .hero h1 { font-family: var(
 .topbar-in { max-width: 1240px; margin: 0 auto; padding: 0 20px; height: 60px; display: flex; align-items: center; gap: 18px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; letter-spacing: .02em; color: var(--pt-color-fg); flex-shrink: 0; }
 .brand:hover { color: var(--pt-color-fg); }
-.mainnav { display: flex; align-items: stretch; height: 60px; gap: 4px; }
-.mainnav a { display: inline-flex; align-items: center; color: var(--pt-color-muted); font-weight: 600; font-size: 14.5px; padding: 0 12px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
+.mainnav { display: flex; align-items: stretch; height: 60px; gap: 2px; flex-shrink: 0; }
+.mainnav a { display: inline-flex; align-items: center; color: var(--pt-color-muted); font-weight: 600; font-size: 14.5px; padding: 0 12px; white-space: nowrap; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
 .mainnav a:hover { color: var(--pt-color-fg); }
 .mainnav a.active { color: var(--pt-color-fg); border-bottom-color: var(--pt-color-accent); }
 .nav-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 38px; flex: 0 1 300px; min-width: 140px; border-radius: 999px;
@@ -58,6 +58,9 @@ h1, h2, .brand, .page-title, .step-h, .greeting h1, .hero h1 { font-family: var(
 .menu-slot { display: contents; }
 .menu-slot a[href="/p/notify/"], .menu-slot a[href="/p/messages/"] { display: none; }
 .mobile-actions { display: none; align-items: center; gap: 4px; margin-left: auto; }
+/* 移动端主导航：标题栏下方可横向滑动的一行（含插件导航项） */
+.mobile-nav { display: none; }
+.mobile-nav .pt-slot { display: contents; }
 
 .content { flex: 1; width: 100%; max-width: 1240px; margin: 0 auto; padding: 22px 20px 48px; }
 .content-bare { max-width: 1120px; }
@@ -74,6 +77,7 @@ h1, h2, .brand, .page-title, .step-h, .greeting h1, .hero h1 { font-family: var(
 .with-sidebar .main { flex: 1; min-width: 0; }
 .with-sidebar.reverse { flex-direction: row; }
 .sidebar { width: 300px; flex-shrink: 0; }
+.with-sidebar > .sidebar:empty { display: none; }
 .sidebar .pt-card-body { display: grid; gap: 10px; }
 .sidebar .pt-card-body .pt-field { margin-bottom: 0; }
 .sidebar .pt-card-body .pt-btn { width: 100%; }
@@ -202,7 +206,8 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .torrent-table .pt-table td:first-child { max-width: 560px; }
 .t-row { display: flex; gap: 10px; align-items: flex-start; }
 .t-thumb { width: 44px; height: 62px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: var(--pt-color-surface-2); }
-.t-title { font-weight: 650; color: var(--pt-color-fg); }
+.torrent-table .pt-table td:first-child { position: relative; }
+.t-title { font-weight: 650; color: var(--pt-color-fg); overflow-wrap: anywhere; }
 .t-title:hover { color: var(--pt-color-primary); }
 .t-zh { color: var(--pt-color-muted); margin-top: 1px; }
 .t-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
@@ -231,8 +236,8 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .swarm .leech { color: var(--pt-color-sky); }
 .swarm .done { color: var(--pt-color-muted); }
 .swarm .zero { opacity: .4; }
-.t-quick-actions { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; opacity: 0; transition: opacity .15s ease; }
-.torrent-table .pt-table tbody tr:hover .t-quick-actions { opacity: 1; }
+.t-quick-actions { position: absolute; right: 8px; bottom: 6px; display: inline-flex; align-items: center; gap: 6px; padding: 2px; border-radius: 8px; background: var(--pt-color-surface); opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+.torrent-table .pt-table tbody tr:hover .t-quick-actions, .t-quick-actions:focus-within { opacity: 1; pointer-events: auto; }
 .infohash-meta { display: inline-flex; align-items: center; gap: 6px; }
 .infohash-meta code { font-size: 12px; background: var(--pt-color-surface-2); padding: 2px 6px; border-radius: 4px; }
 .filter-clear-all { font-size: 12px; color: var(--pt-color-primary); background: none; border: 0; padding: 2px 8px; border-radius: 999px; cursor: pointer; font-weight: 550; }
@@ -377,7 +382,8 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .faq p { margin: 0; color: var(--pt-color-fg); line-height: 1.75; }
 
 /* ============ 首页推荐（recommend 插件） ============ */
-.rec { display: grid; gap: 20px; margin-bottom: 16px; }
+.rec { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; margin-bottom: 16px; }
+.rec-section { min-width: 0; }
 .rec-section header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .rec-section h2 { font-size: 18px; }
 .rec-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(136px, 148px); gap: 14px; overflow-x: auto; padding: 4px 2px 10px; scroll-snap-type: x proximity; scrollbar-width: thin; }
@@ -406,6 +412,10 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
 .rec-skel .pt-skeleton { width: 100%; aspect-ratio: 2 / 3; height: auto; border-radius: 12px; }
 
 /* ============ 平板 ============ */
+@media (max-width: 1240px) {
+  .mainnav a { padding: 0 9px; }
+  .nav-search { min-width: 120px; }
+}
 @media (max-width: 1080px) {
   .nav-search { flex-basis: 200px; }
   .user-chip-name { display: none; }
@@ -419,6 +429,11 @@ mark { background: color-mix(in srgb, var(--pt-color-accent) 35%, transparent); 
   .brand svg { width: 28px; height: 28px; }
   .mainnav, .nav-search, .usernav { display: none; }
   .mobile-actions { display: flex; }
+  .mobile-nav { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 8px 14px; position: sticky; top: 54px; z-index: 29;
+    background: var(--pt-nav-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--pt-color-border); }
+  .mobile-nav::-webkit-scrollbar { display: none; }
+  .mobile-nav a { flex-shrink: 0; white-space: nowrap; padding: 5px 13px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--pt-color-muted); background: var(--pt-color-surface-2); }
+  .mobile-nav a.active { color: var(--pt-color-primary); background: var(--pt-color-primary-soft); }
   .content { padding: 14px 14px 28px; }
   .has-tabbar .content { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
   .has-tabbar .footer { display: none; }
