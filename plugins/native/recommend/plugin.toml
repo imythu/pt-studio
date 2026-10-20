@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "按用户的做种 / 下载历史（类型、题材）、热度、新鲜度和缺种情况生成首页推荐：为你推荐、近期热门、需要做种"
+summary = "首页“为你推荐”：根据用户的做种和下载记录推荐资源"
+category = "content"
 
 requires = ["ctx.auth@^0.1", "ctx.torrents@^0.1", "ctx.accounting@^0.1"]
 

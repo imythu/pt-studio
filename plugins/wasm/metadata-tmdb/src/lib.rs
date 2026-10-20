@@ -40,9 +40,15 @@ struct Cfg {
     cache_days: i64,
 }
 
+/// 后台插件设置优先，site.toml `[plugin.metadata-tmdb]` 为后备
 fn cfg() -> Cfg {
-    let c: Value = serde_json::from_str(&config::get_static()).unwrap_or(Value::Null);
-    let st = |k: &str| c[k].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
+    let set: Value = serde_json::from_str(&config::get_settings()).unwrap_or(Value::Null);
+    let stat: Value = serde_json::from_str(&config::get_static()).unwrap_or(Value::Null);
+    let st = |k: &str| {
+        [&set, &stat]
+            .iter()
+            .find_map(|c| c[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned))
+    };
     Cfg {
         api: st("api_base_url")
             .unwrap_or_else(|| "https://api.themoviedb.org".into())
@@ -54,7 +60,11 @@ fn cfg() -> Cfg {
             .to_owned(),
         key: st("api_key"),
         token: st("access_token"),
-        cache_days: c["cache_days"].as_i64().unwrap_or(30).clamp(1, 365),
+        cache_days: set["cache_days"]
+            .as_i64()
+            .or_else(|| stat["cache_days"].as_i64())
+            .unwrap_or(30)
+            .clamp(1, 365),
     }
 }
 

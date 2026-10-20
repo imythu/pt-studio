@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "消费 pt-tracker 的流量流，按时间窗口聚合结算上传 / 下载 / 做种时长（ctx.accounting）"
+summary = "统计每个用户的上传、下载和做种时长，是分享率等数据的来源"
+category = "system"
 
 provides = ["ctx.accounting@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

@@ -124,6 +124,7 @@ async fn list_plugins(State(sh): State<Arc<Shared>>) -> Response {
                 .map(|f| f.routes.iter().filter(|r| r.starts_with("/admin/")).collect())
                 .unwrap_or_default();
             json!({ "id": rt.id, "name": m.name, "name_term": m.name_term, "description": m.description,
+                    "summary": m.summary, "category": m.category.as_deref().unwrap_or("system"),
                     "version": m.version.to_string(), "kind": m.kind, "provides": m.provides,
                     "settings": settings, "admin_routes": admin_routes })
         })

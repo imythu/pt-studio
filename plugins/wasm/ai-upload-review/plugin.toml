@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "上传后自动预审：确定性规则 + 大模型（ctx.llm）检查，生成报告供审核员参考，不自动处置"
+summary = "新种子发布后由 AI 先做一遍检查，给审核员出报告"
+category = "ai"
 
 requires = ["ctx.llm@^0.1"]
 publishes = ["ai.upload_reviewed"]

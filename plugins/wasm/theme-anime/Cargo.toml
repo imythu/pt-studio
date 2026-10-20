@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-theme-anime"
+description = "PT Studio anime theme (frontend stylesheet; the component itself does nothing)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

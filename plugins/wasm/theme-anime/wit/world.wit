@@ -1,0 +1,6 @@
+package pt:theme-anime-plugin@0.1.0;
+
+world theme-anime {
+  include pt:plugin/host@1.0.0;
+  export pt:plugin/lifecycle@1.0.0;
+}

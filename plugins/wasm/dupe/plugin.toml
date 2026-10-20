@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "去重与替代：拒绝内容相同的重复发布，同作品同规格的种子进入审核队列（或直接拒绝），新种子申请替代旧种子、管理员批准后旧种子下架并通知下载过的用户"
+summary = "拦截重复发布，同一作品同一规格的种子进入审核"
+category = "content"
 
 requires = ["ctx.rbac@^0.1", "ctx.torrents@^0.1"]
 optional_requires = ["ctx.notify@^0.1"]

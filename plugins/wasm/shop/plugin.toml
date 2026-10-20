@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "魔力值商城：用魔力值兑换上传量、邀请名额、促销卡、消除 H&R、勋章 / 头衔、VIP；先冻结后发放、失败自动退回"
+summary = "魔力值商城：兑换上传量、邀请名额、促销卡等"
+category = "play"
 
 requires = ["ctx.ledger@^0.1"]
 optional_requires = ["ctx.accounting@^0.1", "ctx.invites@^0.1", "ctx.promotions@^0.1", "ctx.hnr@^0.1", "ctx.medals@^0.1", "ctx.levels@^0.1"]

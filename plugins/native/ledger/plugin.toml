@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "站点货币的复式记账：发行、回收、转账、冻结、锁定、冲正（ctx.ledger）"
+summary = "魔力值等站内货币的记账底层，保证每一笔收支可追溯"
+category = "play"
 
 provides = ["ctx.ledger@0.1.0"]
 requires = ["ctx.users@^0.1"]

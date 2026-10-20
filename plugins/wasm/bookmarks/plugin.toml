@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "收藏（私有）与合集（用户整理的种子列表，可公开浏览）"
+summary = "用户收藏种子，并整理成可公开分享的合集"
+category = "content"
 
 provides = ["ctx.bookmarks@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

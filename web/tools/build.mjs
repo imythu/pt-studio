@@ -109,10 +109,19 @@ const built = [];
 if (existsSync(pluginsDir)) {
   for (const id of readdirSync(pluginsDir)) {
     const entry = ['src/index.tsx', 'src/index.ts'].map((f) => join(pluginsDir, id, f)).find(existsSync);
-    if (!entry) continue;
-    const r = await esbuild.build({ ...common, entryPoints: [entry], external: SHARED });
+    // 主题插件的样式表：src/*.css → dist/plugins/<id>/*.css（清单 frontend.theme 引用）
+    const srcDir = join(pluginsDir, id, 'src');
+    const styles = existsSync(srcDir) ? readdirSync(srcDir).filter((f) => f.endsWith('.css')) : [];
+    if (!entry && styles.length === 0) continue;
     mkdirSync(join(out, 'plugins', id), { recursive: true });
-    writeFileSync(join(out, 'plugins', id, 'index.js'), textOf(r));
+    if (entry) {
+      const r = await esbuild.build({ ...common, entryPoints: [entry], external: SHARED });
+      writeFileSync(join(out, 'plugins', id, 'index.js'), textOf(r));
+    }
+    for (const f of styles) {
+      const min = await esbuild.transform(readFileSync(join(srcDir, f), 'utf8'), { loader: 'css', minify: !dev });
+      writeFileSync(join(out, 'plugins', id, f), min.code);
+    }
     built.push(id);
   }
 }

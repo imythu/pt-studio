@@ -351,6 +351,22 @@ fn check_migration_depth(sql: &str, depth: u8) -> Result<(), String> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+
+    /// 仓库内所有 WASM 插件的迁移文件都应通过检查（预置数据不能用 `DO` 块等）
+    #[test]
+    fn repo_wasm_migrations_pass() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/wasm");
+        let mut n = 0;
+        for plugin in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+            for f in std::fs::read_dir(plugin.path().join("migrations")).into_iter().flatten().flatten() {
+                let sql = std::fs::read_to_string(f.path()).unwrap_or_default();
+                assert!(check_migration(&sql).is_ok(), "{}: {:?}", f.path().display(), check_migration(&sql));
+                n += 1;
+            }
+        }
+        assert!(n > 10);
+    }
+
     use super::*;
 
     #[test]

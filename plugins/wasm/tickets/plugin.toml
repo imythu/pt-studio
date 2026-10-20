@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "联系管理组（工单）：用户按类别提交问题（账号、种子、申诉、建议），员工队列认领、回复、内部备注、关闭；双方回复互相通知"
+summary = "用户向管理组提交问题和申诉，按工单跟进处理"
+category = "community"
 
 requires = ["ctx.rbac@^0.1"]
 optional_requires = ["ctx.notify@^0.1"]

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "用户等级：按流量、分享率、注册时长、发布数自动升降级（警告期、升级保护、覆盖层），等级绑定角色决定权限"
+summary = "根据流量、分享率和注册时长自动升降用户等级"
+category = "users"
 
 provides = ["ctx.levels@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "捐赠：捐赠说明页、月度目标进度、公开捐赠名单（用户自愿）；管理员登记捐赠后自动授予 VIP 天数（顺延）、魔力值与勋章，VIP 到期前提醒"
+summary = "捐赠说明、月度目标进度与捐赠名单"
+category = "play"
 
 optional_requires = ["ctx.levels@^0.1", "ctx.ledger@^0.1", "ctx.medals@^0.1", "ctx.notify@^0.1"]
 publishes = ["donation.recorded"]

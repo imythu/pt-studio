@@ -481,15 +481,15 @@ pub async fn admin_remove_role(ctx: RequestCtx, Path((uid, role)): Path<(i64, St
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-/// 内置头像（web/assets/avatars，由 web/tools/avatars.py 生成）：注册时随机分配一个，设置页可改选
-pub const BUILTIN_AVATARS: &[&str] = &["frieren", "fern", "stark", "himmel", "heiter", "eisen", "sein", "ubel", "land", "denken", "serie", "flamme", "methode", "lawine"];
+/// 内置头像（web/assets/avatars，由 web/tools/avatars.sh 从动漫插画裁出）：注册时随机分配一个，设置页可改选
+pub const BUILTIN_AVATARS: &[&str] = &["frieren", "frieren-reading", "frieren-sky", "frieren-cool", "frieren-sofa", "fern-sofa", "blonde-elf", "gaze", "staff"];
 
 pub fn builtin_avatars() -> Vec<String> {
-    BUILTIN_AVATARS.iter().map(|s| format!("/avatars/{s}.svg")).collect()
+    BUILTIN_AVATARS.iter().map(|s| format!("/avatars/{s}.jpg")).collect()
 }
 
 fn is_builtin_avatar(u: &str) -> bool {
     u.strip_prefix("/avatars/")
-        .and_then(|r| r.strip_suffix(".svg"))
+        .and_then(|r| r.strip_suffix(".jpg"))
         .is_some_and(|s| BUILTIN_AVATARS.contains(&s))
 }

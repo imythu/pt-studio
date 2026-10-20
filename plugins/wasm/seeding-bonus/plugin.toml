@@ -1,0 +1,140 @@
+id = "seeding-bonus"
+name = "做种魔力"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "做种魔力的计算公式（NexusPHP 式：体积、种子年龄、做种人数、做种个数）与参数、官种奖励（按发布组 / 发布者认定）；bonus 插件每小时结算时向本插件取规则；用户可查看计算方式说明与估算器"
+summary = "设置每小时做种能拿多少魔力（含官种奖励），并向用户展示计算方式"
+category = "play"
+
+provides = ["ctx.seeding_bonus@0.1.0"]
+
+[[http.routes]]
+id = "explain"
+method = "GET"
+path = "/v1/explain"
+auth = "user"
+rate_limit = "user:60/m"
+
+[wasm]
+memory_mb = 32
+default_timeout_ms = 1000
+
+[frontend]
+entry = "index.js"
+slots = ["nav.user_menu"]
+routes = ["/p/seeding-bonus/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["b0", "l", "t0", "n0", "p", "max_count", "official_enabled", "official_factor", "official_groups", "official_uploaders", "donor_factor", "min_seed_minutes", "min_size_mib", "hourly_cap"]
+
+[settings_schema.properties.b0]
+type = "number"
+title = "每小时基础魔力上限 B0"
+description = "做种量非常大时，每小时基础部分趋近于这个值"
+minimum = 0
+maximum = 100000
+default = 100
+
+[settings_schema.properties.l]
+type = "number"
+title = "做种量参考值 L"
+description = "做种分 A 等于 L 时，能拿到 B0 的一半；L 越大，拿满越难"
+minimum = 1
+maximum = 1000000
+default = 300
+
+[settings_schema.properties.t0]
+type = "number"
+title = "种子成熟周数 T0"
+description = "种子发布满 T0 周时，年龄系数达到 90%（鼓励保老种）"
+minimum = 0.1
+maximum = 520
+default = 4
+
+[settings_schema.properties.n0]
+type = "number"
+title = "冷门种人数 N0"
+description = "做种人数越少加成越高：只有你一人做种时约 ×2.41，达到 N0 人时降到 ×1.14"
+minimum = 2
+maximum = 1000
+default = 7
+
+[settings_schema.properties.p]
+type = "number"
+title = "每个种子的固定奖励 P"
+description = "每做一个种子每小时额外加 P，最多计 MAX 个"
+minimum = 0
+maximum = 10000
+default = 1
+
+[settings_schema.properties.max_count]
+type = "integer"
+title = "固定奖励最多计入的种子数 MAX"
+minimum = 0
+maximum = 100000
+default = 7
+
+[settings_schema.properties.official_enabled]
+type = "boolean"
+title = "启用官种奖励"
+default = true
+
+[settings_schema.properties.official_factor]
+type = "number"
+title = "官种奖励系数"
+description = "官种的做种分按同样曲线再算一份，乘以该系数后额外发放（0.5 即官种多拿约一半）"
+minimum = 0
+maximum = 100
+default = 0.5
+
+[settings_schema.properties.official_groups]
+type = "array"
+items = { type = "string" }
+title = "官方发布组"
+description = "发布名以 -组名 或 @组名 结尾的种子认定为官种（不区分大小写），如 PTStudio。只对新发布的种子生效"
+default = []
+
+[settings_schema.properties.official_uploaders]
+type = "array"
+items = { type = "string", pattern = "^[0-9]+$" }
+title = "官方发布者用户 ID"
+description = "这些账号发布的种子都认定为官种"
+default = []
+
+[settings_schema.properties.donor_factor]
+type = "number"
+title = "VIP 倍率"
+description = "拥有 VIP 角色的用户基础部分乘以该倍率"
+minimum = 0
+maximum = 100
+default = 2
+
+[settings_schema.properties.min_seed_minutes]
+type = "integer"
+title = "最少做种分钟数"
+description = "一小时内做种不足这么久的种子不计入"
+minimum = 0
+maximum = 60
+default = 1
+
+[settings_schema.properties.min_size_mib]
+type = "number"
+title = "最小种子体积（MiB）"
+description = "小于该体积的种子不计入（防止用大量小种刷个数奖励）"
+minimum = 0
+default = 0
+
+[settings_schema.properties.hourly_cap]
+type = "number"
+title = "每小时上限"
+description = "单个用户每小时最多获得的魔力值"
+minimum = 0
+default = 10000
+
+[terms]
+"seeding-bonus.name" = { zh-CN = "做种魔力", en = "Seeding bonus" }

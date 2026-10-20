@@ -117,9 +117,7 @@ async fn donations_end_to_end() {
     let a = call(&app, "GET", "/api/p/donations/v1/admin/donations", None, &hv(&admin.headers())).await.body;
     assert_eq!((a["month_total"].as_i64(), a["items"][0]["revoked_at"].is_i64(), a["items"][1]["created_by"].clone()), (Some(3000), true, json!("dn_admin")), "{a:?}");
 
-    // 商城 VIP 商品：bob 购买 2 × 7 天
-    let items = call(&app, "GET", "/api/p/shop/v1/admin/items", None, &hv(&admin.headers())).await.body;
-    assert!(items["items"].as_array().unwrap().iter().all(|i| i["kind"] != "vip"));
+    // 商城 VIP 商品（预置之外再上架一个）：bob 购买 2 × 7 天
     let r = post(&admin, "/api/p/shop/v1/admin/items".into(), json!({ "kind": "vip", "title": "VIP 7 天", "price": 100, "params": { "days": 7 }, "active": true })).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     let vip_item = r.body["id"].as_i64().unwrap();

@@ -1,7 +1,8 @@
 //! 插件出站 HTTP（plugin-api.md §4.3 `http_outbound`、security.md SSRF 防护，评审 R1 B-04）。
 //!
 //! - 只允许清单 `capabilities.http_outbound` 列出的主机：`"api.example.com"`、`"*.example.com"`、`"config:<静态配置键>"`
-//!   （值为 URL 或主机名），或对象 `{ host | config, allow_private = true }`；
+//!   （值为 URL 或主机名），或对象 `{ host | config, allow_private = true }`；对象 `{ setting = "<设置键>" }` 在请求时按插件
+//!   运行时设置中该键的 URL 放行其主机（管理员在后台填写；只允许公网地址）；
 //! - 解析后检查地址：默认禁止私有 / 回环 / 链路本地 / 组播等地址（`allow_private` 的条目除外），并把连接固定到已检查的地址
 //!   （防 DNS rebinding）；
 //! - 只允许 https（`allow_private` 条目与 dev 模式可用 http）；不跟随重定向（由插件自行处理）；
@@ -36,6 +37,8 @@ struct Rule {
 #[derive(Debug, Clone, Default)]
 pub struct OutboundPolicy {
     rules: Vec<Rule>,
+    /// `{ setting = "<key>" }`：主机取自运行时设置（请求时读取）
+    setting_keys: Vec<String>,
     dev: bool,
 }
 
@@ -55,9 +58,15 @@ impl OutboundPolicy {
     /// `entries` 为清单中的 `http_outbound`；`static_config` 用于解析 `config:<key>`
     pub fn parse(entries: &[Json], static_config: &Json, dev: bool) -> Result<Self, String> {
         let mut rules = Vec::new();
+        let mut setting_keys = Vec::new();
         for e in entries {
             let (spec, allow_private) = match e {
                 Json::String(s) => (s.clone(), false),
+                Json::Object(o) if o.contains_key("setting") => {
+                    let k = o.get("setting").and_then(Json::as_str).ok_or("`setting` must be a string")?;
+                    setting_keys.push(k.to_owned());
+                    continue;
+                }
                 Json::Object(o) => {
                     let spec = o
                         .get("host")
@@ -94,7 +103,7 @@ impl OutboundPolicy {
                 allow_private,
             });
         }
-        Ok(Self { rules, dev })
+        Ok(Self { rules, setting_keys, dev })
     }
 
     fn rule_for(&self, host: &str) -> Option<&Rule> {
@@ -109,7 +118,7 @@ impl OutboundPolicy {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rules.is_empty()
+        self.rules.is_empty() && self.setting_keys.is_empty()
     }
 }
 
@@ -150,6 +159,27 @@ pub struct KernelHttp {
     pub plugin: String,
     pub policy: Arc<OutboundPolicy>,
     pub kind: InvocationKind,
+    /// 读取 `{ setting = … }` 条目对应的运行时设置
+    pub pool: Option<sqlx::PgPool>,
+}
+
+impl KernelHttp {
+    /// 运行时设置中声明为出站地址的键：其 URL 的主机与请求主机一致时放行（公网地址、https）
+    async fn setting_rule(&self, host: &str) -> Option<Rule> {
+        let pool = self.pool.as_ref().filter(|_| !self.policy.setting_keys.is_empty())?;
+        let settings: Json = sqlx::query_scalar("SELECT settings FROM kernel.plugin_settings WHERE plugin_id = $1")
+            .bind(&self.plugin)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()?;
+        self.policy
+            .setting_keys
+            .iter()
+            .filter_map(|k| settings.get(k).and_then(Json::as_str).and_then(host_of))
+            .any(|h| h == host)
+            .then(|| Rule { host: HostPat::Exact(host.to_owned()), allow_private: false })
+    }
 }
 
 fn denied(msg: impl Into<String>) -> PluginError {
@@ -172,12 +202,15 @@ impl HttpClient for KernelHttp {
             .host()
             .map(|h| h.trim_matches(['[', ']']).to_ascii_lowercase())
             .ok_or_else(|| PluginError::bad_request("URL has no host"))?;
-        let rule = self.policy.rule_for(&host).ok_or_else(|| {
-            denied(format!(
-                "plugin `{}` may not call host `{host}` (http_outbound)",
-                self.plugin
-            ))
-        })?;
+        let rule = match self.policy.rule_for(&host) {
+            Some(r) => r.clone(),
+            None => self.setting_rule(&host).await.ok_or_else(|| {
+                denied(format!(
+                    "plugin `{}` may not call host `{host}` (http_outbound)",
+                    self.plugin
+                ))
+            })?,
+        };
         match scheme {
             "https" => {}
             "http" if rule.allow_private || self.policy.dev => {}
@@ -315,6 +348,7 @@ mod tests {
                 OutboundPolicy::parse(&[json!("localhost")], &json!({}), false).unwrap_or_default(),
             ),
             kind: InvocationKind::Http,
+            pool: None,
         };
         let req = |u: &str| {
             http::Request::builder()

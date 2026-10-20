@@ -223,7 +223,7 @@ pub fn from_ptgen(id: &str, v: &Value) -> Value {
     let countries = strs(&v["region"]);
     let mut data = unified(
         id,
-        if episodes.is_some_and(|e| e > 1) { "tv" } else { "movie" },
+        if episodes.is_some_and(|e| e > 1) || v["kind"] == "tv" { "tv" } else { "movie" },
         v["chinese_title"].as_str().map(str::to_owned),
         v["foreign_title"].as_str().filter(|s| !s.is_empty()).map(str::to_owned),
         aliases,
@@ -314,8 +314,8 @@ pub fn intro(data: &Value, poster: Option<&str>, markdown: bool) -> String {
         lines.push(String::new());
         lines.push("◎获奖情况".into());
         lines.push(String::new());
-        for p in a.lines().map(str::trim).filter(|p| !p.is_empty()) {
-            lines.push(format!("　　{p}"));
+        for p in a.lines().map(str::trim) {
+            lines.push(if p.is_empty() { String::new() } else { format!("　　{p}") });
         }
     }
     if markdown {

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "种子认领：认领自己下载过的种子并长期保种，每月按做种时长考核，达标发魔力值，连续不达标取消认领"
+summary = "用户认领种子并承诺长期保种，按月考核做种时长"
+category = "content"
 
 provides = ["ctx.claims@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

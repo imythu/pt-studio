@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "种子与作品的评论：Markdown / BBCode、楼层与回复、引用、@提醒、防刷、感谢、编辑历史（ctx.comments）"
+summary = "种子和作品下的评论区，支持回复与 @ 提醒"
+category = "community"
 
 provides = ["ctx.comments@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

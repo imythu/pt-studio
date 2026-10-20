@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "通知：插件经 ctx.notify 发送；站内通知中心（未读数与已读）与邮件渠道（http_relay / Postmark / SendGrid），按类别与渠道的接收偏好、一键退订（Telegram / Discord 待接入）"
+summary = "站内通知中心与邮件通知（需配置邮件服务）"
+category = "community"
 
 provides = ["ctx.notify@0.1.0"]
 optional_requires = ["ctx.users@^0.1", "ctx.auth@^0.1"]

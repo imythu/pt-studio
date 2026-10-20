@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "举报与工单：按目标合并、优先级、认领、处理动作（删除评论、禁用种子、限制用户）、无效举报滥用防护（ctx.reports）"
+summary = "用户举报违规内容，管理员认领并处理"
+category = "community"
 
 provides = ["ctx.reports@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

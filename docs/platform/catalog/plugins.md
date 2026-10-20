@@ -36,6 +36,7 @@
 | G4 记账 | `ledger` | LED | Native | `ctx.ledger` | 多币种账本 |
 | G4 记账 | `anticheat` | ACH | WASM | `ctx.anticheat` | 作弊判定与处置 |
 | G5 经济 | `bonus` | BONUS | WASM | `ctx.bonus` | 魔力值 / 做种积分 |
+| G5 经济 | `seeding-bonus` | SBONUS | WASM | `ctx.seeding_bonus` | 做种魔力公式参数、官种奖励、计算说明页 |
 | G5 经济 | `shop` | SHOP | WASM | `ctx.shop` | 商城 |
 | G5 经济 | `checkin` | CHKIN | WASM | `ctx.checkin` | 签到 |
 | G5 经济 | `lottery` | LOT | WASM | `ctx.lottery` | 幸运转盘（魔力值、上传量、VIP 天数、永久 VIP） |
@@ -76,6 +77,7 @@
 | G12 AI | `ai-upload-review` | AIUR | WASM | `ctx.ai_upload_review` | 上传 AI 审核 |
 | G12 AI | `ai-moderation` | AIMOD | WASM | `ctx.ai_moderation` | 内容 AI 审核 |
 | G12 AI | `ai-assistant` | AIAST | Native | — | 站内助手 / 客服机器人 |
+| G13 外观 | `theme-anime` | THANI | WASM | — | 动漫风站点主题（晴空樱花 / 星空夜），默认主题 |
 
 ## 3. 新增插件
 

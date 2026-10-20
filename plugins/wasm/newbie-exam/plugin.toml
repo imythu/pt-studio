@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "新手考核：新用户在限期内分阶段完成上传量 / 做种时长 / 分享率等目标，未完成禁止下载或封禁（可补救），通过可得魔力值"
+summary = "新手考核：新用户须在限期内达到上传量、做种时长等要求"
+category = "users"
 
 provides = ["ctx.exams@0.1.0"]
 requires = ["ctx.users@^0.1"]

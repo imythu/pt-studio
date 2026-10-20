@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "邀请码签发与兑换（钩子预留、事件确认）、额度批次、邀请树、邀请连坐"
+summary = "邀请码的发放、使用和邀请关系树"
+category = "users"
 
 provides = ["ctx.invites@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]

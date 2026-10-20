@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "论坛：分区与版块（按等级 / 角色的读写权限、版块版主）、主题与楼层、引用、编辑历史、感谢、投票、置顶 / 锁定 / 公告 / 精华 / 移动、已读标记、订阅通知、首页公告"
+summary = "站内论坛：分区、版块、主题帖与版主管理"
+category = "community"
 
 provides = ["ctx.forum@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

@@ -116,6 +116,13 @@ try {
   // 2. 登录；用户菜单插槽（invite）
   step('login and user menu slot');
   await login(p, 'web_bob');
+  // 主题插件（默认 theme-anime）：样式表已挂上并生效
+  const skin = await p.evaluate(() => ({
+    id: document.documentElement.dataset.skin,
+    css: !!document.querySelector('link[data-skin]')?.sheet,
+    r: getComputedStyle(document.documentElement).getPropertyValue('--r').trim(),
+  }));
+  if (skin.id !== 'theme-anime' || !skin.css || skin.r !== '16px') throw new Error(`theme not applied: ${JSON.stringify(skin)}`);
   await openMenu(p);
   await navLink(p, /^邀请\s*\d+$/).waitFor();
   await navLink(p, '等级说明').waitFor();
@@ -359,6 +366,8 @@ try {
   await sheet(a).getByRole('button', { name: '保号' }).click();
   await a.getByText(/保号至/).waitFor();
   await a.getByRole('tab', { name: '邀请' }).click();
+  // 等保号后的查询刷新完：刷新期间面板重新挂载会丢掉刚填的表单
+  await a.waitForLoadState('networkidle');
   const quotaBefore = (await getJson(`/api/p/invite/v1/admin/users/${bobId}/quota`)).balance;
   await a.getByRole('button', { name: '调整名额' }).click();
   await a.locator('input[name=invite_delta]').fill('2');
@@ -470,12 +479,12 @@ try {
   step('forum');
   await a.goto(`${BASE}/admin/p/forum/`);
   await a.getByRole('button', { name: '新建分区' }).click();
-  await sheet(a).locator('input[name=category_name]').fill('站务');
+  await sheet(a).locator('input[name=category_name]').fill('测试分区');
   await sheet(a).getByRole('button', { name: '新建分区' }).click();
   await sheet(a).waitFor({ state: 'detached' });
   await a.getByRole('button', { name: '新建版块' }).click();
-  await sheet(a).locator('select[name=board_category] option', { hasText: '站务' }).waitFor({ state: 'attached' });
-  await sheet(a).locator('select[name=board_category]').selectOption({ label: '站务' });
+  await sheet(a).locator('select[name=board_category] option', { hasText: '测试分区' }).waitFor({ state: 'attached' });
+  await sheet(a).locator('select[name=board_category]').selectOption({ label: '测试分区' });
   await sheet(a).locator('input[name=board_name]').fill('综合讨论');
   await sheet(a).getByRole('button', { name: '保存' }).click();
   await a.getByRole('cell', { name: '综合讨论' }).waitFor();
@@ -681,8 +690,10 @@ try {
 } catch (e) {
   console.error(e instanceof Error ? e.stack : e);
   if (problems.length) console.error(problems.join('\n'));
-  for (const pg of pages) {
+  for (const [i, pg] of pages.entries()) {
     console.error(`--- ${pg.url()}\n${(await pg.locator('body').innerText().catch(() => '')).slice(0, 1500)}`);
+    // 调试：PT_E2E_SHOTS=<目录> 时保存失败现场截图
+    if (process.env.PT_E2E_SHOTS) await pg.screenshot({ path: `${process.env.PT_E2E_SHOTS}/fail-${i}.png`, fullPage: true }).catch(() => {});
   }
   process.exitCode = 1;
 } finally {

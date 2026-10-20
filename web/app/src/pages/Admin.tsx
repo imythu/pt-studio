@@ -10,10 +10,12 @@ import { Button, Empty, Input, Note, PageHead, Panel, Segmented, SkeletonRows, S
 import { ErrorText, useErrorText } from '../errors';
 import { useManifest } from '../manifest';
 import { useSession } from '../session';
-import { pluginLabel, usePluginList, type PluginInfo as NavPlugin } from '../shell/Layout';
+import { CATEGORIES, pluginLabel, usePluginList, type PluginInfo as NavPlugin } from '../shell/Layout';
 
 interface PluginInfo extends NavPlugin {
   description?: string;
+  summary?: string;
+  category?: string;
   version: string;
   kind: string;
   settings?: 'schema' | 'custom' | 'none';
@@ -75,7 +77,8 @@ export function AdminPlugins() {
   const needle = q.trim().toLowerCase();
   const rows = all
     .filter((p) => filter === 'all' || p.settings !== 'none' || adminHref(p))
-    .filter((p) => !needle || [p.id, p.name, pluginLabel(p, t), p.description ?? ''].some((x) => x.toLowerCase().includes(needle)));
+    .filter((p) => !needle || [p.id, p.name, pluginLabel(p, t), p.summary ?? '', p.description ?? ''].some((x) => x.toLowerCase().includes(needle)));
+  const byCat = CATEGORIES.map((c) => [c, rows.filter((p) => (p.category ?? 'system') === c)] as const).filter(([, ps]) => ps.length > 0);
   return (
     <div className="stack">
       <PageHead title={t('ui.admin.plugins')} lede={t('ui.admin.plugins_lede', { n: all.length })} />
@@ -101,40 +104,49 @@ export function AdminPlugins() {
         ) : rows.length === 0 ? (
           <Empty>{t('ui.admin.no_plugins')}</Empty>
         ) : (
-          <div className="plug-grid">
-            {rows.map((p) => {
-              const admin = adminHref(p);
-              return (
-                <div key={p.id} className="plug">
-                  <div className="row-sb">
-                    <b>{pluginLabel(p, t)}</b>
-                    <span className="row" style={{ gap: 4 }}>
-                      <Tag>{p.kind}</Tag>
-                      {fe.get(p.id)?.entry && <Tag tone="o">UI</Tag>}
-                    </span>
-                  </div>
-                  <span className="mono">
-                    {p.id} · v{p.version}
-                  </span>
-                  {p.description && <p className="tiny">{p.description}</p>}
-                  <div className="row plug-acts">
-                    {p.settings !== 'none' ? (
-                      <Link className="btn btn-xs" to={`/admin/p/${p.id}/settings`}>
-                        {t('ui.admin.settings')}
-                      </Link>
-                    ) : (
-                      <span className="tiny muted">{t('ui.admin.no_settings')}</span>
-                    )}
-                    {admin && (
-                      <Link className="btn btn-xs btn-ghost" to={admin}>
-                        {t('ui.admin.manage')}
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          byCat.map(([c, ps]) => (
+            <section key={c} className="plug-cat" aria-labelledby={`plug-cat-${c}`}>
+              <h3 id={`plug-cat-${c}`}>
+                {t(`ui.admin.g_${c}`)} <span className="muted small">{ps.length}</span>
+              </h3>
+              <div className="plug-grid">
+                {ps
+                  .sort((a, b) => pluginLabel(a, t).localeCompare(pluginLabel(b, t)))
+                  .map((p) => {
+                    const admin = adminHref(p);
+                    return (
+                      <div key={p.id} className="plug">
+                        <div className="row-sb">
+                          <b>{pluginLabel(p, t)}</b>
+                          <span className="row" style={{ gap: 4 }}>
+                            <Tag>{p.kind}</Tag>
+                            {fe.get(p.id)?.entry && <Tag tone="o">UI</Tag>}
+                          </span>
+                        </div>
+                        {p.summary && <p className="plug-sum">{p.summary}</p>}
+                        <span className="mono" title={p.description || undefined}>
+                          {p.id} · v{p.version}
+                        </span>
+                        <div className="row plug-acts">
+                          {p.settings !== 'none' ? (
+                            <Link className="btn btn-xs" to={`/admin/p/${p.id}/settings`}>
+                              {t('ui.admin.settings')}
+                            </Link>
+                          ) : (
+                            <span className="tiny muted">{t('ui.admin.no_settings')}</span>
+                          )}
+                          {admin && (
+                            <Link className="btn btn-xs btn-ghost" to={admin}>
+                              {t('ui.admin.manage')}
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </section>
+          ))
         )}
       </Panel>
     </div>
@@ -176,7 +188,7 @@ function SettingsHead({ pluginId, info }: { pluginId: string; info?: PluginInfo 
             {pluginId}
             {info && ` · v${info.version} · ${info.kind}`}
           </span>
-          {info?.description && <> · {info.description}</>}
+          {(info?.summary || info?.description) && <> · {info.summary || info.description}</>}
         </>
       }
       actions={

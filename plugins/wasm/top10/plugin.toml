@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "排行榜：完成数最多 / 最活跃 / 做种最多的种子，上传量 / 做种时长 / 发布数最多的用户（可退出）；每小时更新"
+summary = "排行榜：热门种子、上传量、做种时长等榜单"
+category = "content"
 
 requires = ["ctx.rbac@^0.1"]
 

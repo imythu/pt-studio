@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "下载完成后的做种考核：豁免规则、分层评估、超限限制下载、免除"
+summary = "H&R 考核：下载后必须做种到规定时长，否则记一次违规"
+category = "users"
 
 provides = ["ctx.hnr@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]

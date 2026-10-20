@@ -289,6 +289,14 @@ mod tests {
         assert_eq!(c.torrent_vars, TORRENT_VARS.len() + 3);
     }
 
+    /// seeding-bonus 插件默认参数生成的规则（`ctx.seeding_bonus.rules`）须能编译
+    #[test]
+    fn seeding_bonus_default_compiles() {
+        let def: RuleDef = serde_json::from_str(r#"{"caps":{"bonus":100000,"seed_points":100000},"filters":{"min_seed_secs":60.0,"min_size":0.0},"mode":"expression","params":{"B0":100.0,"DONOR":2.0,"L":300.0,"MAX":7.0,"N0":7.0,"OFFICIAL":0.5,"P":1.0,"T0":4.0,"ZERO_FACTOR":0},"tiers":null,"torrent_terms":[{"expr":"(1 - exp(ln(0.1) / T0 * age_weeks)) * if(tag(\"zero_bonus\"), gib * ZERO_FACTOR, gib) * (1 + sqrt(2) * exp(ln(0.1) * (seeders - 1) / (N0 - 1)))","name":"A"},{"expr":"A_i * seed_hours","name":"AW"},{"expr":"if(tag(\"official\"), A_i, 0)","name":"OA"}],"user_formulas":{"bonus":"((B0 * 2 / pi * atan(A / L) + P * min(count, MAX)) * if(has_role(\"levels:vip\"), DONOR, 1) + B0 * 2 / pi * atan(OA / L) * OFFICIAL) * safe_div(AW, A, 0)","seed_points":"(B0 * 2 / pi * atan(A / L) + P * min(count, MAX)) * safe_div(AW, A, 0)"}}"#).unwrap_or_else(|e| panic!("{e}"));
+        let c = compile(&def, &curs()).unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!((c.terms.len(), c.formulas.len(), c.caps.get("bonus").copied()), (3, 2, Some(100_000)));
+    }
+
     #[test]
     fn term_order_and_errors() {
         let mut def: RuleDef = serde_json::from_str(PRESET_NEXUSPHP).unwrap_or_else(|e| panic!("{e}"));

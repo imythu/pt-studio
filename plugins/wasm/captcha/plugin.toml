@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "人机验证：Cloudflare Turnstile / hCaptcha / reCAPTCHA v2，经 ctx.captcha.verify 供 identity（登录、注册、找回密码）等插件校验令牌"
+summary = "登录、注册等环节的人机验证（Turnstile / hCaptcha 等）"
+category = "users"
 
 provides = ["ctx.captcha@0.1.0"]
 

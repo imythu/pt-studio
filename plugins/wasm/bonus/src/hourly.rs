@@ -44,6 +44,20 @@ pub fn version_at(period_start: &str) -> R<Option<(i64, RuleDef)>> {
     Ok(Some((int(&row[0]), def)))
 }
 
+/// seeding-bonus 插件提供的规则（后台插件设置中的参数）；未安装或规则无效时返回 None，退回规则表。
+/// 用户小时记录中的 rule_version 记为 0。
+fn external_rules() -> Option<CompiledRules> {
+    let out = services::call("ctx.seeding_bonus", "rules", "{}").ok()?;
+    let def: RuleDef = serde_json::from_str(&out).ok()?;
+    match compiled(&def) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            log::emit(log::Level::Warn, &format!("seeding-bonus rules rejected: {}", e.message), &[]);
+            None
+        }
+    }
+}
+
 pub fn currencies() -> R<BTreeMap<String, u32>> {
     let r = sql::query("SELECT code, scale FROM currencies WHERE is_active", &[])?;
     Ok(r.rows
@@ -268,13 +282,18 @@ pub fn on_snapshot(event_id: &str, payload: &Value) -> R<()> {
         log::emit(log::Level::Warn, "duplicate user hour ignored", &[]);
         return Ok(());
     }
-    let Some((ver, def)) = version_at(&period)? else {
-        return Err(err(
-            "bonus.rules_missing",
-            "no rule version is effective for this hour",
-        ));
+    let (ver, c) = match external_rules() {
+        Some(c) => (0, c),
+        None => {
+            let Some((ver, def)) = version_at(&period)? else {
+                return Err(err(
+                    "bonus.rules_missing",
+                    "no rule version is effective for this hour",
+                ));
+            };
+            (ver, compiled(&def)?)
+        }
     };
-    let c = compiled(&def)?;
     let mine = partial(&c, user, period_secs, &torrents)?;
     let agg = if parts > 1 {
         let batch = payload["batch_id"].as_str().unwrap_or_default().to_owned();

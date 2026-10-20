@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "把 passkey、种子、客户端白名单与 tracker 参数写入 Redis（trk:*），供 pt-tracker 鉴权与准入；启动与定时全量同步，用户与种子变更实时同步"
+summary = "把种子和用户数据同步给 Tracker，保证客户端能正常汇报"
+category = "system"
 
 requires = ["ctx.users@^0.1"]
 

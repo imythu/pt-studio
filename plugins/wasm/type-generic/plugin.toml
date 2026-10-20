@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "通用资源类型：管理员定义 kind（字段描述语言编译为 JSON Schema），预设游戏、软件、电子书、课程"
+summary = "通用资源类型：管理员可自定义字段，适合游戏、软件等"
+category = "content"
 
 [capabilities]
 sql = true

@@ -5,7 +5,9 @@ kind = "wasm"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "豆瓣元数据（经站点自建的代理或 PT-Gen 兼容端点，不内置爬取）：查询、搜索、归一化、缓存、海报转存、PT-Gen 版式简介；默认关闭，启用需确认风险声明"
+description = "豆瓣元数据：直连解析豆瓣条目页（参考 PT-Gen），或经 PT-Gen 兼容端点 / 站点自建代理；查询、搜索、归一化、缓存、海报转存、PT-Gen 版式简介；默认关闭，在插件设置中启用"
+summary = "发布时贴豆瓣链接，一键生成 PT-Gen 格式简介（片名、评分、演职员、海报）"
+category = "metadata"
 
 provides = ["ctx.metadata@0.1.0"]
 publishes = ["metadata.fetched"]
@@ -15,9 +17,14 @@ sql = true
 kv = true
 blob = true
 redis = true
-# site.toml [plugin.metadata-douban]：mode = "proxy" | "ptgen"、proxy_base_url / ptgen_url、proxy_token / ptgen_apikey、image_hosts
+# 配置在后台插件设置（settings_schema）；site.toml [plugin.metadata-douban] 的同名键作为后备（内网地址只能写在 site.toml）
 http_outbound = [
+  "movie.douban.com",
+  "m.douban.com",
+  "www.douban.com",
   "*.doubanio.com",
+  { setting = "proxy_base_url" },
+  { setting = "ptgen_url" },
   { config = "proxy_base_url", allow_private = true },
   { config = "ptgen_url", allow_private = true },
 ]
@@ -44,25 +51,10 @@ auth = "user"
 rate_limit = "user:30/m"
 
 [[http.routes]]
-id = "admin_status"
+id = "status"
 method = "GET"
-path = "/v1/admin/status"
-auth = "admin"
-permission = "kernel.settings.manage"
-
-[[http.routes]]
-id = "admin_enable"
-method = "POST"
-path = "/v1/admin/enable"
-auth = "admin"
-permission = "kernel.settings.manage"
-
-[[http.routes]]
-id = "admin_disable"
-method = "POST"
-path = "/v1/admin/disable"
-auth = "admin"
-permission = "kernel.settings.manage"
+path = "/v1/status"
+auth = "user"
 
 [error_codes]
 "metadata-douban.not_enabled" = 503
@@ -71,6 +63,7 @@ permission = "kernel.settings.manage"
 "metadata-douban.not_found" = 404
 "metadata-douban.upstream_error" = 502
 "metadata-douban.search_unsupported" = 501
+"metadata-douban.blocked" = 503
 
 [wasm]
 memory_mb = 64
@@ -82,7 +75,64 @@ migrations = "migrations"
 [frontend]
 entry = "index.js"
 slots = ["torrent.upload.extra"]
-routes = ["/admin/p/metadata-douban/*"]
+settings_ui = "schema"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["enabled", "mode", "cookie", "ptgen_url", "ptgen_apikey", "proxy_base_url", "proxy_token", "cache_days", "image_hosts"]
+
+[settings_schema.properties.enabled]
+type = "boolean"
+title = "启用豆瓣数据源"
+description = "豆瓣没有公开 API：直连模式以普通访客身份读取条目页，站点需自行遵守豆瓣使用条款并承担合规责任。打开即表示已了解（变更会记入审计日志）。"
+default = false
+
+[settings_schema.properties.mode]
+type = "string"
+title = "获取方式"
+enum = ["direct", "ptgen", "proxy"]
+x-pt-enum-titles = ["直连豆瓣（无需额外服务）", "PT-Gen 端点", "自建代理"]
+description = "直连最省事；访问量大或服务器 IP 被豆瓣限制时，改用 PT-Gen 端点或自建代理。"
+default = "direct"
+
+[settings_schema.properties.cookie]
+type = "string"
+title = "豆瓣 Cookie（直连，可选）"
+description = "被豆瓣限流（提示“异常请求”）时，填入登录豆瓣后浏览器里的 Cookie（至少包含 bid、dbcl2）。"
+x-pt-secret = true
+
+[settings_schema.properties.ptgen_url]
+type = "string"
+title = "PT-Gen 地址"
+description = "PT-Gen 兼容端点，如自建的 pt-gen-cfworker：https://ptgen.example.workers.dev"
+
+[settings_schema.properties.ptgen_apikey]
+type = "string"
+title = "PT-Gen API Key（可选）"
+x-pt-secret = true
+
+[settings_schema.properties.proxy_base_url]
+type = "string"
+title = "自建代理地址"
+description = "实现 /subject/<id> 与 /search 接口的代理服务"
+
+[settings_schema.properties.proxy_token]
+type = "string"
+title = "代理令牌（可选）"
+x-pt-secret = true
+
+[settings_schema.properties.cache_days]
+type = "integer"
+title = "缓存天数"
+minimum = 1
+maximum = 365
+default = 30
+
+[settings_schema.properties.image_hosts]
+type = "array"
+items = { type = "string" }
+title = "允许转存海报的图片主机"
+default = ["*.doubanio.com"]
 
 [terms]
 "metadata-douban.name" = { zh-CN = "豆瓣", en = "Douban" }

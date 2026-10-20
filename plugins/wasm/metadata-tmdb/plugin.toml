@@ -5,7 +5,9 @@ kind = "wasm"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "TMDB 电影 / 剧集元数据：查询、搜索、归一化、缓存、海报转存（需在 site.toml 配置 API key）"
+description = "TMDB 电影 / 剧集元数据：查询、搜索、归一化、缓存、海报转存（API Key 在后台插件设置中填写）"
+summary = "发布电影 / 剧集时自动匹配 TMDB，补全中文名、海报和简介（需填 API Key）"
+category = "metadata"
 
 provides = ["ctx.metadata@0.1.0"]
 publishes = ["metadata.fetched"]
@@ -17,6 +19,8 @@ blob = true
 http_outbound = [
   "api.themoviedb.org",
   "image.tmdb.org",
+  { setting = "api_base_url" },
+  { setting = "image_base_url" },
   { config = "api_base_url", allow_private = true },
   { config = "image_base_url", allow_private = true },
 ]
@@ -41,6 +45,39 @@ default_timeout_ms = 20000
 
 [database]
 migrations = "migrations"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["api_key", "access_token", "api_base_url", "image_base_url", "cache_days"]
+
+[settings_schema.properties.api_key]
+type = "string"
+title = "API Key（v3）"
+description = "在 themoviedb.org → 设置 → API 申请；填 API Key 或下面的访问令牌其一即可"
+x-pt-secret = true
+
+[settings_schema.properties.access_token]
+type = "string"
+title = "API 读访问令牌（v4，可选）"
+description = "填写后优先使用（Bearer 方式）"
+x-pt-secret = true
+
+[settings_schema.properties.api_base_url]
+type = "string"
+title = "API 地址（可选）"
+description = "默认 https://api.themoviedb.org；服务器访问 TMDB 不畅时可填反向代理地址（须为公网 https）"
+
+[settings_schema.properties.image_base_url]
+type = "string"
+title = "图片地址（可选）"
+description = "默认 https://image.tmdb.org"
+
+[settings_schema.properties.cache_days]
+type = "integer"
+title = "缓存天数"
+minimum = 1
+maximum = 365
+default = 30
 
 [terms]
 "metadata-tmdb.name" = { zh-CN = "TMDB", en = "TMDB" }

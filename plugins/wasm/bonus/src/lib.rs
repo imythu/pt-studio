@@ -200,6 +200,17 @@ impl on_event::Guest for Bonus {
                       SqlValue::Int(p["created_at"].as_i64().unwrap_or(evt.occurred_at)),
                       p["status"].as_str().map_or(SqlValue::Null, |t| SqlValue::Text(t.into()))],
                 )?;
+                // 官种等标签（seeding-bonus 认定；未安装时跳过）
+                if let Ok(out) = services::call("ctx.seeding_bonus", "classify", &p.to_string())
+                    && let Ok(v) = serde_json::from_str::<Value>(&out)
+                {
+                    for tag in v["tags"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                        sql::execute(
+                            "INSERT INTO torrent_tags (torrent_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                            &[SqlValue::Int(p["torrent_id"].as_i64().unwrap_or(0)), SqlValue::Text(tag.into())],
+                        )?;
+                    }
+                }
                 if p["status"] == "approved"
                     && let (Some(uid), Some(tid)) = (p["uploader_id"].as_i64(), p["torrent_id"].as_i64())
                 {

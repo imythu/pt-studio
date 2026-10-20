@@ -4,6 +4,8 @@ version = "0.1.0"
 kind = "wasm"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
+summary = "开发测试用的故障注入插件，生产环境不要启用"
+category = "system"
 
 [capabilities]
 sql = true

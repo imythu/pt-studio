@@ -37,6 +37,10 @@ pub fn routes(shared: Arc<Shared>) -> Router {
             "/api/kernel/v1/admin/plugins/{id}/settings",
             get(get_settings).put(put_settings),
         )
+        .route(
+            "/api/kernel/v1/admin/appearance",
+            get(get_appearance).put(put_appearance),
+        )
         .route("/api/kernel/v1/admin/audit", get(audit_log))
         .route("/api/kernel/v1/markup/preview", post(markup_preview))
         .with_state(shared)
@@ -54,7 +58,94 @@ fn entry_url(id: &str, version: &str, entry: &str) -> String {
     )
 }
 
+/// 外观设置存于 `kernel.plugin_settings` 的保留键
+const APPEARANCE_KEY: &str = "kernel:appearance";
+/// 不使用主题插件（框架自带样式）
+const CLASSIC: &str = "classic";
+
+/// 已安装的主题插件（加载顺序）
+fn theme_plugins(sh: &Shared) -> Vec<&Arc<crate::runtime::PluginRuntime>> {
+    sh.order
+        .iter()
+        .filter_map(|id| sh.plugins.get(id))
+        .filter(|rt| rt.manifest.frontend.as_ref().is_some_and(|f| f.theme.is_some()))
+        .collect()
+}
+
+/// 当前主题：管理员选择的值；未选择时用第一个已安装的主题插件；所选主题已卸载时退回框架样式
+async fn active_theme(sh: &Shared) -> Option<String> {
+    let chosen: Option<String> = sqlx::query_scalar("SELECT settings->>'theme' FROM kernel.plugin_settings WHERE plugin_id = $1")
+        .bind(APPEARANCE_KEY)
+        .fetch_optional(&sh.pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+    let themes = theme_plugins(sh);
+    match chosen.as_deref() {
+        Some(CLASSIC) => None,
+        Some(id) if themes.iter().any(|rt| rt.id == id) => Some(id.to_owned()),
+        _ => themes.first().map(|rt| rt.id.clone()),
+    }
+}
+
+async fn get_appearance(State(sh): State<Arc<Shared>>, method: Method, headers: HeaderMap) -> PResult<Response> {
+    authorize(&sh, &headers, &method, "kernel.settings.manage").await?;
+    let themes: Vec<Json> = theme_plugins(&sh)
+        .iter()
+        .map(|rt| json!({ "id": rt.id, "name": rt.manifest.name, "name_term": rt.manifest.name_term, "summary": rt.manifest.summary }))
+        .collect();
+    Ok(AxJson(json!({ "theme": active_theme(&sh).await.unwrap_or_else(|| CLASSIC.into()), "themes": themes })).into_response())
+}
+
+#[derive(Deserialize)]
+struct PutAppearance {
+    theme: String,
+}
+
+async fn put_appearance(
+    State(sh): State<Arc<Shared>>,
+    method: Method,
+    headers: HeaderMap,
+    AxJson(b): AxJson<PutAppearance>,
+) -> PResult<Response> {
+    let p = authorize(&sh, &headers, &method, "kernel.settings.manage").await?;
+    if b.theme != CLASSIC && !theme_plugins(&sh).iter().any(|rt| rt.id == b.theme) {
+        return Err(PluginError::validation("unknown theme").with_details(json!({ "theme": b.theme })));
+    }
+    let by = i64::try_from(p.user_id).unwrap_or_default();
+    let mut tx = sh.pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO kernel.plugin_settings (plugin_id, settings, version, updated_by) VALUES ($1, $2, 1, $3)
+         ON CONFLICT (plugin_id) DO UPDATE SET settings = EXCLUDED.settings, version = kernel.plugin_settings.version + 1,
+                updated_by = EXCLUDED.updated_by, updated_at = now()",
+    )
+    .bind(APPEARANCE_KEY)
+    .bind(json!({ "theme": b.theme }))
+    .bind(by)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO kernel.audit_log (actor, plugin_id, action, target, outcome, request_id, details)
+         VALUES ($1, 'kernel', 'kernel.appearance_update', 'site', 'ok', $2, $3)",
+    )
+    .bind(json!({ "kind": "user", "user_id": p.user_id }))
+    .bind(uuid::Uuid::now_v7().to_string())
+    .bind(json!({ "theme": b.theme }))
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
+    let theme = active_theme(&sh).await.and_then(|id| {
+        let rt = sh.plugins.get(&id)?;
+        let f = rt.manifest.frontend.as_ref()?;
+        let version = rt.manifest.version.to_string();
+        Some(json!({ "id": id, "css": f.theme.as_deref().map(|c| entry_url(&id, &version, c)),
+                     "entry": f.entry.as_deref().map(|e| entry_url(&id, &version, e)) }))
+    });
     let plugins: Vec<Json> = sh
         .order
         .iter()
@@ -66,6 +157,7 @@ async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
                 "id": rt.id, "name": rt.manifest.name, "version": version,
                 "entry": f.entry.as_deref().map(|e| entry_url(&rt.id, &version, e)),
                 "slots": f.slots, "routes": f.routes, "settings_ui": f.settings_ui.as_deref().unwrap_or("schema"),
+                "theme": f.theme.is_some(),
             }))
         })
         .collect();
@@ -77,6 +169,7 @@ async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
         "site": { "name": sh.cfg.site.name, "default_locale": sh.cfg.site.default_locale, "locales": locales,
                   "themes": ["default", "dark"] },
         "plugins": plugins,
+        "theme": theme,
         "installed": sh.order,
         "features": {},
     }))
@@ -267,12 +360,61 @@ async fn get_settings(
             .bind(&id)
             .fetch_optional(&sh.pool)
             .await?;
-    let (settings, version) = row.unwrap_or_else(|| (json!({}), 0));
+    let (mut settings, version) = row.unwrap_or_else(|| (json!({}), 0));
+    mask_secrets(rt.manifest.settings_schema.as_ref(), &mut settings);
     Ok(AxJson(json!({
         "plugin_id": id, "settings": settings, "version": version, "schema": rt.manifest.settings_schema,
         "settings_ui": rt.manifest.frontend.as_ref().and_then(|f| f.settings_ui.clone()).unwrap_or_else(|| "schema".into()),
     }))
     .into_response())
+}
+
+/// 设置 schema 中标注 `x-pt-secret` 的顶层字段：API 与审计中只显示占位符，不回显
+const SECRET_MASK: &str = "********";
+
+fn secret_keys(schema: Option<&Json>) -> Vec<&str> {
+    schema
+        .and_then(|s| s.get("properties"))
+        .and_then(Json::as_object)
+        .map(|p| {
+            p.iter()
+                .filter(|(_, v)| v.get("x-pt-secret").and_then(Json::as_bool) == Some(true))
+                .map(|(k, _)| k.as_str())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn mask_secrets(schema: Option<&Json>, settings: &mut Json) {
+    let Some(o) = settings.as_object_mut() else { return };
+    for k in secret_keys(schema) {
+        if let Some(v) = o.get_mut(k)
+            && v.as_str().is_some_and(|s| !s.is_empty())
+        {
+            *v = Json::String(SECRET_MASK.into());
+        }
+    }
+}
+
+/// 写入时：提交的仍是占位符（未修改）则保留原值；清空则删除该字段
+fn keep_secrets(schema: Option<&Json>, before: &Json, settings: &mut Json) {
+    let Some(o) = settings.as_object_mut() else { return };
+    for k in secret_keys(schema) {
+        match o.get(k).and_then(Json::as_str) {
+            Some(SECRET_MASK) => match before.get(k) {
+                Some(old) => {
+                    o.insert(k.to_owned(), old.clone());
+                }
+                None => {
+                    o.remove(k);
+                }
+            },
+            Some("") => {
+                o.remove(k);
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -306,6 +448,9 @@ async fn put_settings(
     .fetch_optional(&mut *tx)
     .await?;
     let (cur_version, before) = cur.clone().unwrap_or((0, json!({})));
+    let schema = sh.plugins.get(&id).and_then(|rt| rt.manifest.settings_schema.clone());
+    let mut settings = b.settings;
+    keep_secrets(schema.as_ref(), &before, &mut settings);
     if cur_version != b.version {
         return Err(
             PluginError::new("kernel.conflict", "settings were modified; reload and retry")
@@ -319,7 +464,7 @@ async fn put_settings(
          RETURNING version",
     )
     .bind(&id)
-    .bind(&b.settings)
+    .bind(&settings)
     .bind(by)
     .fetch_one(&mut *tx)
     .await?;
@@ -330,7 +475,12 @@ async fn put_settings(
     .bind(json!({ "kind": "user", "user_id": p.user_id }))
     .bind(format!("plugin:{id}"))
     .bind(uuid::Uuid::now_v7().to_string())
-    .bind(json!({ "before": before, "after": b.settings, "version": version }))
+    .bind({
+        let (mut before, mut after) = (before, settings);
+        mask_secrets(schema.as_ref(), &mut before);
+        mask_secrets(schema.as_ref(), &mut after);
+        json!({ "before": before, "after": after, "version": version })
+    })
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;

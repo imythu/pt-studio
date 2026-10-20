@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "流量作弊判定：信号与证据、数据驱动规则评分、复核队列、处置（冻结流量 / 锁钱包 / 禁止下载 / 封禁 / 回收流量）、申诉与回测"
+summary = "识别刷流量等作弊行为，给出证据并供管理员复核处理"
+category = "users"
 
 provides = ["ctx.anticheat@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1", "ctx.accounting@^0.1"]

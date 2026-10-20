@@ -105,11 +105,22 @@ export interface FrontendPlugin {
   slots: string[];
   routes: string[];
   settings_ui: 'schema' | 'custom' | 'none' | string;
+  /** 是否主题插件（可在后台“外观”中选用） */
+  theme?: boolean;
+}
+
+/** 当前生效的主题插件：样式表与（可选）替换页面的入口模块 */
+export interface ActiveTheme {
+  id: string;
+  css: string | null;
+  entry: string | null;
 }
 
 export interface FrontendManifest {
   site: { name: string; default_locale: string; locales: string[]; themes: string[] };
   plugins: FrontendPlugin[];
+  /** null：使用框架自带样式（经典） */
+  theme?: ActiveTheme | null;
   installed: string[];
   features: Record<string, boolean>;
 }

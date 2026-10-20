@@ -179,6 +179,37 @@ async fn web_end_to_end() {
     let admin = register_login(&app, "web_admin").await;
     common::grant_role(admin.id, "admin").await;
     let alice = register_login(&app, "web_alice").await;
+
+    // 外观：默认用第一个主题插件（theme-anime）；可切回经典；非管理员不能改；未知主题被拒
+    let theme = m.body["theme"].clone();
+    assert_eq!(theme["id"], "theme-anime", "{theme:?}");
+    let css = call(&app, "GET", theme["css"].as_str().unwrap(), None, &[]).await;
+    assert_eq!(css.status, StatusCode::OK);
+    assert!(css.headers["content-type"].to_str().unwrap().starts_with("text/css"));
+    let appearance = "/api/kernel/v1/admin/appearance";
+    assert_eq!(
+        call(&app, "PUT", appearance, Some(json!({ "theme": "classic" })), &hv(&alice.headers())).await.status,
+        StatusCode::FORBIDDEN
+    );
+    let r = call(&app, "GET", appearance, None, &hv(&admin.headers())).await;
+    assert_eq!(r.body["theme"], "theme-anime", "{:?}", r.body);
+    assert!(r.body["themes"].as_array().unwrap().iter().any(|t| t["id"] == "theme-anime"));
+    let put = |theme: &'static str| {
+        let app = app.clone();
+        let h = admin.headers();
+        async move { call(&app, "PUT", appearance, Some(json!({ "theme": theme })), &hv(&h)).await }
+    };
+    assert_eq!(put("classic").await.status, StatusCode::NO_CONTENT);
+    let m2 = call(&app, "GET", "/api/kernel/v1/frontend/manifest", None, &[]).await;
+    assert_eq!(m2.body["theme"], serde_json::Value::Null);
+    assert_eq!(put("invite").await.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(put("theme-anime").await.status, StatusCode::NO_CONTENT);
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM kernel.audit_log WHERE action = 'kernel.appearance_update'")
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+
     let tid = upload(
         &app,
         &alice,

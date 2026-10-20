@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "站内规则问答：依据规则文档回答并标注来源，可查看提问者自己的账号状态（只读工具），也作为 MCP 工具 ask_site_help 提供"
+summary = "用户可以向 AI 提问站规，回答会注明出自哪条规则"
+category = "ai"
 
 requires = ["ctx.llm@^0.1", "ctx.users@^0.1"]
 

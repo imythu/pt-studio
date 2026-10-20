@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "勋章与头衔：管理员定义物品与成就规则（事件计数 / 每日累计数据），自动或手动授予，用户选择佩戴的勋章与激活的头衔，个人页展示；shop 可出售"
+summary = "勋章与头衔：达成条件自动颁发，用户可佩戴展示"
+category = "play"
 
 provides = ["ctx.medals@0.1.0"]
 optional_requires = ["ctx.notify@^0.1"]

@@ -64,6 +64,8 @@ export interface PluginFrontend {
   routes?: PluginRouteDef[];
   settings?: ComponentType<{ api: PluginApi }>;
   onInit?: (api: PluginApi) => void;
+  /** 主题插件替换框架页面（键为页面 ID：home、login、torrents……）；只有当前生效的主题插件的这一项会被采用 */
+  pages?: Partial<Record<string, ComponentType>>;
 }
 
 // ---------------- 宿主 ----------------

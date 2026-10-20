@@ -1,7 +1,8 @@
 //! metadata-douban 插件（WASM，docs/plugins/metadata-douban/）：`ctx.metadata` 的豆瓣提供方。
 //!
-//! - 豆瓣没有公开 API，本插件**不内置爬取**：只调用站点自建并自行负责的上游——`proxy` 模式（LLD §1 的代理接口）或
-//!   `ptgen` 模式（PT-Gen 兼容端点，如自建的 pt-gen-cfworker）。默认关闭，启用前管理员须确认风险声明（审计）。
+//! - 三种上游（插件设置 `mode`）：`direct`（默认，直接解析豆瓣条目页，做法参考 PT-Gen；可填 Cookie 缓解限流）、
+//!   `ptgen`（PT-Gen 兼容端点，如自建的 pt-gen-cfworker）、`proxy`（站点自建代理，LLD §1 的接口）。
+//!   配置都在后台插件设置中（site.toml `[plugin.metadata-douban]` 的同名键仍作为后备）；默认关闭，启用开关即确认风险说明（设置变更有审计）。
 //! - `lookup` / `search`、归一化到统一模型、PG 缓存（30 天、负缓存 1 天、上游失败时返回过期数据）、海报转存（主机在
 //!   `image_hosts` 中，类型与大小校验）、`metadata.fetched`。
 //! - `GET /v1/ptgen?id=&markup=`：按 PT-Gen 版式生成简介（BBCode / Markdown / 纯文本），海报使用转存后的站内地址。
@@ -11,9 +12,10 @@
 pt_plugin_sdk::world!("metadata-douban", http);
 
 pub mod mapper;
+pub mod scrape;
 
 use exports::pt::plugin::{http_handler, service_provider};
-use pt_plugin_sdk::{audit, blob, config, http_client, kv, prelude::*, redis, serde_json, sql};
+use pt_plugin_sdk::{blob, config, http_client, kv, prelude::*, redis, serde_json, sql};
 use sha2::{Digest, Sha256};
 
 struct Douban;
@@ -22,35 +24,63 @@ struct Cfg {
     mode: String,
     base: String,
     token: Option<String>,
+    cookie: Option<String>,
     image_hosts: Vec<String>,
     cache_days: i64,
 }
 
+/// 插件设置优先，site.toml 静态配置为后备
 fn cfg() -> Cfg {
-    let c: Value = serde_json::from_str(&config::get_static()).unwrap_or(Value::Null);
-    let st = |k: &str| c[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
-    let mode = st("mode").unwrap_or_else(|| if st("ptgen_url").is_some() { "ptgen".into() } else { "proxy".into() });
-    let base = if mode == "ptgen" { st("ptgen_url") } else { st("proxy_base_url") };
+    let set: Value = serde_json::from_str(&config::get_settings()).unwrap_or(Value::Null);
+    let stat: Value = serde_json::from_str(&config::get_static()).unwrap_or(Value::Null);
+    let st = |k: &str| {
+        [&set, &stat]
+            .iter()
+            .find_map(|c| c[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned))
+    };
+    let mode = st("mode").unwrap_or_else(|| {
+        if st("ptgen_url").is_some() {
+            "ptgen".into()
+        } else if st("proxy_base_url").is_some() {
+            "proxy".into()
+        } else {
+            "direct".into()
+        }
+    });
+    let base = match mode.as_str() {
+        "ptgen" => st("ptgen_url"),
+        "proxy" => st("proxy_base_url"),
+        _ => Some(DOUBAN.into()),
+    };
+    let token = if mode == "ptgen" { st("ptgen_apikey") } else { st("proxy_token") };
+    let hosts = [&set, &stat].iter().find_map(|c| c["image_hosts"].as_array().filter(|a| !a.is_empty()).cloned());
     Cfg {
-        mode,
         base: base.unwrap_or_default().trim_end_matches('/').to_owned(),
-        token: st("proxy_token").or_else(|| st("ptgen_apikey")),
-        image_hosts: c["image_hosts"].as_array().map_or_else(
+        mode,
+        token,
+        cookie: st("cookie"),
+        image_hosts: hosts.map_or_else(
             || vec!["*.doubanio.com".into()],
             |a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
         ),
-        cache_days: c["cache_days"].as_i64().unwrap_or(30).clamp(1, 365),
+        cache_days: set["cache_days"].as_i64().or_else(|| stat["cache_days"].as_i64()).unwrap_or(30).clamp(1, 365),
     }
 }
 
-const STATEMENT_VERSION: i64 = 1;
+const DOUBAN: &str = "https://movie.douban.com";
+const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
+/// 设置中的启用开关；旧版本在后台页确认过的风险声明（kv `consent`）在设置未写入该键前继续有效
 fn enabled() -> bool {
+    let set: Value = serde_json::from_str(&config::get_settings()).unwrap_or(Value::Null);
+    if let Some(b) = set["enabled"].as_bool() {
+        return b;
+    }
     kv::get("consent")
         .ok()
         .flatten()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .is_some_and(|v| v["ack"] == true && v["statement_version"] == STATEMENT_VERSION)
+        .is_some_and(|v| v["ack"] == true)
 }
 
 fn enc(s: &str) -> String {
@@ -60,7 +90,10 @@ fn enc(s: &str) -> String {
 }
 
 fn http_get(url: &str, token: Option<&str>, referer: Option<&str>) -> R<(u16, Vec<u8>, Option<String>)> {
-    let mut headers = vec![http_client::Header { name: "accept".into(), value: "application/json".into() }];
+    send(url, vec![http_client::Header { name: "accept".into(), value: "application/json".into() }], token, referer)
+}
+
+fn send(url: &str, mut headers: Vec<http_client::Header>, token: Option<&str>, referer: Option<&str>) -> R<(u16, Vec<u8>, Option<String>)> {
     if let Some(t) = token {
         headers.push(http_client::Header { name: "authorization".into(), value: format!("Bearer {t}") });
     }
@@ -111,11 +144,127 @@ fn rehost(c: &Cfg, url: &str) -> Option<String> {
     Some(format!("/media/metadata-douban/{name}"))
 }
 
+/// 直连豆瓣：浏览器 UA（与可选 Cookie）请求页面；被拦截时提示在设置中填 Cookie
+fn douban_get(c: &Cfg, url: &str, html: bool) -> R<(u16, Vec<u8>)> {
+    let mut headers = vec![
+        http_client::Header { name: "user-agent".into(), value: UA.into() },
+        http_client::Header {
+            name: "accept".into(),
+            value: if html { "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8" } else { "application/json, text/javascript, */*;q=0.01" }.into(),
+        },
+        http_client::Header { name: "accept-language".into(), value: "zh-CN,zh;q=0.9".into() },
+    ];
+    if let Some(k) = &c.cookie {
+        headers.push(http_client::Header { name: "cookie".into(), value: k.clone() });
+    }
+    let (status, body, _) = send(url, headers, None, Some("https://movie.douban.com/"))?;
+    Ok((status, body))
+}
+
+fn blocked() -> PluginError {
+    PluginError {
+        retryable: true,
+        ..err("metadata-douban.blocked", "Douban rejected the request (rate limited); set a cookie in the plugin settings or retry later")
+    }
+}
+
+const MOBILE_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+const REXXAR: &str = "https://m.douban.com/rexxar/api/v2";
+
+/// 移动端接口（要求 Referer 为 m.douban.com）；返回 (状态, 正文, Location)
+fn rexxar_get(c: &Cfg, url: &str) -> R<(u16, Vec<u8>, Option<String>)> {
+    let mut headers = vec![
+        http_client::Header { name: "user-agent".into(), value: MOBILE_UA.into() },
+        http_client::Header { name: "accept".into(), value: "application/json".into() },
+        http_client::Header { name: "referer".into(), value: "https://m.douban.com/movie/".into() },
+    ];
+    if let Some(k) = &c.cookie {
+        headers.push(http_client::Header { name: "cookie".into(), value: k.clone() });
+    }
+    let r = http_client::send(&http_client::OutboundRequest {
+        method: "GET".into(),
+        url: url.into(),
+        headers,
+        body: None,
+        timeout_ms: 10_000,
+    })?;
+    let loc = r.headers.iter().find(|h| h.name.eq_ignore_ascii_case("location")).map(|h| h.value.clone());
+    Ok((r.status, r.body, loc))
+}
+
+fn rexxar_json(c: &Cfg, url: &str) -> Value {
+    match rexxar_get(c, url) {
+        Ok((200, b, _)) => serde_json::from_slice(&b).unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
+}
+
+/// 移动端接口：`movie/<id>` 对剧集返回 301 到 `tv/<id>`。Err(None) 表示不可用，交给桌面页解析
+fn via_rexxar(c: &Cfg, id: &str) -> Result<Option<Value>, Option<PluginError>> {
+    let mut path = format!("{REXXAR}/movie/{id}");
+    for _ in 0..2 {
+        let (status, body, loc) = rexxar_get(c, &path).map_err(Some)?;
+        match status {
+            200 => {
+                let v: Value = serde_json::from_slice(&body).map_err(|_| None)?;
+                let credits = rexxar_json(c, &format!("{path}/credits"));
+                let awards = rexxar_json(c, &format!("{path}/awards"));
+                let kind = if path.contains("/tv/") { "tv" } else { "movie" };
+                let imdb = match douban_get(c, &format!("https://www.douban.com/doubanapp//h5/{kind}/{id}/desc"), true) {
+                    Ok((200, b)) => scrape::h5_imdb(&String::from_utf8_lossy(&b)),
+                    _ => None,
+                };
+                return Ok(Some(scrape::from_rexxar(&v, &credits, &awards, imdb)));
+            }
+            301 | 302 => match loc.filter(|l| l.starts_with(REXXAR)) {
+                Some(l) => path = l,
+                None => return Err(None),
+            },
+            404 => return Ok(None),
+            _ => return Err(None),
+        }
+    }
+    Err(None)
+}
+
+fn direct(c: &Cfg, id: &str) -> R<Option<Value>> {
+    match via_rexxar(c, id) {
+        Ok(v) => return Ok(v),
+        Err(Some(e)) if e.code != "kernel.capability_denied" => return Err(e),
+        Err(_) => {}
+    }
+    let (status, body) = douban_get(c, &format!("{DOUBAN}/subject/{id}/"), true)?;
+    match status {
+        200 => {}
+        404 => return Ok(None),
+        // 跳到 sec.douban.com 等验证页
+        301 | 302 | 403 | 418 | 429 => return Err(blocked()),
+        s => return Err(PluginError { retryable: s >= 500, ..err("metadata-douban.upstream_error", &format!("Douban returned {s}")) }),
+    }
+    let html = String::from_utf8_lossy(&body);
+    let mut v = match scrape::subject(&html) {
+        scrape::Page::Ok(v) => v,
+        scrape::Page::NotFound => return Ok(None),
+        scrape::Page::Blocked => return Err(blocked()),
+    };
+    // 获奖情况在单独页面，失败不影响主体
+    if let Ok((200, b)) = douban_get(c, &format!("{DOUBAN}/subject/{id}/awards/"), true) {
+        let a = scrape::awards(&String::from_utf8_lossy(&b));
+        if !a.is_empty() {
+            v["awards"] = json!(a);
+        }
+    }
+    Ok(Some(v))
+}
+
 fn fetch(c: &Cfg, id: &str) -> R<Option<Value>> {
     if c.base.is_empty() {
         return Err(err("metadata-douban.not_configured", "no Douban proxy or PT-Gen endpoint is configured"));
     }
-    let (mut data, poster) = if c.mode == "ptgen" {
+    let (mut data, poster) = if c.mode == "direct" {
+        let Some(v) = direct(c, id)? else { return Ok(None) };
+        (mapper::from_ptgen(id, &v), v["poster"].as_str().map(str::to_owned))
+    } else if c.mode == "ptgen" {
         let url = format!("{}/?url={}", c.base, enc(&format!("https://movie.douban.com/subject/{id}/")));
         let Some(v) = upstream(c, &url)? else { return Ok(None) };
         if v["success"] == false {
@@ -210,6 +359,21 @@ fn search(query: &str, type_id: &str, limit: u32) -> R<Vec<Value>> {
     if q.is_empty() || q.chars().count() > 100 {
         return Err(err("kernel.validation_failed", "query must be 1..=100 characters"));
     }
+    if c.mode == "direct" {
+        let n = usize::try_from(limit.clamp(1, 20)).unwrap_or(10);
+        if let Ok((200, body, _)) = rexxar_get(&c, &format!("{REXXAR}/search/movie?q={}&count={n}", enc(q))) {
+            let items = scrape::rexxar_search(&body);
+            if !items.is_empty() {
+                return Ok(items.into_iter().take(n).collect());
+            }
+        }
+        let (status, body) = douban_get(&c, &format!("{DOUBAN}/j/subject_suggest?q={}", enc(q)), false)?;
+        return match status {
+            200 => Ok(scrape::suggest(&body).into_iter().take(n).collect()),
+            301 | 302 | 403 | 418 | 429 => Err(blocked()),
+            s => Err(PluginError { retryable: s >= 500, ..err("metadata-douban.upstream_error", &format!("Douban returned {s}")) }),
+        };
+    }
     if c.mode == "ptgen" || c.base.is_empty() {
         return Err(err("metadata-douban.search_unsupported", "the configured upstream does not support search"));
     }
@@ -280,28 +444,9 @@ impl http_handler::Guest for Douban {
                 http::Reply::ok(&json!({ "external_id": id, "format": text, "markup": markup,
                                          "title": data["titles"]["localized"]["zh-CN"], "imdb": data["ids"]["imdb"], "stale": stale }))
             }
-            "admin_status" => {
+            "status" => {
                 let c = cfg();
-                http::Reply::ok(&json!({ "enabled": enabled(), "configured": !c.base.is_empty(), "mode": c.mode, "statement_version": STATEMENT_VERSION,
-                    "statement": "豆瓣未提供公开 API。启用本插件意味着站点自行部署上游（代理或 PT-Gen 服务）并对其合规性负责。" }))
-            }
-            "admin_enable" => {
-                let b: Value = req.body_json().unwrap_or(Value::Null);
-                if b["ack"] != true || b["statement_version"] != STATEMENT_VERSION {
-                    return Err(err("kernel.validation_failed", "acknowledge the current statement to enable"));
-                }
-                kv::set("consent", json!({ "ack": true, "statement_version": STATEMENT_VERSION, "by": ctx::current_user()? }).to_string().as_bytes(), None)?;
-                audit::write(&audit::AuditEntry {
-                    action: "metadata-douban.enable".into(),
-                    target: "metadata-douban".into(),
-                    details: json!({ "statement_version": STATEMENT_VERSION }).to_string(),
-                })?;
-                http::Reply::no_content()
-            }
-            "admin_disable" => {
-                kv::delete("consent")?;
-                audit::write(&audit::AuditEntry { action: "metadata-douban.disable".into(), target: "metadata-douban".into(), details: "{}".into() })?;
-                http::Reply::no_content()
+                http::Reply::ok(&json!({ "enabled": enabled(), "mode": c.mode, "search": c.mode != "ptgen" }))
             }
             _ => return Err(err("kernel.not_found", "no such route")),
         };

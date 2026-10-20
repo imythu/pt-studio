@@ -9,6 +9,7 @@ import { SlotsProvider, type HostServices } from '@pt-studio/slots';
 import { TermsProvider, useTranslator } from '@pt-studio/terms';
 import { ToastHost, useToast } from '@pt-studio/ui-kit';
 import { ManifestCtx } from './manifest';
+import { applyTheme, preloadTheme } from './theme';
 import { router } from './router';
 import { SessionProvider, useSession } from './session';
 
@@ -59,7 +60,9 @@ async function boot() {
   } catch {
     /* 忽略 */
   }
+  preloadTheme();
   const manifest = await api<FrontendManifest>('/api/kernel/v1/frontend/manifest');
+  await applyTheme(manifest.theme ?? null);
   document.title = manifest.site.name;
   const locale = pickLocale(manifest);
   document.documentElement.lang = locale;

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "评论的 AI 审核：本地规则 + 大模型分类，达到阈值时建举报工单交给人工处理（不自动删除）"
+summary = "用 AI 自动检查评论，发现违规内容时生成举报交给管理员"
+category = "ai"
 
 provides = ["ctx.ai_moderation@0.1.0"]
 requires = ["ctx.reports@^0.1"]

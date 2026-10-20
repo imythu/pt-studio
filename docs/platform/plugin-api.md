@@ -1185,6 +1185,7 @@ entry = "ui/index.js"
 slots = ["user.profile.stats", "nav.user_menu"]
 routes = ["/p/bonus/*"]
 settings_ui = "schema"             # "schema" = 由 settings_schema 自动生成；"custom" = 插件自带
+# theme = "theme.css"              # 主题插件：样式表（相对前端产物目录），见下文“主题插件”
 
 # ---------- MCP ----------
 [[mcp.tools]]
@@ -1204,6 +1205,9 @@ audience = "user"                  # "user" | "admin"
 |---|---|---|---|
 | `id` | string | 是 | `^[a-z][a-z0-9-]{1,31}$`；不得以 `-` 结尾；保留字：`kernel`、`public`、`core`、`shared`、`system`、`pg-*`、`information-schema`。官方插件在 [catalog/plugins.md](catalog/plugins.md) 中登记；第三方插件选一个不冲突的 ID（`x-` 前缀留给测试插件） |
 | `name` / `name_term` | string | 是（二选一） | |
+| `description` | string | 否 | 面向开发者的完整说明 |
+| `summary` | string | 否 | 一句话说明（给站点管理员看的大白话），后台插件列表与设置页展示 |
+| `category` | enum | 否 | 用途分组：`content` / `metadata` / `community` / `users` / `play` / `ai` / `system`（缺省 `system`）；后台导航与插件列表按此分组 |
 | `version` | semver | 是 | |
 | `kind` | enum | 是 | `wasm` / `native`；与实际加载方式不符则拒绝启动 |
 | `api` | string | 是 | `pt:plugin@<major>` 或 `pt:plugin@<major>.<minor>`（如 `pt:plugin@1`）；兼容规则见 §6 |
@@ -1227,11 +1231,14 @@ audience = "user"                  # "user" | "admin"
 | `[redis]` | | 否 | `quota_mb`（默认 32）、`max_keys`（默认 100000） |
 | `[wasm]` | | 否 | 仅 `kind = "wasm"` |
 | `[terms]` | map | 否 | 键必须以 `<plugin_id>.` 开头；值为 `{ <locale> = "..." }` 或 `{ <locale> = { name, short, unit, icon } }` |
-| `[frontend]` | | 否 | `entry`、`slots`（须在 [catalog/slots.md](catalog/slots.md)）、`routes`（须以 `/p/<plugin_id>/` 或 `/admin/p/<plugin_id>/` 开头）、`settings_ui` |
+| `[frontend]` | | 否 | `entry`、`slots`（须在 [catalog/slots.md](catalog/slots.md)）、`routes`（须以 `/p/<plugin_id>/` 或 `/admin/p/<plugin_id>/` 开头）、`settings_ui`、`theme`（相对 `.css` 路径，声明后即为主题插件） |
+| `[settings_schema]` | | 否 | 运行时设置的 JSON Schema（后台 schema 表单）。顶层字段标注 `x-pt-secret = true` 时：后台接口与审计日志只显示 `********`，提交占位符保留原值、提交空串删除该值 |
 | `[[mcp.tools]]` | table[] | 否 | 官方插件的工具名在 [catalog/mcp-tools.md](catalog/mcp-tools.md) 中登记；管理员工具以 `admin_` 开头 |
 | `[error_codes]` | map | 否 | 本插件错误码 → HTTP 状态（4xx / 5xx），如 `"notes.too_many" = 422`；键须以 `<id>.` 开头。只对 [catalog/error-codes.md](catalog/error-codes.md) 未登记的码生效，都未声明时按后缀规则（conventions/api.md §7） |
 
 清单的 JSON Schema 放在 `crates/plugin-api/schemas/plugin-manifest.schema.json`，内核用它校验 TOML 解析后的结果；上表与该 schema 不一致时以本文为准并修正 schema。
+
+**主题插件**：`[frontend]` 声明 `theme = "theme.css"` 的插件即为主题插件，管理员在后台“外观”（`/admin/appearance`，接口 `GET/PUT /api/kernel/v1/admin/appearance`，权限 `kernel.settings.manage`，写审计 `kernel.appearance_update`）中选择站点主题；未选择时使用第一个已安装的主题插件，选 `classic` 则不加载主题（框架自带样式）。前端清单的 `theme` 字段给出当前主题的样式表与入口地址，宿主在启动时把样式表挂在框架样式之后（同优先级选择器直接覆盖，主题令牌见 `web/themes/tokens.css`），并在 `<html data-skin="<id>">` 上标记。主题插件的 `entry` 模块可以导出 `pages`（键为页面 ID：`home`、`login`、`register`、`torrents`、`torrent`、`group`、`upload`、`profile`、`settings`、`admin`）替换框架页面；只采用当前主题的替换。样式表源文件放在 `web/plugins/<id>/src/*.css`，构建时复制到前端产物目录。
 
 ### 4.3 能力（capabilities）清单
 
@@ -1242,7 +1249,7 @@ audience = "user"                  # "user" | "admin"
 | `redis` | bool | false | | 前缀 `p:<plugin_id>:` |
 | `redis_global` | [{ role, prefix, mode }] | [] | 是 | 访问全局前缀，`mode` = `r` / `rw`；只能申请 [catalog/redis-keys.md](catalog/redis-keys.md) 中分配给本插件的前缀 |
 | `blob` | bool | false | | |
-| `http_outbound` | [host] | [] | | 主机名；或 `config:<静态配置键>`（启动时从插件配置解析，可加 `allow_private = true` 供本地 LLM 等内网服务）；或 `runtime:<设置键>`（管理员修改设置后生效，仅 webhook 类插件）。所有出站请求经内核 http-client 的 SSRF 防护：解析后检查地址，禁止私有 / 回环 / 链路本地地址及重定向到这些地址（`allow_private` 声明的除外） |
+| `http_outbound` | [host] | [] | | 主机名；或 `config:<静态配置键>`（启动时从插件配置解析，可加 `allow_private = true` 供本地 LLM 等内网服务）；或对象 `{ setting = "<设置键>" }`（请求时读取插件运行时设置中该键的 URL 并放行其主机，只允许公网地址，如 TMDB 反向代理、PT-Gen 端点）。所有出站请求经内核 http-client 的 SSRF 防护：解析后检查地址，禁止私有 / 回环 / 链路本地地址及重定向到这些地址（`allow_private` 声明的除外） |
 | `views` | [string] | [] | | `<provider_schema>.<view>` |
 | `sensitive` | [string] | [] | | 取值：`user.email`、`user.ip`、`user.passkey`、`peer.ip`、`user.webauthn`、`user.totp`；全部须在 site.toml 授权，否则拒绝启动 |
 | `sensitive_optional` | [string] | [] | | 未授权时插件照常启动，相关调用返回 `kernel.capability_denied` |

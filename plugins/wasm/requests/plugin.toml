@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "求种与悬赏：发布、追加悬赏（经 ctx.ledger 托管）、投票、应求（规格要求检查）、确认发放、驳回、撤回与到期退款（ctx.requests）"
+summary = "求种：用户发布需求并悬赏魔力值，有人发布后领取"
+category = "content"
 
 provides = ["ctx.requests@0.1.0"]
 requires = ["ctx.ledger@^0.1", "ctx.rbac@^0.1"]

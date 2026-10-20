@@ -42,7 +42,7 @@ function AvatarPicker({ value, onChange }: { value: string | null; onChange(v: s
   return (
     <div className="ava-pick" role="group" aria-label={t('ui.settings.avatar_builtin')}>
       {q.data.map((a) => {
-        const url = `/avatars/${a.slug}.svg`;
+        const url = `/avatars/${a.slug}.jpg`;
         return (
           <button key={a.slug} type="button" title={a.name} aria-label={a.name} aria-pressed={value === url} onClick={() => onChange(url)}>
             <img src={url} alt="" loading="lazy" />
@@ -118,6 +118,7 @@ function ProfileSection() {
   const toast = useToast();
   const m = useManifest();
   const qc = useQueryClient();
+  const session = useSession();
   const q = useQuery({ queryKey: ['my-profile'], queryFn: () => api<Profile>('/api/p/identity/v1/users/me/profile') });
   const [draft, setDraft] = useState<Partial<Profile> | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -134,7 +135,9 @@ function ProfileSection() {
         /* 隐私模式 */
       }
       setDraft(null);
-      await qc.invalidateQueries({ queryKey: ['my-profile'] });
+      // 侧栏卡片、个人主页等处的头像与头衔来自会话和其他查询：一并刷新
+      await session.refresh();
+      await qc.invalidateQueries();
       toast(t('ui.admin.saved'), 'success');
     } catch (err) {
       setError(err);

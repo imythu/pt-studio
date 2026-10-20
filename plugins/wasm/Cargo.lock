@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "pt-markup"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "pulldown-cmark",
 ]
@@ -201,11 +201,11 @@ dependencies = [
 
 [[package]]
 name = "pt-release-parser"
-version = "0.4.1"
+version = "0.5.0"
 
 [[package]]
 name = "pt-type-kit"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "pt-release-parser",
  "serde_json",
@@ -465,6 +465,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-seeding-bonus"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-shop"
 version = "0.1.0"
 dependencies = [
@@ -477,6 +484,13 @@ version = "0.1.0"
 dependencies = [
  "pt-plugin-sdk",
  "sha2",
+]
+
+[[package]]
+name = "pt-wasm-theme-anime"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
 ]
 
 [[package]]

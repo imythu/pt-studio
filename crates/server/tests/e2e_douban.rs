@@ -1,4 +1,4 @@
-//! 端到端：豆瓣元数据（metadata-douban，WASM）—— 未确认风险时拒绝、代理模式查询 / 海报转存 / 缓存 / 负缓存 / 搜索、
+//! 端到端：豆瓣元数据（metadata-douban，WASM）—— 未启用时拒绝、插件设置中启用（密钥字段不回显 / 不进审计）、代理模式查询 / 海报转存 / 缓存 / 负缓存 / 搜索、
 //! PT-Gen 版式简介、PT-Gen 兼容端点模式。上游为本地模拟服务。
 //!
 //! 运行：`cargo test -p pt-server --test e2e_douban -- --test-threads=1`
@@ -16,7 +16,13 @@ use axum::{extract::Query, http::StatusCode, response::IntoResponse};
 use pt_kernel::{Kernel, config::SiteConfig};
 use serde_json::{Value, json};
 
-use common::{call, hv, register_login, reset};
+use sqlx::{Connection, PgConnection};
+
+use common::{call, env, hv, register_login, reset};
+
+async fn db() -> PgConnection {
+    PgConnection::connect(&env("PT_TEST_SUPERUSER_URL", "postgres://postgres@127.0.0.1:55432/pt_test")).await.unwrap()
+}
 
 /// 模拟上游：代理接口（/subject/{id}、/search）、PT-Gen（/ptgen/?url=）与海报（/img/p.jpg）
 async fn mock(hits: Arc<AtomicUsize>) -> String {
@@ -103,14 +109,32 @@ async fn douban_proxy_and_ptgen() {
         async move { call(&app, "GET", &format!("/api/p/metadata-douban{path}"), None, &hv(&h)).await }
     };
 
-    // 未确认风险：拒绝
+    // 未启用：拒绝；状态接口告诉前端是否显示“生成简介”
     let r = get("/v1/lookup?id=1292052".into()).await;
     assert_eq!((r.status, r.body["code"].clone()), (StatusCode::SERVICE_UNAVAILABLE, json!("metadata-douban.not_enabled")), "{:?}", r.body);
     assert_eq!(hits.load(Ordering::SeqCst), 0);
-    let r = call(&app, "POST", "/api/p/metadata-douban/v1/admin/enable", Some(json!({ "ack": true, "statement_version": 1 })), &hv(&user.headers())).await;
-    assert_eq!(r.status, StatusCode::FORBIDDEN);
-    let r = call(&app, "POST", "/api/p/metadata-douban/v1/admin/enable", Some(json!({ "ack": true, "statement_version": 1 })), &hv(&admin.headers())).await;
-    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    assert_eq!(get("/v1/status".into()).await.body["enabled"], false);
+    // 启用与配置都在插件设置中（只有管理员能改）；密钥字段不回显，提交占位符时保留原值
+    let path = "/api/kernel/v1/admin/plugins/metadata-douban/settings";
+    let body = json!({ "settings": { "enabled": true, "proxy_token": "tok-secret" }, "version": 0 });
+    assert_eq!(call(&app, "PUT", path, Some(body.clone()), &hv(&user.headers())).await.status, StatusCode::FORBIDDEN);
+    let r = call(&app, "PUT", path, Some(body), &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = call(&app, "GET", path, None, &hv(&admin.headers())).await;
+    assert_eq!((r.body["settings"]["proxy_token"].clone(), r.body["schema"]["properties"]["cookie"]["x-pt-secret"].clone()), (json!("********"), json!(true)));
+    let r = call(&app, "PUT", path, Some(json!({ "settings": r.body["settings"], "version": r.body["version"] })), &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let (stored,): (Value,) = sqlx::query_as("SELECT settings FROM kernel.plugin_settings WHERE plugin_id = 'metadata-douban'")
+        .fetch_one(&mut db().await)
+        .await
+        .unwrap();
+    assert_eq!(stored["proxy_token"], "tok-secret");
+    let (audit,): (String,) = sqlx::query_as("SELECT details::text FROM kernel.audit_log WHERE action = 'kernel.settings_update' AND target = 'plugin:metadata-douban' ORDER BY id DESC LIMIT 1")
+        .fetch_one(&mut db().await)
+        .await
+        .unwrap();
+    assert!(!audit.contains("tok-secret"), "{audit}");
+    assert_eq!(get("/v1/status".into()).await.body["enabled"], true);
 
     // 查询（链接形式）：归一化、海报转存到站内
     let r = get(format!("/v1/lookup?id={}", "https%3A%2F%2Fmovie.douban.com%2Fsubject%2F1292052%2F")).await;
@@ -144,7 +168,7 @@ async fn douban_proxy_and_ptgen() {
     assert!(!r.body["format"].as_str().unwrap().contains("[img]"));
     drop(kernel);
 
-    // PT-Gen 兼容端点模式（启用状态保留在插件 KV）
+    // PT-Gen 兼容端点模式（启用状态保留在插件设置）
     let kernel = Kernel::start(config(&dir, &format!("mode = \"ptgen\"\nptgen_url = \"{base}/ptgen\"\n")), pt_server::native_plugins())
         .await
         .unwrap_or_else(|e| panic!("{e}"));

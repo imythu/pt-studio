@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "MediaInfo / BDInfo 解析：脱敏保存、规格摘要（分辨率 / 编码 / HDR / 音轨 / 字幕），与发布时声明的字段比较"
+summary = "解析 MediaInfo / BDInfo，自动提取分辨率、编码等规格"
+category = "content"
 
 provides = ["ctx.mediainfo@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

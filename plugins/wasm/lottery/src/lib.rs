@@ -28,7 +28,7 @@ struct Settings {
 fn settings() -> Settings {
     let s = ctx::settings();
     Settings {
-        enabled: s["enabled"].as_bool().unwrap_or(false),
+        enabled: s["enabled"].as_bool().unwrap_or(true),
         spin_cost: s["spin_cost"].as_i64().unwrap_or(50).clamp(0, 1_000_000),
         daily_limit: s["daily_limit"].as_i64().unwrap_or(10).clamp(0, 1000),
         min_account_days: s["min_account_days"].as_i64().unwrap_or(7).clamp(0, 365),

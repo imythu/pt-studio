@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "单种 / 自动 / 全站促销与个人促销卡；倍率经 ctx.accounting 的倍率规则生效"
+summary = "促销：免费、半价、双倍上传等，可设单种或全站"
+category = "play"
 
 provides = ["ctx.promotions@0.1.0"]
 requires = ["ctx.accounting@^0.1"]

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "动漫：解析字幕组风格发布名（字幕组、集号、字幕语言与方式）、字幕组别名、按 Bangumi / AniDB / TMDB 分组、范围检查、搜索字段"
+summary = "动漫类资源：识别字幕组、集数和字幕语言"
+category = "content"
 
 requires = ["ctx.torrents@^0.1"]
 optional_requires = ["ctx.metadata@^0.1"]

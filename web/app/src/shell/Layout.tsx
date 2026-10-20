@@ -226,16 +226,14 @@ interface PluginInfo {
   id: string;
   name: string;
   name_term?: string | null;
+  summary?: string;
+  category?: string;
   admin_routes?: string[];
   settings?: string;
 }
 
-/** 后台导航分组（插件 ID → 分组）；未列出的插件归「系统」 */
-const ADMIN_GROUPS: [string, string[]][] = [
-  ['content', ['moderation', 'reports', 'tickets', 'dupe', 'ai-upload-review', 'ai-moderation', 'subtitles', 'attachments', 'forum', 'comments', 'requests']],
-  ['users', ['anticheat', 'accounting', 'ratio-policy', 'hnr', 'seedbox', 'invite', 'registration-policy', 'newbie-exam']],
-  ['play', ['promotion', 'levels', 'medals', 'shop', 'lottery', 'donations', 'messages', 'ledger', 'bonus', 'checkin', 'claims']],
-];
+/** 后台分组顺序（插件清单的 `category`） */
+export const CATEGORIES = ['content', 'metadata', 'community', 'users', 'play', 'ai', 'system'] as const;
 
 export function pluginLabel(p: PluginInfo, t: (k: string) => string): string {
   if (p.name_term) {
@@ -250,44 +248,110 @@ export function usePluginList() {
   return useQuery({ queryKey: ['kernel-plugins'], queryFn: () => api<{ items: PluginInfo[] }>('/api/kernel/v1/plugins'), enabled: s.isStaff, staleTime: 300_000 });
 }
 
+/** 插件的后台入口：插件自己的后台页优先，其次设置页；都没有时为 null */
+export function pluginAdminHref(p: PluginInfo): string | null {
+  const r = p.admin_routes?.[0];
+  if (r) return r.replace(/\*$/, '');
+  return p.settings && p.settings !== 'none' ? `/admin/p/${p.id}/settings` : null;
+}
+
+/** 本地存储的小偏好（隐私模式下读写失败时忽略） */
+export function usePref<T>(key: string, init: T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? init : (JSON.parse(raw) as T);
+    } catch {
+      return init;
+    }
+  });
+  const set = (x: T) => {
+    setV(x);
+    try {
+      localStorage.setItem(key, JSON.stringify(x));
+    } catch {
+      /* 忽略 */
+    }
+  };
+  return [v, set];
+}
+
 function AdminNav() {
   const t = useT();
   const s = useSession();
   const ref = useRef<HTMLElement>(null);
   useMarkCurrent(ref);
+  const loc = useLocation();
+  const [closed, setClosed] = usePref<string[]>('pt-admin-nav-closed', []);
   const list = usePluginList().data?.items ?? [];
-  const withAdmin = list.filter((p) => p.admin_routes?.length);
-  const groups = new Map<string, PluginInfo[]>([['content', []], ['users', []], ['play', []], ['system', []]]);
-  for (const p of withAdmin) {
-    const g = ADMIN_GROUPS.find(([, ids]) => ids.includes(p.id))?.[0] ?? 'system';
-    groups.get(g)?.push(p);
+  const groups = new Map<string, PluginInfo[]>(CATEGORIES.map((c) => [c, []]));
+  for (const p of list) {
+    if (pluginAdminHref(p)) (groups.get(p.category ?? 'system') ?? groups.get('system'))?.push(p);
   }
-  const href = (p: PluginInfo) => (p.admin_routes?.[0] ?? `/admin/p/${p.id}/`).replace(/\*$/, '');
   return (
     <nav className="nav" ref={ref} aria-label={t('ui.nav.admin')}>
       <div className="nav-sec">{t('ui.admin.g_overview')}</div>
       <Link to="/admin">{t('ui.admin.dashboard')}</Link>
       <Link to="/admin/plugins">{t('ui.admin.plugins')}</Link>
+      {s.can('kernel.settings.manage') && <Link to="/admin/appearance">{t('ui.appearance.title')}</Link>}
       {s.can('kernel.audit.read') && <Link to="/admin/audit">{t('ui.audit.title')}</Link>}
       {s.can('identity.users.read') && <Link to="/admin/users">{t('ui.admin.users')}</Link>}
       <Slot name="nav.admin" ctx={{ user: s.me }} />
-      {[...groups].map(
-        ([g, ps]) =>
-          ps.length > 0 && (
-            <div key={g} className="nav-grp">
-              <div className="nav-sec">{t(`ui.admin.g_${g}`)}</div>
-              {ps
+      {[...groups].map(([g, ps]) => {
+        if (ps.length === 0) return null;
+        // 当前页面所在的分组总是展开
+        const here = ps.some((p) => loc.pathname.startsWith(`/admin/p/${p.id}`));
+        const open = here || !closed.includes(g);
+        return (
+          <div key={g} className="nav-grp">
+            <button
+              type="button"
+              className="nav-sec nav-fold"
+              aria-expanded={open}
+              onClick={() => setClosed(open ? [...closed, g] : closed.filter((x) => x !== g))}
+            >
+              {t(`ui.admin.g_${g}`)}
+              <span className="nav-n">{ps.length}</span>
+            </button>
+            {open &&
+              ps
                 .sort((a, b) => pluginLabel(a, t).localeCompare(pluginLabel(b, t)))
                 .map((p) => (
-                  <Link key={p.id} to={href(p)}>
+                  <Link key={p.id} to={pluginAdminHref(p) as string} title={p.summary || undefined}>
                     {pluginLabel(p, t)}
                   </Link>
                 ))}
-            </div>
-          ),
-      )}
+          </div>
+        );
+      })}
     </nav>
   );
+}
+
+/** 侧栏滚动位置：前台与后台各记一份（换页、前后台切换后恢复） */
+function useRailScroll(ref: React.RefObject<HTMLElement | null>, mode: string) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const key = `pt-rail-scroll-${mode}`;
+    try {
+      const y = Number(sessionStorage.getItem(key) ?? 0);
+      // 插件导航异步加载，内容撑开后再恢复
+      requestAnimationFrame(() => (el.scrollTop = y));
+      setTimeout(() => (el.scrollTop = y), 300);
+    } catch {
+      /* 忽略 */
+    }
+    const save = () => {
+      try {
+        sessionStorage.setItem(key, String(el.scrollTop));
+      } catch {
+        /* 忽略 */
+      }
+    };
+    el.addEventListener('scroll', save, { passive: true });
+    return () => el.removeEventListener('scroll', save);
+  }, [ref, mode]);
 }
 
 function Rail({ admin, open, onClose }: { admin: boolean; open: boolean; onClose(): void }) {
@@ -295,8 +359,10 @@ function Rail({ admin, open, onClose }: { admin: boolean; open: boolean; onClose
   const loc = useLocation();
   // 窄屏抽屉：换页后收起
   useEffect(() => onClose(), [loc.pathname, onClose]);
+  const ref = useRef<HTMLElement>(null);
+  useRailScroll(ref, admin ? 'admin' : 'front');
   return (
-    <aside className={cx('rail', admin && 'admin', open && 'open')} id="rail" aria-label={t('ui.nav.menu')}>
+    <aside ref={ref} className={cx('rail', admin && 'admin', open && 'open')} id="rail" aria-label={t('ui.nav.menu')}>
       <Wordmark />
       {admin ? (
         <div className="admin-mark">
@@ -308,7 +374,9 @@ function Rail({ admin, open, onClose }: { admin: boolean; open: boolean; onClose
       )}
       {admin ? <AdminNav /> : <UserNav />}
       <div className="rail-foot">
-        <span>Powered by PT Studio</span>
+        <a href="https://github.com/imythu/pt-studio" target="_blank" rel="noopener noreferrer">
+          Powered by PT Studio
+        </a>
       </div>
     </aside>
   );

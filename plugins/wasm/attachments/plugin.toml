@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "站内图床：上传 PNG / JPEG / GIF / WebP（去除 EXIF 等元数据），用于种子简介、论坛帖子与评论"
+summary = "站内图床：上传截图和图片，用于种子简介和帖子"
+category = "content"
 
 requires = ["ctx.rbac@^0.1"]
 

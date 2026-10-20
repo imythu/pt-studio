@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "种子上传、规范化、存储与下载（ctx.torrents）"
+summary = "种子的上传、存储与下载，站点的核心插件"
+category = "content"
 
 provides = ["ctx.torrents@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]

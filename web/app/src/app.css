@@ -40,7 +40,14 @@
 .nav a > span:first-child, .nav a > .nm { flex: 1; }
 .nav a em, .nav a .n { margin-left: auto; font-style: normal; font: 11px var(--f-mono); color: var(--muted); }
 .nav a .pill, .nav a b.n { font: 600 10.5px/1 var(--f-mono); background: var(--ember); color: #fff; border-radius: 8px; padding: 2px 5px; margin-left: auto; }
+.nav-fold { display: flex; align-items: center; gap: 6px; border: 0; background: none; width: 100%; text-align: left; cursor: pointer; font-family: inherit; }
+.nav-fold::after { content: "▾"; margin-left: auto; letter-spacing: 0; transition: transform .15s; }
+.nav-fold[aria-expanded="false"]::after { transform: rotate(-90deg); }
+.nav-fold:hover { color: var(--ink); }
+.nav-fold .nav-n { font: 10px var(--f-mono); letter-spacing: 0; opacity: .7; }
 .rail-foot { margin-top: auto; font-size: 11px; color: var(--muted); padding: 0 4px; }
+.rail-foot a { color: inherit; }
+.rail-foot a:hover { color: var(--gold); text-decoration: underline; }
 
 /* 顶栏 */
 .top {
@@ -340,6 +347,10 @@ a.plug:hover { background: var(--sunk); }
 .plug .mono { color: var(--muted); font-size: 11px; }
 .plug p { color: var(--ink-2); }
 .plug-acts { margin-top: 4px; }
+.plug .plug-sum { font-size: 12.5px; line-height: 1.55; color: var(--ink-2); margin: 0; }
+.plug-cat > h3 { font-size: 13px; letter-spacing: .08em; padding: 14px 16px 8px; margin: 0; border-top: 1px solid var(--line); }
+.plug-cat:first-of-type > h3 { border-top: 0; }
+.plug-cat .plug-grid { border-radius: 0; }
 .dash-widgets:empty { display: none; }
 .save-bar { position: sticky; bottom: 12px; z-index: 5; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: var(--r); border: 1px solid var(--line); background: var(--veil); backdrop-filter: blur(10px); }
 .save-bar.dirty { border-color: var(--gold); box-shadow: var(--shadow); }
@@ -673,3 +684,24 @@ fieldset.poll { margin: 0; min-width: 0; max-width: none; }
 .ava-pick button img { width: 100%; height: 100%; display: block; border-radius: 50%; }
 .ava-pick button:hover { border-color: var(--line); }
 .ava-pick button[aria-pressed="true"] { border-color: var(--gold, #c9a24f); box-shadow: 0 0 0 2px var(--surface); }
+
+/* seeding-bonus 说明页 */
+.sb-steps { margin: 0; padding-left: 1.4em; display: grid; gap: 10px; line-height: 1.7; }
+.sb-result { font-size: 18px; margin: 14px 0 4px; }
+.sb-result b { color: var(--gold); }
+.sb-formula { font: 12.5px/1.8 var(--f-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--sunk); padding: 12px 14px; border-radius: 4px; margin: 0 0 12px; }
+
+/* 后台：外观 */
+.skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.skin { display: grid; gap: 10px; align-content: start; justify-items: start; border: 1px solid var(--line); border-radius: var(--r); padding: 12px; background: var(--surface); }
+.skin[data-on] { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.skin-b { display: grid; gap: 4px; width: 100%; }
+.skin-pv { width: 100%; height: 86px; border-radius: calc(var(--r) - 2px); position: relative; overflow: hidden; background: #eceff0; border: 1px solid #d3dadd; }
+.skin-pv i { position: absolute; display: block; border-radius: 3px; }
+.skin-pv i:nth-child(1) { left: 0; top: 0; bottom: 0; width: 26%; background: #fafbfb; border-right: 1px solid #d3dadd; }
+.skin-pv i:nth-child(2) { left: 32%; top: 14px; width: 60%; height: 30px; background: #fafbfb; border: 1px solid #d3dadd; }
+.skin-pv i:nth-child(3) { left: 32%; top: 54px; width: 22%; height: 16px; background: #17212a; }
+.skin-pv[data-pv="theme-anime"] { background: linear-gradient(160deg, #ffe3ef, #dcecff 60%, #eef4fb); border-color: #f3c6da; }
+.skin-pv[data-pv="theme-anime"] i:nth-child(1) { background: rgb(255 255 255 / .7); border-right-color: #e9d5f2; border-radius: 0 14px 14px 0; }
+.skin-pv[data-pv="theme-anime"] i:nth-child(2) { background: rgb(255 255 255 / .85); border-color: #f0d8e6; border-radius: 12px; box-shadow: 0 6px 14px -8px rgb(232 90 148 / .45); }
+.skin-pv[data-pv="theme-anime"] i:nth-child(3) { background: linear-gradient(135deg, #f06ba5, #6b9cf5); border-radius: 999px; }

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "剧集：从发布名推断季集与范围、按季分组、上传时按文件列表检查范围、剧与季元数据补全、搜索字段"
+summary = "剧集类资源：识别季和集，按季归组"
+category = "content"
 
 requires = ["ctx.torrents@^0.1"]
 optional_requires = ["ctx.metadata@^0.1"]

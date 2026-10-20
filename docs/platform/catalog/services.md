@@ -64,6 +64,7 @@ WASM 插件通过 `pt:plugin` 的宿主接口使用；Native 插件通过 `Ctx` 
 | `ctx.ledger` | ledger | single | `register_currency(code, scale, name_term)`、`transfer(TransferRequest) -> entry_id`、`balance(currency, user_id) -> i64`、`balances(user_id)`、`history(currency, user_id, cursor)`、`reverse(entry_id, reason)` | `currency:<code>`（只能操作该币种）、`read`、`reverse` | 0.1.0 |
 | `ctx.anticheat` | anticheat | single | `risk(user_id) -> RiskSummary`、`cases(filter, cursor)`、`case(id)`、`resolve(case_id, decision, actions[], false_positive_evidence_ids[], note, idempotency_key)`、`report(req) -> evidence_id`（种类须以调用方插件 ID 为前缀） | `read`、`write`、`report` | 0.1.0 |
 | `ctx.bonus` | bonus | single | `estimate_hourly(user_id) -> i64`、`award(user_id, amount, reason, idempotency_key)`、`rules_summary(locale)` | `award` | 0.1.0 |
+| `ctx.seeding_bonus` | seeding-bonus | single | `rules() -> RuleDef`（bonus 每小时结算用的做种魔力规则，由插件设置生成）、`classify({title, uploader_id}) -> {tags}`（官种认定，bonus 在种子发布时打 `official` 标签） | — | 0.1.0 |
 | `ctx.shop` | shop | single | `items(locale)`、`purchase(user_id, item_id, qty, idempotency_key) -> order_id` | — | 0.1.0 |
 | `ctx.checkin` | checkin | single | `status(user_id) -> {checked_today, streak}`、`check_in(user_id) -> reward` | — | 0.1.0 |
 | `ctx.lottery` | lottery | single | `wheel(user_id?)`（转盘配置、奖品与概率、最近中奖；带 user_id 时含今日次数与资格） | — | 0.2.0 |

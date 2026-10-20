@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "字幕区：为种子上传 SRT / ASS / SSA / VTT / SUP 字幕或 ZIP 字幕包（内容与压缩包检查），下载计数，可选上传奖励"
+summary = "字幕区：为种子上传和下载字幕文件"
+category = "content"
 
 provides = ["ctx.subtitles@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

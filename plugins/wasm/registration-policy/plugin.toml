@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "注册策略：开放注册开关与每周时段、限时开放（可限名额）、邀请注册开关、全站用户上限、同 IP / 同网段注册上限、邮箱域名黑白名单、开放注册审核"
+summary = "控制注册方式：开放注册时段、名额、邀请制、邮箱白名单"
+category = "users"
 
 [capabilities]
 sql = true

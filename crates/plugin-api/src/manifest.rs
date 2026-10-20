@@ -14,6 +14,9 @@ pub enum PluginKind {
     Native,
 }
 
+/// 清单 `category` 的取值（后台按此顺序分组）
+pub const CATEGORIES: &[&str] = &["content", "metadata", "community", "users", "play", "ai", "system"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
@@ -31,6 +34,12 @@ pub struct Manifest {
     pub authors: Vec<String>,
     #[serde(default)]
     pub description: String,
+    /// 一句话说明（给站点管理员看的大白话，后台插件列表与设置页展示）
+    #[serde(default)]
+    pub summary: String,
+    /// 用途分组：content / metadata / community / users / play / ai / system（后台导航与插件列表按此分组）
+    #[serde(default)]
+    pub category: Option<String>,
     #[serde(default)]
     pub provides: Vec<String>,
     #[serde(default)]
@@ -328,6 +337,10 @@ pub struct FrontendDecl {
     pub routes: Vec<String>,
     #[serde(default)]
     pub settings_ui: Option<String>,
+    /// 主题插件：样式表（相对前端产物目录，如 `theme.css`）。声明后可在后台“外观”中选为站点主题；
+    /// 主题插件的 `entry` 模块还可以通过 `pages` 替换框架页面
+    #[serde(default)]
+    pub theme: Option<String>,
     /// 前端需要的外部来源（并入站点 CSP），如验证码服务的脚本与 iframe
     #[serde(default)]
     pub csp: Option<CspDecl>,
@@ -437,6 +450,14 @@ impl Manifest {
                 self.id
             )));
         }
+        if let Some(c) = &self.category
+            && !CATEGORIES.contains(&c.as_str())
+        {
+            return Err(PluginError::validation(format!(
+                "unknown category `{c}` (expected one of {})",
+                CATEGORIES.join(", ")
+            )));
+        }
         for s in self
             .provides
             .iter()
@@ -512,6 +533,13 @@ impl Manifest {
                         "frontend route `{r}` has wrong prefix"
                     )));
                 }
+            }
+            if let Some(t) = &f.theme
+                && (!t.ends_with(".css") || t.starts_with('/') || t.split('/').any(|s| s == ".." || s.is_empty()))
+            {
+                return Err(PluginError::validation(format!(
+                    "frontend theme `{t}` must be a relative .css path"
+                )));
             }
         }
         Ok(())

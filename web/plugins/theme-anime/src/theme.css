@@ -1,0 +1,224 @@
+/* theme-anime「晴空樱花」：动漫风站点主题。只在本主题生效时加载（排在框架样式之后），所以同优先级的选择器直接覆盖。
+   昼：晴空蓝 + 樱花粉，半透明圆角面板，渐变按钮，背景是天空渐变与零星花瓣。
+   夜「星空」：深靛夜空、粉色与天青强调色，背景点缀星光。
+   令牌名与 web/themes/tokens.css 一致：--gold 在本主题里是樱花粉（主强调色），--moon 是天空蓝，--emerald 是薄荷青。 */
+
+:root {
+  --bg: #eef4fb;
+  --surface: #ffffff;
+  --sunk: #edf2fa;
+  --ink: #1e2846;
+  --ink-2: #47527a;
+  --muted: #7b86a8;
+  --line: #e1e8f4;
+  --line-2: #c9d5ea;
+  --gold: #e45b96;
+  --gold-soft: #fde4ef;
+  --emerald: #13a08a;
+  --emerald-soft: #d8f4ee;
+  --moon: #4a7fe6;
+  --moon-soft: #dfe9fd;
+  --ember: #e24f5a;
+  --ember-soft: #fde1e3;
+  --on-gold: #ffffff;
+  --veil: rgb(255 255 255 / .72);
+  --scrim: rgb(30 30 70 / .38);
+  --shadow: 0 2px 6px rgb(98 122 196 / .08), 0 16px 36px -18px rgb(98 110 200 / .42);
+  --hero-tint: linear-gradient(90deg, rgb(255 246 250 / .94) 0%, rgb(240 246 255 / .74) 40%, rgb(240 246 255 / .04) 74%);
+  --r: 16px;
+
+  /* 主题自有令牌 */
+  --a-grad: linear-gradient(135deg, #f06ba5 0%, #b37cf0 52%, #5f97f2 100%);
+  --a-grad-soft: linear-gradient(135deg, #fde4ef 0%, #ece3fd 55%, #dfe9fd 100%);
+  --a-glass: rgb(255 255 255 / .9);
+  --a-glow: 0 10px 24px -12px rgb(228 91 150 / .55);
+  --a-sky:
+    radial-gradient(900px 520px at 6% -8%, #ffe0ee 0%, transparent 62%),
+    radial-gradient(1000px 640px at 104% 0%, #d6e8ff 0%, transparent 58%),
+    radial-gradient(800px 600px at 50% 110%, #e7defd 0%, transparent 60%),
+    linear-gradient(180deg, #f6f9ff 0%, #eef4fb 100%);
+  --a-petal: #f7a8c8;
+  --a-petal-o: .4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1230; --surface: #181d42; --sunk: #12163a;
+    --ink: #eef0ff; --ink-2: #c3c8ea; --muted: #8f96c2;
+    --line: #2a3066; --line-2: #3a417c;
+    --gold: #ff8cc0; --gold-soft: #45204a;
+    --emerald: #5fe3c6; --emerald-soft: #153d44;
+    --moon: #8fb6ff; --moon-soft: #1f2c5e;
+    --ember: #ff8a90; --ember-soft: #4a1f33;
+    --on-gold: #2a0c1e;
+    --veil: rgb(20 24 60 / .74);
+    --scrim: rgb(4 4 20 / .6);
+    --shadow: 0 2px 6px rgb(0 0 0 / .3), 0 18px 40px -18px rgb(0 0 0 / .7);
+    --hero-tint: linear-gradient(90deg, rgb(14 18 48 / .95) 0%, rgb(14 18 48 / .74) 40%, rgb(14 18 48 / .06) 76%);
+    --a-grad: linear-gradient(135deg, #ff7eb6 0%, #b48cff 52%, #6fa3ff 100%);
+    --a-grad-soft: linear-gradient(135deg, #45204a 0%, #33245e 55%, #1f2c5e 100%);
+    --a-glass: rgb(24 29 66 / .9);
+    --a-glow: 0 10px 26px -12px rgb(255 126 182 / .55);
+    --a-sky:
+      radial-gradient(1.2px 1.2px at 12% 18%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 38% 8%, #fff 50%, transparent 51%),
+      radial-gradient(1.4px 1.4px at 66% 22%, #ffe9f4 50%, transparent 51%),
+      radial-gradient(1px 1px at 84% 12%, #fff 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 24% 52%, #dfe8ff 50%, transparent 51%),
+      radial-gradient(1px 1px at 92% 46%, #fff 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 52% 64%, #fff 50%, transparent 51%),
+      radial-gradient(1px 1px at 8% 82%, #fff 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 74% 86%, #ffe9f4 50%, transparent 51%),
+      radial-gradient(900px 560px at 0% 0%, #3a1f5c 0%, transparent 60%),
+      radial-gradient(900px 600px at 100% 10%, #1b3172 0%, transparent 60%),
+      linear-gradient(180deg, #121641 0%, #0b0e28 100%);
+    --a-petal: #ff9cc8;
+    --a-petal-o: .22;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1230; --surface: #181d42; --sunk: #12163a;
+  --ink: #eef0ff; --ink-2: #c3c8ea; --muted: #8f96c2;
+  --line: #2a3066; --line-2: #3a417c;
+  --gold: #ff8cc0; --gold-soft: #45204a;
+  --emerald: #5fe3c6; --emerald-soft: #153d44;
+  --moon: #8fb6ff; --moon-soft: #1f2c5e;
+  --ember: #ff8a90; --ember-soft: #4a1f33;
+  --on-gold: #2a0c1e;
+  --veil: rgb(20 24 60 / .74);
+  --scrim: rgb(4 4 20 / .6);
+  --shadow: 0 2px 6px rgb(0 0 0 / .3), 0 18px 40px -18px rgb(0 0 0 / .7);
+  --hero-tint: linear-gradient(90deg, rgb(14 18 48 / .95) 0%, rgb(14 18 48 / .74) 40%, rgb(14 18 48 / .06) 76%);
+  --a-grad: linear-gradient(135deg, #ff7eb6 0%, #b48cff 52%, #6fa3ff 100%);
+  --a-grad-soft: linear-gradient(135deg, #45204a 0%, #33245e 55%, #1f2c5e 100%);
+  --a-glass: rgb(24 29 66 / .9);
+  --a-glow: 0 10px 26px -12px rgb(255 126 182 / .55);
+  --a-sky:
+    radial-gradient(1.2px 1.2px at 12% 18%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 38% 8%, #fff 50%, transparent 51%),
+    radial-gradient(1.4px 1.4px at 66% 22%, #ffe9f4 50%, transparent 51%),
+    radial-gradient(1px 1px at 84% 12%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 24% 52%, #dfe8ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 46%, #fff 50%, transparent 51%),
+    radial-gradient(1.3px 1.3px at 52% 64%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 82%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 74% 86%, #ffe9f4 50%, transparent 51%),
+    radial-gradient(900px 560px at 0% 0%, #3a1f5c 0%, transparent 60%),
+    radial-gradient(900px 600px at 100% 10%, #1b3172 0%, transparent 60%),
+    linear-gradient(180deg, #121641 0%, #0b0e28 100%);
+  --a-petal: #ff9cc8;
+  --a-petal-o: .22;
+  color-scheme: dark;
+}
+
+/* ---------- 背景：天空 + 花瓣 ---------- */
+body { background: var(--a-sky) var(--bg); background-attachment: fixed; }
+/* 花瓣层：固定定位、z-index -1，画在页面背景之上、所有内容之下 */
+.shell::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: var(--a-petal-o);
+  background-color: var(--a-petal);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='420'%20height='420'%3E%3Cg%20fill='%23000'%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%2860%2040%29%20rotate%2818%2020%2022%29%20scale%280.5%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%28270%2090%29%20rotate%28-30%2020%2022%29%20scale%280.38%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%28150%20250%29%20rotate%2855%2020%2022%29%20scale%280.44%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%28340%20320%29%20rotate%28-12%2020%2022%29%20scale%280.32%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%2840%20350%29%20rotate%2880%2020%2022%29%20scale%280.28%29'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 420px 420px repeat;
+          mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='420'%20height='420'%3E%3Cg%20fill='%23000'%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%2860%2040%29%20rotate%2818%2020%2022%29%20scale%280.5%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%28270%2090%29%20rotate%28-30%2020%2022%29%20scale%280.38%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%28150%20250%29%20rotate%2855%2020%2022%29%20scale%280.44%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%28340%20320%29%20rotate%28-12%2020%2022%29%20scale%280.32%29'/%3E%3Cpath%20d='M20%204%20L23%209%20C32%206%2038%2016%2033%2026%20C29%2034%2022%2038%2020%2040%20C18%2038%2011%2034%207%2026%20C2%2016%208%206%2017%209%20Z'%20transform='translate%2840%20350%29%20rotate%2880%2020%2022%29%20scale%280.28%29'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 420px 420px repeat;
+  animation: anime-petals 90s linear infinite;
+}
+@keyframes anime-petals { to { -webkit-mask-position: 160px 420px; mask-position: 160px 420px; } }
+@media (prefers-reduced-motion: reduce) { .shell::before { animation: none; } }
+
+::selection { background: var(--gold-soft); color: var(--ink); }
+:focus-visible { outline-color: var(--gold); border-radius: 8px; }
+* { scrollbar-color: color-mix(in srgb, var(--gold) 45%, var(--line-2)) transparent; }
+
+/* ---------- 字标与标题 ---------- */
+.mark b { background: var(--a-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.mark i { color: var(--gold); }
+.mark i::after { content: " ✿"; font: 400 15px/1 var(--f-body); vertical-align: 4px; color: var(--gold); }
+.page-h h1 { position: relative; padding-bottom: 6px; }
+.page-h h1::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 46px; height: 4px; border-radius: 4px; background: var(--a-grad);
+}
+.panel-h h2::before { content: "✦ "; font-size: .7em; vertical-align: .18em; background: var(--a-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* ---------- 外壳 ---------- */
+.rail { background: var(--a-glass); backdrop-filter: blur(16px) saturate(1.4); border-right: 1px solid var(--line); }
+.rail.admin { background: color-mix(in srgb, var(--a-glass) 85%, var(--moon-soft)); }
+.admin-mark { background: var(--a-grad); color: #fff; border-radius: 12px; box-shadow: var(--a-glow); }
+.admin-mark a { color: #fff; }
+.me-card { border-radius: 18px; background: var(--a-grad-soft); border-color: transparent; box-shadow: var(--shadow); }
+.me-foot a { border-radius: 999px; background: var(--a-glass); }
+.nav a, .nav-btn { border-radius: 999px; padding: 7px 12px; transition: background-color .15s, color .15s, transform .15s; }
+.nav a:hover, .nav-btn:hover { background: var(--gold-soft); color: var(--ink); transform: translateX(2px); }
+.nav a[aria-current="page"] { background: var(--a-grad); color: #fff; box-shadow: var(--a-glow); }
+.nav a[aria-current="page"]::before { content: "❀"; color: #fff; font-size: 11px; }
+.nav a[aria-current="page"] em, .nav a[aria-current="page"] .n { color: rgb(255 255 255 / .85); }
+.nav-sec { color: var(--gold); letter-spacing: .16em; font-weight: 600; }
+.top { background: var(--veil); border-bottom-color: var(--line); }
+.search { border-radius: 999px; background: var(--a-glass); border-color: var(--line-2); padding-left: 16px; }
+.search:focus-within { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.menu-btn { border-radius: 999px; }
+
+/* ---------- 面板 ---------- */
+/* 面板不加 backdrop-filter：长页面上几十个模糊层太耗性能，半透明已足够透出天空 */
+.panel, .kpis, .keyfacts {
+  background: var(--a-glass);
+  border-color: color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--r); box-shadow: var(--shadow);
+}
+.kpis > div, .keyfacts > div { border-left-color: var(--line); }
+.kpis b, .stat b { background: var(--a-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dt th { background: color-mix(in srgb, var(--sunk) 80%, transparent); }
+.dt tbody tr:hover td, .trow:hover { background: color-mix(in srgb, var(--gold-soft) 45%, transparent); }
+.thead, .thead:hover { background: color-mix(in srgb, var(--sunk) 80%, transparent); }
+.side-list > a:hover, .side-list > button:hover { background: color-mix(in srgb, var(--gold-soft) 50%, transparent); }
+.side-list > .top .rk { color: var(--gold); }
+.sheet-pn { border-radius: 22px 0 0 22px; background: var(--surface); }
+.toast { border-radius: 14px; background: var(--a-grad); color: #fff; box-shadow: var(--a-glow); }
+.note { border-radius: 12px; }
+.code-box, .json, pre.pre { border-radius: 12px; }
+
+/* ---------- 按钮与表单 ---------- */
+.btn { border-radius: 999px; transition: transform .15s, box-shadow .15s, border-color .15s, background-color .15s, filter .15s; }
+.btn:hover:not([disabled]) { border-color: var(--gold); transform: translateY(-1px); }
+.btn-primary, .btn-gold { background: var(--a-grad); color: #fff; border-color: transparent; box-shadow: var(--a-glow); }
+.btn-primary:hover:not([disabled]), .btn-gold:hover:not([disabled]) { background: var(--a-grad); border-color: transparent; filter: brightness(1.06) saturate(1.1); }
+.btn-ghost:hover:not([disabled]) { border-color: transparent; background: var(--gold-soft); }
+.btn-xs { border-radius: 999px; }
+.txt-btn { border-radius: 999px; }
+.in, .sel, .ta, .pt-input, .md-editor { border-radius: 12px; background: var(--surface); }
+.ta, textarea.pt-input { border-radius: 14px; }
+.chip { border-radius: 999px; }
+.chip[aria-pressed="true"], .chip[aria-checked="true"] { background: var(--gold-soft); color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
+.seg { border-radius: 999px; }
+.seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--a-grad); color: #fff; }
+.sw[aria-checked="true"] { background: var(--a-grad); }
+.ck input, .pt-check input { accent-color: var(--gold); }
+.subnav [aria-selected="true"], .subnav [aria-current="page"], .tabs [aria-selected="true"] { color: var(--gold); border-color: var(--gold); }
+.pager button { border-radius: 999px; }
+.pager button[aria-current="page"] { background: var(--a-grad); color: #fff; border-color: transparent; }
+
+/* ---------- 标记 ---------- */
+.st, .tag, .cls, .seal { border-radius: 999px; }
+.tag { padding: 3px 8px; }
+.seal-free { background: var(--a-grad); color: #fff; }
+.bar { border-radius: 999px; }
+.bar > i { background: var(--a-grad); border-radius: 999px; }
+.ava { box-shadow: 0 0 0 2px var(--surface); }
+.ava.ring { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--gold); }
+.spinner { border-top-color: var(--gold); border-right-color: var(--moon); }
+
+/* ---------- 封面与海报墙 ---------- */
+.cover { border-radius: 14px; box-shadow: 0 6px 16px -10px rgb(60 70 140 / .5); }
+.wall a:hover .cover, .shelf > a:hover .cover { transform: translateY(-4px) rotate(-.6deg); box-shadow: var(--a-glow), var(--shadow); }
+.shelf .cover { transition: transform .2s, box-shadow .2s; }
+.cover .rt { border-radius: 999px; padding: 3px 7px; background: rgb(30 20 60 / .6); color: #ffd6ea; }
+
+/* ---------- 大图区域 ---------- */
+.guest-hero, .dt-hero, .gate { border-radius: 24px; border-color: transparent; box-shadow: var(--shadow); }
+.guest-hero h1 { background: var(--a-grad); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: .08em; }
+.gate-art blockquote::before { content: "❀ "; color: #ffc4dd; }
+.dt-cover .cover, .dt-cover img { border-radius: 16px; }
+.lost-code { background: var(--a-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* 用户内容 */
+.pt-user-content blockquote { border-left-color: var(--gold); border-radius: 0 12px 12px 0; }
+.pt-user-content img { border-radius: 12px; }
+.pt-user-content code { border-radius: 6px; }

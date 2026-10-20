@@ -68,15 +68,15 @@ async fn lottery_end_to_end() {
 
     // 迁移带默认奖品；用户看到的转盘不含库存等后台字段
     let w = call(&app, "GET", "/api/p/lottery/v1/wheel", None, &hv(&alice.headers())).await.body;
-    assert_eq!(w["enabled"], false);
+    assert_eq!(w["enabled"], true);
     assert_eq!(w["prizes"].as_array().unwrap().len(), 7, "{w:?}");
     assert!(w["prizes"][0].get("stock").is_none());
     assert!(w["none_chance_ppm"].as_i64().unwrap() > 0);
 
-    // 默认关闭；开启后仍有注册天数限制
-    assert_eq!(spin(&alice).await.body["code"], "lottery.disabled");
-    put_settings(&app, &admin, json!({ "enabled": true, "spin_cost": 50, "daily_limit": 10 })).await;
+    // 默认开启，但有注册天数限制；关闭后不能抽
     assert_eq!(spin(&alice).await.body["code"], "lottery.not_eligible");
+    put_settings(&app, &admin, json!({ "enabled": false, "min_account_days": 0 })).await;
+    assert_eq!(spin(&alice).await.body["code"], "lottery.disabled");
     put_settings(&app, &admin, json!({ "enabled": true, "spin_cost": 50, "daily_limit": 10, "min_account_days": 0 })).await;
 
     // 奖品校验：概率之和不超过 100%、数量范围、仅管理员

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "站内信：会话、回复、系统消息、群发公告、拉黑与接收设置、举报某条消息（ctx.messages）"
+summary = "用户之间的站内信，以及系统消息与群发公告"
+category = "community"
 
 provides = ["ctx.messages@0.1.0"]
 requires = ["ctx.rbac@^0.1"]

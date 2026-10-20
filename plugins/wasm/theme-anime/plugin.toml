@@ -1,0 +1,20 @@
+id = "theme-anime"
+name = "主题：晴空樱花"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "动漫风站点主题：晴空蓝与樱花粉配色、圆角半透明面板、渐变按钮、飘落的花瓣；夜间为星空配色。在后台“外观”中切换"
+summary = "动漫风站点主题（晴空樱花 / 星空夜）"
+category = "system"
+
+[wasm]
+memory_mb = 16
+
+[frontend]
+theme = "theme.css"
+settings_ui = "none"
+
+[terms]
+"theme-anime.name" = { zh-CN = "晴空樱花", en = "Sakura Sky" }

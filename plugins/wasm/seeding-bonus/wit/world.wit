@@ -1,0 +1,7 @@
+package pt:seeding-bonus-plugin@0.1.0;
+
+world seeding-bonus {
+  include pt:plugin/host@1.0.0;
+  export pt:plugin/http-handler@1.0.0;
+  export pt:plugin/service-provider@1.0.0;
+}

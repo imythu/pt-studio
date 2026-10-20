@@ -55,9 +55,14 @@ async fn shop_end_to_end() {
         async move { call(&app, "PATCH", &format!("/api/p/shop/v1/admin/items/{id}"), Some(body), &hv(&h)).await }
     };
 
-    // 预置商品默认下架：用户看不到，也买不了
-    assert_eq!(call(&app, "GET", "/api/p/shop/v1/items", None, &ah).await.body["items"], json!([]));
+    // 预置商品首次加载即上架（含 VIP）；下架后用户看不到，也买不了
+    let items = call(&app, "GET", "/api/p/shop/v1/items", None, &ah).await.body;
+    let kinds: Vec<&str> = items["items"].as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap()).collect();
+    assert!(kinds.contains(&"upload_credit") && kinds.contains(&"vip"), "{items:?}");
     let upload = item_id(&app, &admin, "upload_credit").await;
+    assert_eq!(patch(upload, json!({ "active": false })).await.status, StatusCode::OK);
+    let items = call(&app, "GET", "/api/p/shop/v1/items", None, &ah).await.body;
+    assert!(items["items"].as_array().unwrap().iter().all(|i| i["id"].as_i64() != Some(upload)), "{items:?}");
     assert_eq!(buy(upload, json!({})).await.body["code"], "shop.unavailable");
     assert_eq!(call(&app, "GET", "/api/p/shop/v1/admin/items", None, &ah).await.status, StatusCode::FORBIDDEN);
 

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "MCP 网关：AI 客户端以个人 MCP token 调用站点工具，写操作需要用户在站内确认"
+summary = "让用户用 AI 客户端（如 Claude）通过个人令牌操作站点"
+category = "ai"
 
 provides = ["ctx.mcp@0.1.0"]
 requires = ["ctx.auth@^0.1", "ctx.rbac@^0.1"]

@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "盒子（seedbox）登记：用户登记盒子的 IP 段，管理员审核；accounting 据此标记来自盒子的 peer，供 H&R、魔力值与反作弊规则使用"
+summary = "用户登记盒子 IP，管理员审核后按盒子规则统计流量"
+category = "users"
 
 provides = ["ctx.seedbox@0.1.0"]
 publishes = ["seedbox.registered", "seedbox.reviewed", "seedbox.removed"]

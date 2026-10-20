@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "分享率考核：按下载量分档的要求分享率（做种减免）、豁免、警告期、到期禁止下载（可选封禁）、恢复后自动解除"
+summary = "分享率考核：低于要求先警告，持续不达标则限制下载"
+category = "users"
 
 provides = ["ctx.ratio@0.1.0"]
 requires = ["ctx.users@^0.1"]

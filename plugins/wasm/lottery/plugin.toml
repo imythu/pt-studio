@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "幸运转盘：用户消耗魔力值转动转盘，奖品可为魔力值、上传量、VIP 天数或永久 VIP；奖品、中奖概率与库存在后台设置，开关、每次消耗、每日次数与注册天数门槛在插件设置里。默认关闭"
+summary = "幸运转盘：花魔力值抽奖，奖品可设魔力值、上传量、VIP 等"
+category = "play"
 
 provides = ["ctx.lottery@0.2.0"]
 requires = ["ctx.ledger@^0.1"]
@@ -88,7 +90,7 @@ x-pt-order = ["enabled", "spin_cost", "daily_limit", "min_account_days"]
 
 [settings_schema.properties.enabled]
 type = "boolean"
-default = false
+default = true
 title = "开启幸运转盘（请确认符合当地法规与站点规则）"
 
 [settings_schema.properties.spin_cost]

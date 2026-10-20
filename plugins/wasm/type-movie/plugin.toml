@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "电影：字段 schema、从发布名补全规格、按 IMDb / TMDB / 豆瓣分组、规范标题、搜索字段"
+summary = "电影类资源：从发布名识别规格，按作品自动归组"
+category = "content"
 
 requires = ["ctx.torrents@^0.1"]
 optional_requires = ["ctx.metadata@^0.1"]

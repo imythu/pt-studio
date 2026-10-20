@@ -6,6 +6,8 @@ api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
 description = "音乐：艺人与专辑分组、版本（介质 / 年份 / 厂牌 / 目录号）、格式与编码规则、文件检查、抓轨日志评分、搜索字段"
+summary = "音乐类资源：按艺人与专辑归组，记录格式和版本"
+category = "content"
 
 requires = ["ctx.torrents@^0.1"]
 

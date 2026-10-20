@@ -68,7 +68,12 @@ async fn forum_end_to_end() {
     assert_eq!(r.status, StatusCode::FORBIDDEN);
 
     let boards = get(&alice, "/v1/boards".into()).await.body;
-    let names: Vec<&str> = boards["categories"][0]["boards"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap()).collect();
+    // 首次加载预置的分区与版块（站务公告仅管理组可发帖）
+    let preset = &boards["categories"][0];
+    assert_eq!(preset["name"], "站务", "{boards:?}");
+    assert_eq!(preset["boards"][0]["can_create"], json!(false), "{boards:?}");
+    let ours = |b: &Value| b["categories"].as_array().unwrap().iter().find(|c| c["id"] == cat).unwrap()["boards"].clone();
+    let names: Vec<String> = ours(&boards).as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap().to_owned()).collect();
     assert_eq!(names, vec!["公告", "综合讨论"], "VIP is hidden: {boards:?}");
     assert_eq!(get(&alice, format!("/v1/boards/{vip}/topics")).await.status, StatusCode::NOT_FOUND);
 
@@ -86,7 +91,7 @@ async fn forum_end_to_end() {
     let r = send(&bob, "POST", format!("/v1/topics/{topic}/posts"), json!({ "body": "我投 B", "quote_of": first_post })).await;
     assert_eq!((r.status, r.body["floor"].clone()), (StatusCode::CREATED, json!(2)), "{:?}", r.body);
     let reply_id = r.body["id"].as_i64().unwrap();
-    let unread = |b: &Value| b["categories"][0]["boards"].as_array().unwrap().iter().find(|x| x["id"] == general).unwrap()["unread"].clone();
+    let unread = |b: &Value| ours(b).as_array().unwrap().iter().find(|x| x["id"] == general).unwrap()["unread"].clone();
     assert_eq!(unread(&get(&alice, "/v1/boards".into()).await.body), json!(true));
     let view = get(&alice, format!("/v1/topics/{topic}")).await.body;
     assert_eq!(view["posts"].as_array().unwrap().len(), 2);

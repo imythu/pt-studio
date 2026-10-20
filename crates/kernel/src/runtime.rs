@@ -256,6 +256,7 @@ impl Shared {
                 plugin: plugin.to_owned(),
                 policy: outbound,
                 kind,
+                pool: Some(self.pool.clone()),
             }),
             blob: Arc::new(crate::storage::blob::FsBlob::new(
                 self.plugins

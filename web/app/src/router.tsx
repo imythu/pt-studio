@@ -4,6 +4,7 @@ import { useT } from '@pt-studio/terms';
 import { AdminHome, AdminPluginRoute, AdminPlugins } from './pages/Admin';
 import { AdminUser, AdminUsers } from './pages/AdminUsers';
 import { AdminAudit } from './pages/AdminAudit';
+import { AdminAppearance } from './pages/AdminAppearance';
 import { SettingsPage } from './pages/Settings';
 import { Login, Register, ResetPassword, VerifyEmail } from './pages/Auth';
 import { PluginRoute } from './pages/PluginRoute';
@@ -18,9 +19,14 @@ import { overrides, type PageId } from './overrides';
 import { GuestBar, Layout, MePage, RequireLogin } from './shell/Layout';
 import { useSession } from './session';
 
-function page(id: PageId, C: ComponentType) {
+/** 渲染时才查覆盖表：主题插件的替换页面在启动时注册，晚于路由表创建 */
+function Page({ id, C }: { id: PageId; C: ComponentType }) {
   const O = overrides[id] ?? C;
   return <O />;
+}
+
+function page(id: PageId, C: ComponentType) {
+  return <Page id={id} C={C} />;
 }
 
 export function NotFound() {
@@ -88,6 +94,7 @@ export const router = createBrowserRouter([
       { path: 'admin/users', element: staff(<AdminUsers />) },
       { path: 'admin/users/:id', element: staff(<AdminUser />) },
       { path: 'admin/audit', element: staff(<AdminAudit />) },
+      { path: 'admin/appearance', element: staff(<AdminAppearance />) },
       { path: 'admin/p/:plugin/*', element: staff(<AdminPluginRoute />) },
       { path: '*', element: <NotFound /> },
     ],
