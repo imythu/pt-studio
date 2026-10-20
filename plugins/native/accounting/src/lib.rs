@@ -672,12 +672,56 @@ async fn stats_json(ctx: &Ctx, uid: i64, full: bool) -> PResult<serde_json::Valu
 }
 
 async fn can_read_others(ctx: &Ctx) -> PResult<bool> {
+    can(ctx, "accounting.stats.read").await
+}
+
+async fn can(ctx: &Ctx, perm: &'static str) -> PResult<bool> {
     let Some(uid) = ctx.user_id() else {
         return Ok(false);
     };
     let rbac = ctx.service::<dyn pt_plugin_api::services::RbacService>(pt_plugin_api::services::RBAC)?;
-    rbac.call(move |s, c| Box::pin(async move { s.check(c, uid, "accounting.stats.read").await }))
+    rbac.call(move |s, c| Box::pin(async move { s.check(c, uid, perm).await }))
         .await
+}
+
+/// 同伴的 IPv4 / IPv6：从 tracker 的会话状态（`ps:{<info_hash>}`，field `<uid>:<peer_id_hex>`）现读，不落库。
+/// 混合种子的 v1 与截断 v2 是两个 swarm，都读；地址一族来自连接，另一族来自 BEP 7 自报（`alt`）。
+async fn peer_addrs(
+    ctx: &Ctx,
+    c: &mut sqlx::PgConnection,
+    id: i64,
+) -> PResult<HashMap<String, (Option<String>, Option<String>)>> {
+    let row = sqlx::query("SELECT info_hash_v1, info_hash_v2 FROM torrent.v_torrent_tracker WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&mut *c)
+        .await?;
+    let mut out = HashMap::new();
+    let Some(row) = row else { return Ok(out) };
+    let mut keys = Vec::new();
+    if let Some(h) = row.get::<Option<Vec<u8>>, _>(0) {
+        keys.push(format!("ps:{{{}}}", hex::encode(h)));
+    }
+    if let Some(h) = row.get::<Option<Vec<u8>>, _>(1) {
+        keys.push(format!("ps:{{{}}}", hex::encode(&h[..20.min(h.len())])));
+    }
+    let mut conn = ctx.redis.global("tracker_state")?;
+    for k in keys {
+        let m: HashMap<String, String> = redis::cmd("HGETALL").arg(&k).query_async(&mut conn).await?;
+        for (field, raw) in m {
+            let Ok(st) = serde_json::from_str::<serde_json::Value>(&raw) else { continue };
+            let (mut v4, mut v6) = (None, None);
+            let ip = st["ip"].as_str().and_then(|s| s.parse::<std::net::IpAddr>().ok()).map(|i| i.to_canonical());
+            let alt = st["alt"].as_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok()).map(|a| a.ip().to_canonical());
+            for a in [ip, alt].into_iter().flatten() {
+                match a {
+                    std::net::IpAddr::V4(x) => v4 = v4.or(Some(x.to_string())),
+                    std::net::IpAddr::V6(x) => v6 = v6.or(Some(x.to_string())),
+                }
+            }
+            out.entry(field).or_insert((v4, v6));
+        }
+    }
+    Ok(out)
 }
 
 struct Tools;
@@ -798,24 +842,46 @@ async fn http_swarm(ctx: RequestCtx, Path(id): Path<i64>) -> PResult<Response> {
         (r.get::<i64, _>(0), r.get::<i64, _>(1), r.get::<i64, _>(2))
     });
     let peers = sqlx::query(
-        "SELECT user_id, is_seeder, client_prefix, first_seen_at, last_announce_at, is_seedbox FROM peers
-          WHERE torrent_id = $1 AND is_active AND last_announce_at > now() - interval '1 hour'
-          ORDER BY is_seeder DESC, last_announce_at DESC LIMIT 100",
+        "SELECT p.user_id, p.is_seeder, p.client_prefix, p.first_seen_at, p.last_announce_at, p.is_seedbox, p.peer_id,
+                CASE WHEN $2 THEN u.username END
+           FROM peers p LEFT JOIN identity.v_user_public u ON u.id = p.user_id
+          WHERE p.torrent_id = $1 AND p.is_active AND p.last_announce_at > now() - interval '1 hour'
+          ORDER BY p.is_seeder DESC, p.last_announce_at DESC LIMIT 100",
     )
     .bind(id)
+    .bind(staff)
     .fetch_all(&mut *c)
     .await?;
+    let addrs = if staff && can(&ctx, "accounting.peers.ip").await? {
+        let a = peer_addrs(&ctx, &mut c, id).await?;
+        ctx.audit
+            .write(pt_plugin_api::AuditEntry {
+                action: "accounting.peers_ip_viewed".into(),
+                target: format!("torrent:{id}"),
+                details: json!({ "peers": a.len() }),
+            })
+            .await?;
+        Some(a)
+    } else {
+        None
+    };
     let peers: Vec<_> = peers
         .iter()
         .map(|r| {
             let uid: i64 = r.get(0);
-            json!({
+            let mut v = json!({
                 "user_id": (staff || uid == me).then_some(uid), "mine": uid == me, "seeder": r.get::<bool, _>(1),
                 "client": r.get::<Option<String>, _>(2),
                 "since": r.get::<chrono::DateTime<chrono::Utc>, _>(3).to_rfc3339(),
                 "last_announce": r.get::<chrono::DateTime<chrono::Utc>, _>(4).to_rfc3339(),
                 "seedbox": r.get::<bool, _>(5),
-            })
+                "username": r.get::<Option<String>, _>(7),
+            });
+            if let Some(a) = addrs.as_ref().and_then(|m| m.get(&format!("{uid}:{}", hex::encode(r.get::<Vec<u8>, _>(6))))) {
+                v["ipv4"] = json!(a.0);
+                v["ipv6"] = json!(a.1);
+            }
+            v
         })
         .collect();
     let mine = sqlx::query(

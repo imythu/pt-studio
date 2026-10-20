@@ -125,11 +125,12 @@ export function TorrentRows({
     </div>
   );
   // 列宽经 CSS 变量传入（UI-WEB R6）：插件列插在标题之后
-  const grid = ['58px', 'minmax(0, 1fr)', ...pluginCols.map(() => '84px'), ...(compact ? [] : ['52px']), '88px', '54px', '54px', '54px'].join(' ');
+  const grid = ['58px', '36px', 'minmax(0, 1fr)', ...pluginCols.map(() => '84px'), ...(compact ? [] : ['52px']), '88px', '54px', '54px', '54px'].join(' ');
   return (
     <div className={cx('tlist', compact && 'compact')} role="table" aria-label={t('ui.torrent.list')} style={{ ['--cols' as string]: grid }}>
       <div className="trow thead" role="row">
         <div className="c-cat">{t('ui.torrent.type')}</div>
+        <div className="c-thumb" />
         <div>{t('ui.torrent.title')}</div>
         {pluginCols.map((c) => (
           <div key={c.key} className="c-hide">
@@ -151,6 +152,9 @@ export function TorrentRows({
             <div className="c-cat">
               <TypeMark typeId={r.type_id} />
             </div>
+            <Link className="c-thumb" to={`/torrents/${r.id}`} tabIndex={-1} aria-hidden="true">
+              <Cover className="mini" src={mediaUrl(r.poster)} title={zh ?? r.title} />
+            </Link>
             <div className="tt">
               <div className="tt-1">
                 {r.sticky === 1 && <span className="sticky-flag">{t('ui.torrent.sticky')}</span>}

@@ -29,7 +29,7 @@ import {
 } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { DownloadGuide, useFirstTime } from '../help';
-import { age, timeAgo } from '../lib';
+import { age, clientName, timeAgo } from '../lib';
 import { useSession } from '../session';
 import { FieldsView, TypeMark, mediaUrl, seedCls, statusName, useTypeName, type Swarm } from '../torrent';
 
@@ -62,7 +62,7 @@ interface GroupDetail {
 }
 
 interface SwarmDetail extends Swarm {
-  peers: { user_id: number | null; mine: boolean; seeder: boolean; client: string | null; since: string; last_announce: string; seedbox?: boolean }[];
+  peers: { user_id: number | null; username?: string | null; mine: boolean; seeder: boolean; client: string | null; since: string; last_announce: string; seedbox?: boolean; ipv4?: string | null; ipv6?: string | null }[];
   mine: { uploaded: number; downloaded: number; seed_secs: number; completed_at: string | null } | null;
 }
 
@@ -229,12 +229,17 @@ function Peers({ d }: { d?: SwarmDetail }) {
   const t = useT();
   if (!d) return <SkeletonRows n={3} />;
   if (d.peers.length === 0) return <Empty compact hint={t('ui.torrent.no_peers')}>{t('ui.torrent.no_peers_title')}</Empty>;
+  // 管理员视角：用户名（accounting.stats.read）与 IPv4 / IPv6（accounting.peers.ip，tracker 现读）
+  const users = d.peers.some((p) => p.username);
+  const ips = d.peers.some((p) => 'ipv4' in p || 'ipv6' in p);
   return (
     <div className="dtw">
-      <table className="dt min640">
+      <table className={users || ips ? 'dt min820' : 'dt min640'}>
         <thead>
           <tr>
             <th>{t('ui.torrent.peer_role')}</th>
+            {users && <th>{t('ui.torrent.peer_user')}</th>}
+            {ips && <th>{t('ui.torrent.peer_ip')}</th>}
             <th>{t('ui.torrent.peer_client')}</th>
             <th>{t('ui.torrent.peer_since')}</th>
             <th>{t('ui.torrent.peer_last')}</th>
@@ -250,7 +255,15 @@ function Peers({ d }: { d?: SwarmDetail }) {
                   {p.seedbox && <Tag>{t('ui.torrent.seedbox')}</Tag>}
                 </span>
               </td>
-              <td className="mono">{p.client ?? '-'}</td>
+              {users && <td>{p.user_id && p.username ? <Link to={`/users/${p.user_id}`}>{p.username}</Link> : '-'}</td>}
+              {ips && (
+                <td className="mono small peer-ip">
+                  {p.ipv4 && <span>{p.ipv4}</span>}
+                  {p.ipv6 && <span>{p.ipv6}</span>}
+                  {!p.ipv4 && !p.ipv6 && '-'}
+                </td>
+              )}
+              <td className="nowrap" title={p.client ?? undefined}>{clientName(p.client) ?? '-'}</td>
               <td className="nowrap small">{timeAgo(Date.parse(p.since))}</td>
               <td className="nowrap small">{timeAgo(Date.parse(p.last_announce))}</td>
             </tr>

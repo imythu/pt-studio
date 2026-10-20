@@ -26,7 +26,7 @@
 |---|---|---|---|---|---|---|
 | `acct:<partition>` | acct | STREAM | pt-tracker | accounting（消费组 `accounting`） | `MAXLEN ~` 配置 | 流量增量，`partition = user_id % N`，N 全站固定（默认 64），字段见 design/10 §5.4 |
 | `u:<user_id>:live` | acct | HASH | pt-tracker（HINCRBY）、accounting（结算后扣减/重置） | accounting | 7 天无更新过期 | 实时原始计数 `up`、`down`、`seed_time` |
-| `ps:{<info_hash_hex>}` | tracker_state | HASH | pt-tracker | pt-tracker | `max_peer_timeout × 2`（每次写刷新） | 会话状态：field `<uid>:<peer_id_hex>` → JSON（累计值、left、最近时间、是否完成、IP、端口）。`{}` 是真实的 Cluster 哈希标签（D20），同一种子的 `ps:` / `sw:` 键在同一 slot |
+| `ps:{<info_hash_hex>}` | tracker_state | HASH | pt-tracker | pt-tracker、accounting（只读：管理员查看同伴 IP，不落库） | `max_peer_timeout × 2`（每次写刷新） | 会话状态：field `<uid>:<peer_id_hex>` → JSON（累计值、left、最近时间、是否完成、IP、端口）。`{}` 是真实的 Cluster 哈希标签（D20），同一种子的 `ps:` / `sw:` 键在同一 slot |
 | `sw:{<info_hash_hex>}:s` / `sw:{<info_hash_hex>}:l` | tracker_state | ZSET | pt-tracker | pt-tracker | 同上 | 做种者 / 下载者：member 同上，score 为最近 announce 时间；超时成员在 announce 脚本中清理 |
 | `sw:{<info_hash_hex>}:n` | tracker_state | STRING(计数器) | pt-tracker | pt-tracker | 同上 | 完成次数（scrape 的 downloaded） |
 | `trk:pk:<passkey>` | tracker_sync | HASH | tracker-bridge | pt-tracker | 无（随用户生命周期删除） | `uid`、`st`、`ver` |
@@ -63,4 +63,4 @@
 
 ## 5. pt-tracker 的 ACL
 
-按 design/10 §5.5：pt-tracker 账号只读 `trk:*`，只写 `ps:*`、`acct:*`、`u:*:live`。内核账号不得写 `ps:*`；tracker-bridge 账号可写 `trk:*`、读 `ps:*`；accounting 账号可读写 `acct:*`（消费组）、`u:*:live`。ACL 模板放在 `deploy/redis/acl.conf`。
+按 design/10 §5.5：pt-tracker 账号只读 `trk:*`，只写 `ps:*`、`acct:*`、`u:*:live`。内核账号不得写 `ps:*`；tracker-bridge 账号可写 `trk:*`、读 `ps:*`；accounting 账号可读写 `acct:*`（消费组）、`u:*:live`，只读 `ps:*`。ACL 模板放在 `deploy/redis/acl.conf`。

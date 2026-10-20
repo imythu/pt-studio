@@ -59,6 +59,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0008_webauthn.sql",
         include_str!("../migrations/0008_webauthn.sql"),
     ),
+    (
+        "0009_builtin_avatars.sql",
+        include_str!("../migrations/0009_builtin_avatars.sql"),
+    ),
 ];
 
 #[derive(Debug, Default)]

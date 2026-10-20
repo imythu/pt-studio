@@ -79,6 +79,35 @@ const TYPE_COLORS: Record<string, string> = {
   game: '#5a8f8f',
   generic: 'var(--muted)',
 };
+// Azureus 风格 peer_id 前缀（`-qB5120-`）→ 客户端名与版本；版本位 0-9 / A-Z（A = 10）
+const CLIENTS: Record<string, string> = {
+  qB: 'qBittorrent', TR: 'Transmission', DE: 'Deluge', lt: 'libtorrent', LT: 'libtorrent', UT: 'µTorrent', UM: 'µTorrent Mac', UW: 'µTorrent Web',
+  BI: 'BiglyBT', AZ: 'Vuze', KT: 'KTorrent', BC: 'BitComet', BT: 'BitTorrent', FD: 'Free Download Manager', XL: '迅雷', SD: '迅雷', TL: 'Tribler',
+  WW: 'WebTorrent', WD: 'WebTorrent Desktop', PI: 'PicoTorrent', FW: 'FrostWire', MG: 'MediaGet', '7T': 'aTorrent', FL: 'Folx', BN: '百度网盘', QD: 'QQ 旋风',
+  TT: 'TuoTu', AG: 'Ares', HL: 'Halite', LW: 'LimeWire', TX: 'Tixati', RT: 'Retriever', ZT: 'ZipTorrent', SZ: 'Shareaza', BB: 'BitBuddy', CD: 'Enhanced CTorrent',
+};
+
+export function clientName(prefix: string | null | undefined): string | null {
+  if (!prefix) return null;
+  const m = /^-([A-Za-z0-9]{2})([0-9A-Za-z]{4})-?$/.exec(prefix);
+  if (m) {
+    const code = m[1] ?? '';
+    const ver = m[2] ?? '';
+    const name = CLIENTS[code];
+    if (!name) return prefix;
+    if (code === 'BC') return `${name} ${Number(ver.slice(0, 2))}.${ver.slice(2)}`;
+    // µTorrent / Transmission 末位字母是发布通道（S 稳定、B 测试、Z 开发版），不是版本号
+    const v = /^(UT|UM|UW|TR)$/.test(code) && /[A-Za-z]$/.test(ver) ? ver.slice(0, 3) : ver;
+    const parts = [...v].map((c) => (/\d/.test(c) ? Number(c) : c.toUpperCase().charCodeAt(0) - 55));
+    while (parts.length > 3 && parts[parts.length - 1] === 0) parts.pop();
+    return `${name} ${parts.join('.')}`;
+  }
+  // 主线（BitTorrent）：`M7-2-2--`
+  const ml = /^M(\d+)-(\d+)-(\d+)/.exec(prefix);
+  if (ml) return `BitTorrent ${ml[1]}.${ml[2]}.${ml[3]}`;
+  return prefix;
+}
+
 export function typeColor(id?: string): string {
   return (id && TYPE_COLORS[id]) || 'var(--line-2)';
 }

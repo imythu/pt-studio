@@ -30,6 +30,11 @@ event = "torrent.created"
 name = "torrent_updated"
 event = "torrent.updated"
 
+# 作品字段（海报 / 中文名）进种子文档，作品更新时重建其下种子
+[[subscriptions]]
+name = "group_updated"
+event = "group.updated"
+
 [[subscriptions]]
 name = "torrent_tags_changed"
 event = "torrent.tags_changed"

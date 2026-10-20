@@ -254,8 +254,8 @@ pub async fn register(id: &Identity, ctx: &Ctx, req: RegisterRequest, origin: Or
     let uid: i64 = {
         let mut conn = ctx.sql.conn().await?;
         let r = sqlx::query_scalar(
-            "INSERT INTO users (username, username_canonical, class_id, status, locale, registration_mode, inviter_id, tags)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+            "INSERT INTO users (username, username_canonical, class_id, status, locale, registration_mode, inviter_id, tags, avatar_url)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8, ($9::text[])[1 + floor(random() * cardinality($9::text[]))::int]) RETURNING id",
         )
         .bind(&display)
         .bind(&canonical)
@@ -265,6 +265,7 @@ pub async fn register(id: &Identity, ctx: &Ctx, req: RegisterRequest, origin: Or
         .bind(&mode)
         .bind(inviter)
         .bind(&tags)
+        .bind(crate::settings::builtin_avatars())
         .fetch_one(&mut *conn)
         .await;
         let uid: i64 = match r {

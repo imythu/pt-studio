@@ -99,8 +99,8 @@ async fn update_profile(
     }
     if let Some(a) = p.avatar_url {
         let a = clean(a, 512, "avatar_url")?;
-        if a.as_ref().is_some_and(|u| !u.starts_with("https://")) {
-            return Err(PluginError::validation("avatar_url must be an https URL"));
+        if a.as_ref().is_some_and(|u| !u.starts_with("https://") && !is_builtin_avatar(u)) {
+            return Err(PluginError::validation("avatar_url must be an https URL or a built-in avatar"));
         }
         sqlx::query("UPDATE users SET avatar_url = $2 WHERE id = $1")
             .bind(uid)
@@ -479,4 +479,17 @@ pub async fn admin_remove_role(ctx: RequestCtx, Path((uid, role)): Path<(i64, St
         })
         .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// 内置头像（web/assets/avatars，由 web/tools/avatars.py 生成）：注册时随机分配一个，设置页可改选
+pub const BUILTIN_AVATARS: &[&str] = &["frieren", "fern", "stark", "himmel", "heiter", "eisen", "sein", "ubel", "land", "denken", "serie", "flamme", "methode", "lawine"];
+
+pub fn builtin_avatars() -> Vec<String> {
+    BUILTIN_AVATARS.iter().map(|s| format!("/avatars/{s}.svg")).collect()
+}
+
+fn is_builtin_avatar(u: &str) -> bool {
+    u.strip_prefix("/avatars/")
+        .and_then(|r| r.strip_suffix(".svg"))
+        .is_some_and(|s| BUILTIN_AVATARS.contains(&s))
 }

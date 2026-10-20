@@ -1,7 +1,8 @@
-// recommend 前端：首页主栏“为你推荐 / 近期热门 / 需要做种 / 最新上架”，海报卡片横向排布。
+// recommend 前端：首页主栏“为你推荐 / 近期热门 / 需要做种 / 最新上架”，海报书架横向滚动。
 import { useQuery } from '@tanstack/react-query';
 import type { PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
+import { Cover, Panel, SkeletonRows, Tag } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'recommend.ui.for_you': '为你推荐',
@@ -57,43 +58,24 @@ function readable(title: string): string {
   return (cut > 0 ? title.slice(0, cut) : title).replace(/\./g, ' ').trim();
 }
 
-function Poster({ item }: { item: Item }) {
-  if (item.poster) return <img src={item.poster} alt="" loading="lazy" />;
-  const ch = (item.title_zh ?? readable(item.title)).slice(0, 1).toUpperCase();
-  return (
-    <span className={`rec-ph rec-ph-${item.type_id}`} aria-hidden="true">
-      {ch}
-    </span>
-  );
-}
-
 function CardItem({ item, api }: { item: Item; api: SlotProps['api'] }) {
   const href = `/torrents/${item.id}`;
+  const name = item.title_zh ?? readable(item.title);
   return (
     <a
-      className="rec-card"
       href={href}
+      title={item.title}
       onClick={(e) => {
         e.preventDefault();
         api.navigate(href);
       }}
     >
-      <div className="rec-poster">
-        <Poster item={item} />
-        <span className="rec-type">{TYPE_NAME[item.type_id] ?? item.type_id}</span>
-        {item.rating ? <span className="rec-rating">★ {item.rating.toFixed(1)}</span> : null}
-        {item.mine && <span className="rec-mine">{api.t('recommend.ui.mine')}</span>}
-      </div>
-      <div className="rec-body">
-        <b className="rec-title" title={item.title}>
-          {item.title_zh ?? readable(item.title)}
-        </b>
-        {item.title_zh && <span className="rec-sub">{readable(item.title)}</span>}
-        <span className="rec-meta">
-          <span className="seed">↑{item.seeders}</span> <span className="leech">↓{item.leechers}</span> · {formatBytes(item.size)}
-        </span>
-        {item.reason && <span className="rec-reason">{item.reason}</span>}
-      </div>
+      <Cover src={item.poster} title={name} sub={item.title_zh ? readable(item.title) : null} rating={item.rating} corner={item.mine ? <Tag tone="g">{api.t('recommend.ui.mine')}</Tag> : null} />
+      <span className="nm">{name}</span>
+      <span className="mt">
+        {TYPE_NAME[item.type_id] ?? item.type_id} · <span className="c-seed">↑{item.seeders}</span> ↓{item.leechers} · {formatBytes(item.size)}
+      </span>
+      {item.reason && <span className="mt">{item.reason}</span>}
     </a>
   );
 }
@@ -108,35 +90,29 @@ function Sections({ api }: SlotProps) {
   if (!api.user()) return null;
   if (q.isLoading) {
     return (
-      <div className="rec-skel" aria-busy="true">
-        {Array.from({ length: 6 }, (_, i) => (
-          <span key={i} className="pt-skeleton" />
-        ))}
-      </div>
+      <Panel flush>
+        <SkeletonRows n={3} />
+      </Panel>
     );
   }
   const sections = q.data?.sections ?? [];
   if (sections.length === 0) return null;
   return (
-    <div className="rec">
+    <>
       {sections.map((s) => {
         const key = s.id === 'for_you' && !s.personalised ? 'for_you_cold' : s.id;
         const hint = s.id === 'for_you' ? (s.personalised ? 'personal_hint' : 'cold_hint') : s.id === 'needs_seed' ? 'needs_seed_hint' : null;
         return (
-          <section key={s.id} className="rec-section">
-            <header>
-              <h2>{api.t(`recommend.ui.${key}`)}</h2>
-              {hint && <span className="small muted">{api.t(`recommend.ui.${hint}`)}</span>}
-            </header>
-            <div className="rec-row">
+          <Panel key={s.id} title={api.t(`recommend.ui.${key}`)} sub={hint ? api.t(`recommend.ui.${hint}`) : undefined} flush>
+            <div className="shelf">
               {s.items.map((it) => (
                 <CardItem key={it.id} item={it} api={api} />
               ))}
             </div>
-          </section>
+          </Panel>
         );
       })}
-    </div>
+    </>
   );
 }
 

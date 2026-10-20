@@ -18,9 +18,11 @@ redis = true
 redis_global = [
   { role = "acct", prefix = "acct:", mode = "rw" },
   { role = "acct", prefix = "u:", mode = "rw" },
+  # 同伴列表给有 accounting.peers.ip 的管理员显示 IP：只读 tracker 的会话状态，IP 不落库
+  { role = "tracker_state", prefix = "ps:", mode = "r" },
 ]
-# 盒子网段（seedbox 插件；未安装时不授予，按没有盒子处理）
-views = ["seedbox.v_ranges"]
+# 盒子网段（seedbox 插件；未安装时不授予，按没有盒子处理）；同伴列表的用户名与 info hash
+views = ["seedbox.v_ranges", "identity.v_user_public", "torrent.v_torrent_tracker"]
 
 [[workers]]
 name = "ingest"
@@ -114,6 +116,11 @@ rate_limit = "user:60/m"
 name = "accounting.stats.read"
 description_term = "accounting.perm.stats_read"
 default_roles = ["moderator"]
+
+[[permissions]]
+name = "accounting.peers.ip"
+description_term = "accounting.perm.peers_ip"
+default_roles = ["admin"]
 
 [[permissions]]
 name = "accounting.traffic.adjust"

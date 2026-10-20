@@ -43,6 +43,9 @@ impl SearchContributor for Contributor {
                 field("status", "string", false, true, false, 0),
                 // 1 = 置顶中（列表默认排序在前；到期由 unsticky 任务重建索引）
                 field("sticky", "int", false, true, true, 0),
+                // 列表海报与中文名：种子字段优先，其次所属作品（group）的字段
+                field("poster", "string", false, false, false, 0),
+                field("title_zh", "string", true, false, false, 1),
             ],
             synonyms: vec![],
         }]
@@ -60,9 +63,11 @@ impl SearchContributor for Contributor {
         let ids: Vec<i64> = entity_ids.iter().filter_map(|i| i64::try_from(*i).ok()).collect();
         let mut c = ctx.sql.conn().await?;
         let rows = sqlx::query(
-            "SELECT id, group_id, type_id, category_id, title, subtitle, size, file_count, uploader_id, is_anonymous,
-                    status, extract(epoch FROM created_at)::bigint AS created, coalesce(sticky_until > now(), false) AS sticky
-               FROM torrents WHERE id = ANY($1) AND deleted_at IS NULL",
+            "SELECT t.id, t.group_id, t.type_id, t.category_id, t.title, t.subtitle, t.size, t.file_count, t.uploader_id, t.is_anonymous,
+                    t.status, extract(epoch FROM t.created_at)::bigint AS created, coalesce(t.sticky_until > now(), false) AS sticky,
+                    coalesce(g.fields, '{}'::jsonb) || t.fields AS merged
+               FROM torrents t LEFT JOIN groups g ON g.id = t.group_id AND g.deleted_at IS NULL
+              WHERE t.id = ANY($1) AND t.deleted_at IS NULL",
         )
         .bind(&ids)
         .fetch_all(&mut *c)
@@ -96,6 +101,18 @@ impl SearchContributor for Contributor {
             });
             if let (Some(u), Some(m)) = (uploader, d.as_object_mut()) {
                 m.insert("vis_owner_id".into(), json!(u));
+            }
+            let merged: Json = r.get("merged");
+            if let Some(m) = d.as_object_mut() {
+                if let Some(p) = merged["poster"].as_str().filter(|p| p.starts_with("/media/")) {
+                    m.insert("poster".into(), json!(p));
+                }
+                if let Some(z) = ["title_zh", "title_cn"]
+                    .iter()
+                    .find_map(|k| merged[*k].as_str().filter(|z| !z.is_empty()))
+                {
+                    m.insert("title_zh".into(), json!(z));
+                }
             }
             docs.insert(id, d);
         }

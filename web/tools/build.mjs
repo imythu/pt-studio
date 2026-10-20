@@ -132,6 +132,7 @@ const html = `<!doctype html>
 <meta name="theme-color" content="#0d1120" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script type="importmap" nonce="__CSP_NONCE__">${JSON.stringify({ imports: importMap })}</script>
 <link rel="stylesheet" href="/static/${cssFile}">
 <script type="module" src="/static/${appFile}"></script>

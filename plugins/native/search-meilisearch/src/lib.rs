@@ -1633,6 +1633,16 @@ impl OnEvent for Search {
                 .await
             }
             "torrent.deleted" => mark(self, ctx, "torrents", &tid, "delete", "priority", ev).await,
+            "group.updated" => {
+                let Some(gid) = p["group_id"].as_i64() else { return Ok(()) };
+                let mut c = ctx.sql.conn().await?;
+                let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM torrent.v_torrent_public WHERE group_id = $1")
+                    .bind(gid)
+                    .fetch_all(&mut *c)
+                    .await?;
+                drop(c);
+                mark(self, ctx, "torrents", &ids, "upsert", "normal", ev).await
+            }
             "promotion.started" | "promotion.ended" if p["scope"].as_str() != Some("global") => {
                 mark(
                     self,

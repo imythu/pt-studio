@@ -30,6 +30,29 @@ interface SessionRow {
   current: boolean;
 }
 
+/** 内置人物头像（web/assets/avatars）：注册时随机分配，这里可改选；选中后自定义链接清空 */
+function AvatarPicker({ value, onChange }: { value: string | null; onChange(v: string): void }) {
+  const t = useT();
+  const q = useQuery({
+    queryKey: ['builtin-avatars'],
+    queryFn: async () => (await fetch('/avatars/index.json')).json() as Promise<{ slug: string; name: string }[]>,
+    staleTime: Infinity,
+  });
+  if (!q.data?.length) return null;
+  return (
+    <div className="ava-pick" role="group" aria-label={t('ui.settings.avatar_builtin')}>
+      {q.data.map((a) => {
+        const url = `/avatars/${a.slug}.svg`;
+        return (
+          <button key={a.slug} type="button" title={a.name} aria-label={a.name} aria-pressed={value === url} onClick={() => onChange(url)}>
+            <img src={url} alt="" loading="lazy" />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Sec({ title, desc, children, actions }: { title: ReactNode; desc?: ReactNode; children: ReactNode; actions?: ReactNode }) {
   return (
     <section className="set-sec">
@@ -125,8 +148,9 @@ function ProfileSection() {
           <div className="row" style={{ gap: 16 }}>
             <Avatar src={p.avatar_url} name={p.username} size={64} ring />
             <div className="stack-s grow">
+              <AvatarPicker value={p.avatar_url} onChange={(v) => setDraft({ ...(draft ?? {}), avatar_url: v })} />
               <Field label={t('ui.settings.avatar')} hint={t('ui.settings.avatar_hint')}>
-                <Input name="avatar_url" type="url" placeholder="https://" value={p.avatar_url ?? ''} onChange={set('avatar_url')} />
+                <Input name="avatar_url" type="url" placeholder="https://" value={p.avatar_url?.startsWith('/avatars/') ? '' : (p.avatar_url ?? '')} onChange={set('avatar_url')} />
               </Field>
             </div>
           </div>
