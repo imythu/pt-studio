@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "pt-kernel"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2230,14 +2230,14 @@ dependencies = [
 
 [[package]]
 name = "pt-markup"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "pulldown-cmark",
 ]
 
 [[package]]
 name = "pt-plugin-accounting"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-ai-assistant"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-api"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2292,7 +2292,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-identity"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-ledger"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-llm-claude"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-mcp"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2377,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-recommend"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "axum",
  "chrono",
@@ -2389,7 +2389,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-rss"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2406,7 +2406,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-search-meilisearch"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2427,7 +2427,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-torrent"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -2449,7 +2449,7 @@ dependencies = [
 
 [[package]]
 name = "pt-plugin-tracker-bridge"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "hex",
@@ -2463,11 +2463,11 @@ dependencies = [
 
 [[package]]
 name = "pt-release-parser"
-version = "0.4.0"
+version = "0.4.1"
 
 [[package]]
 name = "pt-server"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2506,7 +2506,7 @@ dependencies = [
 
 [[package]]
 name = "pt-type-kit"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "pt-release-parser",
  "serde_json",
