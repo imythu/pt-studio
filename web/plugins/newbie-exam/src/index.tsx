@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Input, Progress } from '@pt-studio/ui-kit';
+import { Button, Empty, Field, Input, Note, PageHead, Panel, PLink, Progress, Sheet, SkeletonRows, Status, type Tone } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'newbie-exam.ui.title': '新手考核',
@@ -32,6 +32,7 @@ registerMessages('zh-CN', {
   'newbie-exam.ui.extend': '延期（天）',
   'newbie-exam.ui.exempt': '豁免',
   'newbie-exam.ui.done': '已处理',
+  'newbie-exam.ui.exempt_confirm': '豁免后该用户不再受新手考核约束，确定？',
   'newbie-exam.already_assigned': '该用户已有考核',
   'newbie-exam.not_assigned': '该用户没有进行中的考核',
   'newbie-exam.restricted': '新手考核通过前不能发邀请',
@@ -63,6 +64,7 @@ registerMessages('en', {
   'newbie-exam.ui.extend': 'Extend (days)',
   'newbie-exam.ui.exempt': 'Exempt',
   'newbie-exam.ui.done': 'Done',
+  'newbie-exam.ui.exempt_confirm': 'Exempt this user from the newbie exam?',
   'newbie-exam.already_assigned': 'The user already has an exam',
   'newbie-exam.not_assigned': 'The user has no open exam',
   'newbie-exam.restricted': 'Members cannot send invites before passing the newbie exam',
@@ -92,16 +94,28 @@ interface Status {
 
 const fmt = (v: number | null) => (v == null ? '∞' : Number.isInteger(v) ? String(v) : v.toFixed(2));
 
+const DONE = ['passed', 'remedied', 'exempted'];
+const stateTone = (s: string): Tone => (DONE.includes(s) ? 'ok' : s === 'active' ? 'warn' : 'bad');
+
 function Goals({ api, stage }: { api: PluginApi; stage: StageP }) {
   return (
-    <ul className="exam-goals">
+    <div className="stack">
       {stage.goals.map((g) => (
-        <li key={g.metric}>
-          {api.t(`newbie-exam.ui.metric.${g.metric}`)}：{fmt(g.current)} / {fmt(g.target)} {g.met && <Badge tone="success">✓</Badge>}
-          <Progress value={g.current == null ? 1 : Math.min(1, g.target > 0 ? g.current / g.target : 1)} />
-        </li>
+        <div key={g.metric} className="stack-s">
+          <div className="row-sb small">
+            <span>{api.t(`newbie-exam.ui.metric.${g.metric}`)}</span>
+            <span className={g.met ? 'num up' : 'num'}>
+              {fmt(g.current)} <span className="muted">/ {fmt(g.target)}</span>
+            </span>
+          </div>
+          <Progress
+            value={g.met || g.current == null ? 1 : Math.min(1, g.target > 0 ? g.current / g.target : 1)}
+            label={api.t(`newbie-exam.ui.metric.${g.metric}`)}
+            tone={g.met ? 'ok' : undefined}
+          />
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }
 
@@ -118,80 +132,153 @@ function useStatus(api: PluginApi, path: `/api/${string}`) {
   return [s, load] as const;
 }
 
+const stageLabel = (api: PluginApi, st: StageP) => api.t('newbie-exam.ui.stage', { n: st.index + 1, at: new Date(st.deadline).toLocaleString() });
+
 function HomeWidget({ api }: SlotProps) {
   const [s] = useStatus(api, '/api/p/newbie-exam/v1/me');
   if (!s || s.state !== 'active') return null;
   const st = s.stages[s.current_stage];
   if (!st) return null;
   return (
-    <Card title={s.exam}>
-      <p className="small">
-        {api.t('newbie-exam.ui.stage', { n: st.index + 1, at: new Date(st.deadline).toLocaleString() })} · {api.t(`newbie-exam.ui.fail.${s.action_on_fail}`)}
-      </p>
-      <Goals api={api} stage={st} />
-      <Button variant="ghost" onClick={() => api.navigate('/p/newbie-exam/')}>
-        {api.t('newbie-exam.ui.details')}
-      </Button>
-    </Card>
+    <Panel
+      title={s.exam}
+      sub={stageLabel(api, st)}
+      more={
+        <PLink to="/p/newbie-exam/" navigate={api.navigate}>
+          {api.t('newbie-exam.ui.details')}
+        </PLink>
+      }
+    >
+      <div className="stack">
+        <Goals api={api} stage={st} />
+        <span className="tiny muted">{api.t(`newbie-exam.ui.fail.${s.action_on_fail}`)}</span>
+      </div>
+    </Panel>
   );
 }
 
+/** 阶段条 + 每个阶段的目标进度 */
 function Details({ api, s }: { api: PluginApi; s: Status }) {
   return (
-    <>
-      <p>
-        <Badge tone={s.state === 'passed' || s.state === 'remedied' || s.state === 'exempted' ? 'success' : s.state === 'active' ? 'primary' : 'danger'}>
-          {api.t(`newbie-exam.ui.state.${s.state}`)}
-        </Badge>{' '}
-        {api.t(`newbie-exam.ui.fail.${s.action_on_fail}`)}
-      </p>
-      {s.action_on_fail === 'restrict' && s.remedy_days > 0 && <p className="pt-muted small">{api.t('newbie-exam.ui.remedy', { n: s.remedy_days })}</p>}
-      {s.reward_bonus > 0 && <p className="pt-muted small">{api.t('newbie-exam.ui.reward', { n: s.reward_bonus })}</p>}
+    <div className="stack">
+      {s.stages.length > 1 && (
+        <ol className="steps">
+          {s.stages.map((st) => (
+            <li key={st.index} className={st.passed ? 'done' : st.index === s.current_stage && s.state === 'active' ? 'cur' : undefined}>
+              <span>{`STAGE ${st.index + 1}`}</span>
+              {new Date(st.deadline).toLocaleDateString()}
+            </li>
+          ))}
+        </ol>
+      )}
       {s.stages.map((st) => (
-        <div key={st.index}>
-          <h3>
-            {api.t('newbie-exam.ui.stage', { n: st.index + 1, at: new Date(st.deadline).toLocaleString() })} {st.passed && <Badge tone="success">✓</Badge>}
-          </h3>
+        <Panel key={st.index} title={stageLabel(api, st)} primary={st.index === s.current_stage} actions={st.passed && <Status tone="ok">{api.t('newbie-exam.ui.state.passed')}</Status>}>
           <Goals api={api} stage={st} />
-        </div>
+        </Panel>
       ))}
+    </div>
+  );
+}
+
+function Rules({ api, s }: { api: PluginApi; s: Status }) {
+  return (
+    <>
+      <Note tone={s.action_on_fail === 'none' ? 'info' : 'warn'}>
+        {api.t(`newbie-exam.ui.fail.${s.action_on_fail}`)}
+        {s.action_on_fail === 'restrict' && s.remedy_days > 0 && ` ${api.t('newbie-exam.ui.remedy', { n: s.remedy_days })}`}
+      </Note>
+      {s.reward_bonus > 0 && <p className="small muted">{api.t('newbie-exam.ui.reward', { n: s.reward_bonus })}</p>}
     </>
   );
 }
 
 function MyPage({ api }: { api: PluginApi }) {
   const [s] = useStatus(api, '/api/p/newbie-exam/v1/me');
-  if (s === undefined) return null;
-  return <Card title={api.t('newbie-exam.ui.title')}>{s ? <Details api={api} s={s} /> : <p className="pt-muted">{api.t('newbie-exam.ui.none')}</p>}</Card>;
+  if (s === undefined) return <SkeletonRows n={6} />;
+  return (
+    <div className="stack">
+      <PageHead title={s ? s.exam : api.t('newbie-exam.ui.title')} actions={s && <Status tone={stateTone(s.state)}>{api.t(`newbie-exam.ui.state.${s.state}`)}</Status>} />
+      {s ? (
+        <>
+          <Rules api={api} s={s} />
+          <Details api={api} s={s} />
+        </>
+      ) : (
+        <Panel>
+          <Empty compact>{api.t('newbie-exam.ui.none')}</Empty>
+        </Panel>
+      )}
+    </div>
+  );
 }
 
 function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   const uid = ctx.profile.id;
   const [s, reload] = useStatus(api, `/api/p/newbie-exam/v1/admin/users/${uid}`);
   const [days, setDays] = useState('7');
+  const [sheet, setSheet] = useState<'extend' | 'exempt' | null>(null);
   const act = async (path: string, body: Record<string, unknown>) => {
     try {
       const r = await api.json<{ results?: { error?: string }[] }>(`/api/p/newbie-exam/v1/admin/${path}`, { json: body });
       const e = r?.results?.[0]?.error;
       api.toast(e ? api.t(e) : api.t('newbie-exam.ui.done'), e ? 'error' : 'success');
+      setSheet(null);
       await reload();
     } catch (err) {
       api.toast(err instanceof ApiError ? api.t(err.code) : String(err), 'error');
     }
   };
-  if (s === undefined) return null;
+  if (s === undefined) return <SkeletonRows n={3} />;
   return (
-    <Card title={api.t('newbie-exam.ui.title')}>
-      {s ? <Details api={api} s={s} /> : <p className="pt-muted">{api.t('newbie-exam.ui.none')}</p>}
-      <div className="searchbar">
-        <Button onClick={() => void act('assign', { user_ids: [uid] })}>{api.t('newbie-exam.ui.assign')}</Button>
-        <Input name="exam_days" type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} />
-        <Button onClick={() => void act(`users/${uid}/extend`, { days: Number(days) })}>{api.t('newbie-exam.ui.extend')}</Button>
-        <Button variant="danger" onClick={() => void act(`users/${uid}/exempt`, { reason: 'admin' })}>
-          {api.t('newbie-exam.ui.exempt')}
-        </Button>
+    <div className="stack">
+      <div className="row-sb">
+        {s ? <Status tone={stateTone(s.state)}>{`${s.exam} · ${api.t(`newbie-exam.ui.state.${s.state}`)}`}</Status> : <span className="muted">{api.t('newbie-exam.ui.none')}</span>}
+        <div className="form-acts">
+          {!s && (
+            <Button size="sm" variant="primary" onClick={() => void act('assign', { user_ids: [uid] })}>
+              {api.t('newbie-exam.ui.assign')}
+            </Button>
+          )}
+          {s?.state === 'active' && (
+            <>
+              <Button size="sm" onClick={() => setSheet('extend')}>
+                {api.t('newbie-exam.ui.extend')}
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => setSheet('exempt')}>
+                {api.t('newbie-exam.ui.exempt')}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
-    </Card>
+      {s && <Details api={api} s={s} />}
+      <Sheet
+        open={sheet === 'extend'}
+        onClose={() => setSheet(null)}
+        title={api.t('newbie-exam.ui.extend')}
+        footer={
+          <Button variant="primary" onClick={() => void act(`users/${uid}/extend`, { days: Number(days) })}>
+            {api.t('newbie-exam.ui.extend')}
+          </Button>
+        }
+      >
+        <Field label={api.t('newbie-exam.ui.extend')}>
+          <Input name="exam_days" type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} />
+        </Field>
+      </Sheet>
+      <Sheet
+        open={sheet === 'exempt'}
+        onClose={() => setSheet(null)}
+        title={api.t('newbie-exam.ui.exempt')}
+        footer={
+          <Button variant="danger" onClick={() => void act(`users/${uid}/exempt`, { reason: 'admin' })}>
+            {api.t('newbie-exam.ui.exempt')}
+          </Button>
+        }
+      >
+        <p>{api.t('newbie-exam.ui.exempt_confirm')}</p>
+      </Sheet>
+    </div>
   );
 }
 

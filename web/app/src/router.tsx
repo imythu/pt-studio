@@ -1,18 +1,21 @@
-import { LostArt } from './art';
-import { HelpPage } from './help';
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { createBrowserRouter, Link } from 'react-router';
 import { useT } from '@pt-studio/terms';
-import { AdminHome, AdminPluginRoute } from './pages/Admin';
+import { AdminHome, AdminPluginRoute, AdminPlugins } from './pages/Admin';
 import { AdminUser, AdminUsers } from './pages/AdminUsers';
 import { AdminAudit } from './pages/AdminAudit';
 import { SettingsPage } from './pages/Settings';
 import { Login, Register, ResetPassword, VerifyEmail } from './pages/Auth';
 import { PluginRoute } from './pages/PluginRoute';
 import { ProfilePage } from './pages/Profile';
-import { GroupPage, Home, TorrentList, TorrentPage, Upload } from './pages/Torrents';
+import { Home } from './pages/Home';
+import { TorrentList } from './pages/TorrentList';
+import { TorrentPage } from './pages/TorrentDetail';
+import { GroupPage } from './pages/Group';
+import { Upload } from './pages/Upload';
+import { HelpPage } from './help';
 import { overrides, type PageId } from './overrides';
-import { Layout, MePage, RequireLogin } from './shell/Layout';
+import { GuestBar, Layout, MePage, RequireLogin } from './shell/Layout';
 import { useSession } from './session';
 
 function page(id: PageId, C: ComponentType) {
@@ -20,35 +23,46 @@ function page(id: PageId, C: ComponentType) {
   return <O />;
 }
 
-function NotFound() {
+export function NotFound() {
   const t = useT();
+  const s = useSession();
   return (
-    <div className="lost">
-      <div className="lost-card">
-        <div className="lost-cover">
-          <img src="/frieren/frieren-wide-scenery.jpg" alt="" className="lost-scenery" />
-          <div className="lost-overlay" />
-        </div>
-        <div className="lost-body">
-          <LostArt />
+    <div className={s.me ? undefined : 'bare-page'}>
+      {!s.me && <GuestBar actions={false} />}
+      <section className="lost" data-primary>
+        <div className="lost-art" aria-hidden="true" />
+        <div className="lost-b">
+          <span className="lost-code">404</span>
           <h1>{t('ui.common.not_found')}</h1>
-          <p className="pt-muted" style={{ margin: '0 0 18px' }}>
-            在漫长的时间与魔法旅途中迷失了方向……
-          </p>
-          <Link className="pt-btn pt-btn-primary" to="/">
-            {t('ui.nav.home')}
-          </Link>
+          <p className="muted">{t('ui.common.not_found_hint')}</p>
+          <div className="row">
+            <Link className="btn btn-primary" to="/">
+              {t('ui.nav.home')}
+            </Link>
+            {s.me && (
+              <Link className="btn" to="/torrents">
+                {t('ui.nav.torrents')}
+              </Link>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
 
-function RequireStaff({ children }: { children: React.ReactNode }) {
+function RequireStaff({ children }: { children: ReactNode }) {
   const s = useSession();
   if (!s.isStaff) return <NotFound />;
   return <>{children}</>;
 }
+
+const member = (el: ReactNode) => <RequireLogin>{el}</RequireLogin>;
+const staff = (el: ReactNode) => (
+  <RequireLogin>
+    <RequireStaff>{el}</RequireStaff>
+  </RequireLogin>
+);
 
 export const router = createBrowserRouter([
   {
@@ -60,63 +74,21 @@ export const router = createBrowserRouter([
       { path: 'register', element: page('register', Register) },
       { path: 'reset-password', element: <ResetPassword /> },
       { path: 'verify-email', element: <VerifyEmail /> },
-      { path: 'torrents', element: <RequireLogin>{page('torrents', TorrentList)}</RequireLogin> },
-      { path: 'torrents/:id', element: <RequireLogin>{page('torrent', TorrentPage)}</RequireLogin> },
-      { path: 'groups/:id', element: <RequireLogin>{page('group', GroupPage)}</RequireLogin> },
-      { path: 'upload', element: <RequireLogin>{page('upload', Upload)}</RequireLogin> },
-      { path: 'users/:id', element: <RequireLogin>{page('profile', ProfilePage)}</RequireLogin> },
+      { path: 'torrents', element: member(page('torrents', TorrentList)) },
+      { path: 'torrents/:id', element: member(page('torrent', TorrentPage)) },
+      { path: 'groups/:id', element: member(page('group', GroupPage)) },
+      { path: 'upload', element: member(page('upload', Upload)) },
+      { path: 'users/:id', element: member(page('profile', ProfilePage)) },
       { path: 'help', element: <HelpPage /> },
-      { path: 'me', element: <RequireLogin><MePage /></RequireLogin> },
-      { path: 'settings', element: <RequireLogin>{page('settings', SettingsPage)}</RequireLogin> },
+      { path: 'me', element: member(<MePage />) },
+      { path: 'settings', element: member(page('settings', SettingsPage)) },
       { path: 'p/:plugin/*', element: <PluginRoute /> },
-      {
-        path: 'admin/users',
-        element: (
-          <RequireLogin>
-            <RequireStaff>
-              <AdminUsers />
-            </RequireStaff>
-          </RequireLogin>
-        ),
-      },
-      {
-        path: 'admin/audit',
-        element: (
-          <RequireLogin>
-            <RequireStaff>
-              <AdminAudit />
-            </RequireStaff>
-          </RequireLogin>
-        ),
-      },
-      {
-        path: 'admin/users/:id',
-        element: (
-          <RequireLogin>
-            <RequireStaff>
-              <AdminUser />
-            </RequireStaff>
-          </RequireLogin>
-        ),
-      },
-      {
-        path: 'admin',
-        element: (
-          <RequireLogin>
-            <RequireStaff>{page('admin', AdminHome)}</RequireStaff>
-          </RequireLogin>
-        ),
-      },
-      {
-        path: 'admin/p/:plugin/*',
-        element: (
-          <RequireLogin>
-            <RequireStaff>
-              <AdminPluginRoute />
-            </RequireStaff>
-          </RequireLogin>
-        ),
-      },
+      { path: 'admin', element: staff(page('admin', AdminHome)) },
+      { path: 'admin/plugins', element: staff(<AdminPlugins />) },
+      { path: 'admin/users', element: staff(<AdminUsers />) },
+      { path: 'admin/users/:id', element: staff(<AdminUser />) },
+      { path: 'admin/audit', element: staff(<AdminAudit />) },
+      { path: 'admin/p/:plugin/*', element: staff(<AdminPluginRoute />) },
       { path: '*', element: <NotFound /> },
     ],
   },

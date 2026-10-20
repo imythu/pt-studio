@@ -126,7 +126,7 @@ function Sections({ api }: SlotProps) {
           <section key={s.id} className="rec-section">
             <header>
               <h2>{api.t(`recommend.ui.${key}`)}</h2>
-              {hint && <span className="pt-muted small">{api.t(`recommend.ui.${hint}`)}</span>}
+              {hint && <span className="small muted">{api.t(`recommend.ui.${hint}`)}</span>}
             </header>
             <div className="rec-row">
               {s.items.map((it) => (

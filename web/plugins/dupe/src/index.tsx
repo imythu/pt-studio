@@ -1,9 +1,9 @@
-// dupe 前端：种子页“替代”信息卡（被替代 / 替代了 / 同规格版本 / 申请替代）、后台审核队列、仪表盘待办数。
-import { useEffect, useState, type ReactNode } from 'react';
+// dupe 前端：种子页「版本与替代」（被替代 / 替代了 / 同规格版本；申请替代在抽屉里）、后台审核队列、仪表盘待办数。
+import { useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Table } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, Kpis, Note, PageHead, Panel, PLink, Select, Sheet, SkeletonRows, Status, Table } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'dupe.ui.card': '版本与替代',
@@ -28,6 +28,9 @@ registerMessages('zh-CN', {
   'dupe.ui.none': '没有待处理项',
   'dupe.ui.pending': '待审核替代',
   'dupe.ui.open': '疑似重复',
+  'dupe.ui.new_old': '新种子 → 被替代的旧种子',
+  'dupe.ui.requested_by': '申请人',
+  'dupe.ui.lede': '同一作品、同一规格只保留最好的版本；替代后旧种子标记为已替代。',
   'dupe.same_content': '已有内容相同的种子',
   'dupe.slot_taken': '该作品已有相同规格的种子，请申请替代',
   'dupe.not_same_work': '两个种子必须属于同一作品',
@@ -57,6 +60,9 @@ registerMessages('en', {
   'dupe.ui.none': 'Nothing to review',
   'dupe.ui.pending': 'Pending trumps',
   'dupe.ui.open': 'Possible dupes',
+  'dupe.ui.new_old': 'New torrent → torrent it trumps',
+  'dupe.ui.requested_by': 'Requested by',
+  'dupe.ui.lede': 'Keep only the best release per work and spec; a trumped torrent is marked as such.',
   'dupe.same_content': 'A torrent with the same content already exists',
   'dupe.slot_taken': 'This work already has a torrent with the same specs; request a trump instead',
   'dupe.not_same_work': 'Both torrents must belong to the same work',
@@ -66,30 +72,17 @@ registerMessages('en', {
 
 const errText = (api: PluginApi, e: unknown) => (e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e));
 
-function A({ api, to, children }: { api: PluginApi; to: string; children: ReactNode }) {
-  return (
-    <a
-      href={to}
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate(to);
-      }}
-    >
-      {children}
-    </a>
-  );
-}
-
-interface Link {
+interface TrumpLink {
   trump_id: number;
   torrent_id: number;
   title: string | null;
   reason: string;
   state: string;
 }
+
 interface Info {
-  trumped_by: Link | null;
-  replaces: Link[];
+  trumped_by: TrumpLink | null;
+  replaces: TrumpLink[];
   slot_peers: { torrent_id: number; title: string | null }[];
   can_request: boolean;
   candidates: { torrent_id: number; title: string | null }[];
@@ -97,14 +90,15 @@ interface Info {
 }
 
 const TLink = ({ api, id, title }: { api: PluginApi; id: number; title: string | null }) => (
-  <A api={api} to={`/torrents/${id}`}>
+  <PLink to={`/torrents/${id}`} navigate={api.navigate} className="link">
     {title ?? `#${id}`}
-  </A>
+  </PLink>
 );
 
 function TorrentCard({ api, ctx }: SlotProps<{ torrent: { id: number } }>) {
   const tid = ctx.torrent.id;
   const [d, setD] = useState<Info | null>(null);
+  const [open, setOpen] = useState(false);
   const [f, setF] = useState({ old: '', reason: '', approve: false });
   const load = () =>
     api
@@ -121,73 +115,75 @@ function TorrentCard({ api, ctx }: SlotProps<{ torrent: { id: number } }>) {
       await api.json('/api/p/dupe/v1/trumps', { json: { old_id: Number(f.old), new_id: tid, reason: f.reason, approve: f.approve } });
       api.toast(api.t('dupe.ui.requested'), 'success');
       setF({ old: '', reason: '', approve: false });
+      setOpen(false);
       await load();
     } catch (e) {
       api.toast(errText(api, e), 'error');
     }
   };
   return (
-    <Card title={api.t('dupe.ui.card')}>
+    <section className="stack-s">
+      <div className="row-sb">
+        <h3>{api.t('dupe.ui.card')}</h3>
+        {d.can_request && (
+          <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
+            {api.t('dupe.ui.request')}
+          </Button>
+        )}
+      </div>
       {d.trumped_by && (
-        <p className={d.trumped_by.state === 'approved' ? 'pt-field-error' : ''} role="status">
-          {api.t(d.trumped_by.state === 'approved' ? 'dupe.ui.trumped_by' : 'dupe.ui.trump_pending')} <TLink api={api} id={d.trumped_by.torrent_id} title={d.trumped_by.title} />
-          <span className="pt-muted small">（{d.trumped_by.reason}）</span>
-        </p>
+        <Note tone={d.trumped_by.state === 'approved' ? 'bad' : 'warn'}>
+          <b>{api.t(d.trumped_by.state === 'approved' ? 'dupe.ui.trumped_by' : 'dupe.ui.trump_pending')}</b>
+          <TLink api={api} id={d.trumped_by.torrent_id} title={d.trumped_by.title} />
+          <span className="small">（{d.trumped_by.reason}）</span>
+        </Note>
       )}
-      {d.replaces.length > 0 && (
-        <p>
-          {api.t('dupe.ui.replaces')}
-          {d.replaces.map((r) => (
-            <span key={r.trump_id}>
-              {' '}
-              <TLink api={api} id={r.torrent_id} title={r.title} /> {r.state === 'pending' && <Badge>{api.t('dupe.ui.pending')}</Badge>}
-            </span>
-          ))}
-        </p>
-      )}
-      {d.slot_peers.length > 0 && (
-        <p className="small">
-          {api.t('dupe.ui.peers')}
-          {d.slot_peers.map((p) => (
-            <span key={p.torrent_id}>
-              {' '}
-              <TLink api={api} id={p.torrent_id} title={p.title} />
-            </span>
-          ))}
-        </p>
-      )}
-      {d.can_request && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <h4>{api.t('dupe.ui.request')}</h4>
-          <Field label={api.t('dupe.ui.old')}>
-            <select className="pt-input" name="trump_old" value={f.old} onChange={(e) => setF({ ...f, old: e.target.value })} required>
-              <option value="" />
-              {d.candidates.map((c) => (
-                <option key={c.torrent_id} value={c.torrent_id}>
-                  {c.title ?? `#${c.torrent_id}`}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={api.t('dupe.ui.reason')}>
-            <Input name="trump_reason" value={f.reason} maxLength={500} required onChange={(e) => setF({ ...f, reason: e.target.value })} />
-          </Field>
-          {d.staff && (
-            <label className="pt-check">
-              <input type="checkbox" checked={f.approve} onChange={(e) => setF({ ...f, approve: e.target.checked })} /> {api.t('dupe.ui.approve_now')}
-            </label>
+      {(d.replaces.length > 0 || d.slot_peers.length > 0) && (
+        <dl className="kv">
+          {d.replaces.length > 0 && (
+            <>
+              <dt>{api.t('dupe.ui.replaces')}</dt>
+              <dd className="row" style={{ gap: 8 }}>
+                {d.replaces.map((r) => (
+                  <span key={r.trump_id} className="row" style={{ gap: 4 }}>
+                    <TLink api={api} id={r.torrent_id} title={r.title} />
+                    {r.state === 'pending' && <Status tone="warn">{api.t('dupe.ui.pending')}</Status>}
+                  </span>
+                ))}
+              </dd>
+            </>
           )}
-          <Button type="submit" disabled={!f.old || !f.reason.trim()}>
+          {d.slot_peers.length > 0 && (
+            <>
+              <dt>{api.t('dupe.ui.peers')}</dt>
+              <dd className="row" style={{ gap: 8 }}>
+                {d.slot_peers.map((p) => (
+                  <TLink key={p.torrent_id} api={api} id={p.torrent_id} title={p.title} />
+                ))}
+              </dd>
+            </>
+          )}
+        </dl>
+      )}
+      <Sheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title={api.t('dupe.ui.request')}
+        footer={
+          <Button variant="primary" disabled={!f.old || !f.reason.trim()} onClick={() => void submit()}>
             {api.t('dupe.ui.submit')}
           </Button>
-        </form>
-      )}
-    </Card>
+        }
+      >
+        <Field label={api.t('dupe.ui.old')}>
+          <Select name="trump_old" value={f.old} onChange={(e) => setF({ ...f, old: e.target.value })} options={[{ value: '', label: '—' }, ...d.candidates.map((c) => ({ value: String(c.torrent_id), label: c.title ?? `#${c.torrent_id}` }))]} />
+        </Field>
+        <Field label={api.t('dupe.ui.reason')}>
+          <Input name="trump_reason" value={f.reason} maxLength={500} required onChange={(e) => setF({ ...f, reason: e.target.value })} />
+        </Field>
+        {d.staff && <Checkbox label={api.t('dupe.ui.approve_now')} checked={f.approve} onChange={(v) => setF({ ...f, approve: v })} />}
+      </Sheet>
+    </section>
   );
 }
 
@@ -198,12 +194,13 @@ interface Queue {
 
 function Admin({ api }: { api: PluginApi }) {
   const [q, setQ] = useState<Queue | null>(null);
+  const [rejecting, setRejecting] = useState<number | null>(null);
+  const [note, setNote] = useState('');
   const load = () => api.json<Queue>('/api/p/dupe/v1/admin/queue').then(setQ);
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  if (!q) return null;
   const run = async (f: () => Promise<unknown>) => {
     try {
       await f();
@@ -212,78 +209,120 @@ function Admin({ api }: { api: PluginApi }) {
       api.toast(errText(api, e), 'error');
     }
   };
-  const decide = (id: number, decision: 'approve' | 'reject') => {
-    const note = decision === 'reject' ? window.prompt(api.t('dupe.ui.note')) : '';
-    if (note === null) return;
-    void run(() => api.json(`/api/p/dupe/v1/admin/trumps/${id}/decision`, { json: { decision, note } }));
-  };
+  const decide = (id: number, decision: 'approve' | 'reject', n = '') => void run(() => api.json(`/api/p/dupe/v1/admin/trumps/${id}/decision`, { json: { decision, note: n } }));
   return (
-    <div className="pt-stack">
-      <Card title={api.t('dupe.ui.trumps')}>
-        <Table
-          rows={q.trumps}
-          rowKey={(r) => r.id}
-          empty={api.t('dupe.ui.none')}
-          columns={[
-            {
-              key: 't',
-              header: '',
-              render: (r) => (
-                <>
-                  <TLink api={api} id={r.new_id} title={r.new_title} /> → <TLink api={api} id={r.old_id} title={r.old_title} />
-                  <div className="pt-muted small">
-                    {r.reason} · {r.requested_by ?? '?'}
-                  </div>
-                </>
-              ),
-            },
-            {
-              key: 'a',
-              header: '',
-              render: (r) => (
-                <span>
-                  <Button variant="primary" onClick={() => decide(r.id, 'approve')}>
-                    {api.t('dupe.ui.approve')}
-                  </Button>{' '}
-                  <Button onClick={() => decide(r.id, 'reject')}>{api.t('dupe.ui.reject')}</Button>
-                </span>
-              ),
-            },
-          ]}
-        />
-      </Card>
-      <Card title={api.t('dupe.ui.candidates')}>
-        <Table
-          rows={q.candidates}
-          rowKey={(r) => r.id}
-          empty={api.t('dupe.ui.none')}
-          columns={[
-            {
-              key: 't',
-              header: '',
-              render: (r) => (
-                <>
-                  <TLink api={api} id={r.torrent_id} title={r.title} /> <span className="pt-muted small pt-mono">{r.slot}</span>
-                  <div className="small">
-                    {api.t('dupe.ui.matches')}
-                    {r.matches.map((m) => (
-                      <span key={m}>
-                        {' '}
-                        <TLink api={api} id={m} title={null} />
+    <div className="stack">
+      <PageHead title={api.t('dupe.ui.queue')} lede={api.t('dupe.ui.lede')} />
+      {!q ? (
+        <SkeletonRows n={6} />
+      ) : (
+        <>
+          <Kpis
+            items={[
+              { label: api.t('dupe.ui.pending'), value: q.trumps.length, tone: q.trumps.length ? 'gold' : undefined },
+              { label: api.t('dupe.ui.open'), value: q.candidates.length },
+            ]}
+          />
+          <Panel title={api.t('dupe.ui.trumps')} flush primary>
+            <Table
+              rows={q.trumps}
+              rowKey={(r) => r.id}
+              empty={api.t('dupe.ui.none')}
+              minWidth={820}
+              columns={[
+                {
+                  key: 't',
+                  header: api.t('dupe.ui.new_old'),
+                  render: (r) => (
+                    <div className="tt">
+                      <span>
+                        <TLink api={api} id={r.new_id} title={r.new_title} /> → <TLink api={api} id={r.old_id} title={r.old_title} />
                       </span>
-                    ))}
-                  </div>
-                </>
-              ),
-            },
-            {
-              key: 'a',
-              header: '',
-              render: (r) => <Button onClick={() => void run(() => api.json(`/api/p/dupe/v1/admin/candidates/${r.id}/dismiss`, { json: {} }))}>{api.t('dupe.ui.dismiss')}</Button>,
-            },
-          ]}
-        />
-      </Card>
+                      <span className="small muted">{r.reason}</span>
+                    </div>
+                  ),
+                },
+                { key: 'u', header: api.t('dupe.ui.requested_by'), render: (r) => <span className="small">{r.requested_by ?? '?'}</span> },
+                {
+                  key: 'a',
+                  header: '',
+                  render: (r) => (
+                    <div className="acts">
+                      <Button size="xs" variant="primary" onClick={() => decide(r.id, 'approve')}>
+                        {api.t('dupe.ui.approve')}
+                      </Button>
+                      <Button size="xs" onClick={() => setRejecting(r.id)}>
+                        {api.t('dupe.ui.reject')}
+                      </Button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </Panel>
+          <Panel title={api.t('dupe.ui.candidates')} flush>
+            <Table
+              rows={q.candidates}
+              rowKey={(r) => r.id}
+              empty={api.t('dupe.ui.none')}
+              minWidth={820}
+              columns={[
+                {
+                  key: 't',
+                  header: '',
+                  render: (r) => (
+                    <div className="tt">
+                      <span>
+                        <TLink api={api} id={r.torrent_id} title={r.title} /> <span className="mono muted">{r.slot}</span>
+                      </span>
+                      <span className="small">
+                        {api.t('dupe.ui.matches')}{' '}
+                        {r.matches.map((m) => (
+                          <span key={m}>
+                            <TLink api={api} id={m} title={null} />{' '}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'a',
+                  header: '',
+                  render: (r) => (
+                    <div className="acts">
+                      <Button size="xs" onClick={() => void run(() => api.json(`/api/p/dupe/v1/admin/candidates/${r.id}/dismiss`, { json: {} }))}>
+                        {api.t('dupe.ui.dismiss')}
+                      </Button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </Panel>
+        </>
+      )}
+      <Sheet
+        open={rejecting !== null}
+        onClose={() => setRejecting(null)}
+        title={api.t('dupe.ui.reject')}
+        footer={
+          <Button
+            variant="danger"
+            onClick={() => {
+              if (rejecting !== null) decide(rejecting, 'reject', note);
+              setRejecting(null);
+              setNote('');
+            }}
+          >
+            {api.t('dupe.ui.reject')}
+          </Button>
+        }
+      >
+        <Field label={api.t('dupe.ui.note')}>
+          <Input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </Sheet>
     </div>
   );
 }
@@ -298,11 +337,21 @@ function Widget({ api }: SlotProps) {
   }, [api]);
   if (!q || (q.trumps.length === 0 && q.candidates.length === 0)) return null;
   return (
-    <Card title={<A api={api} to="/admin/p/dupe/">{api.t('dupe.ui.queue')}</A>}>
-      <p>
-        {api.t('dupe.ui.pending')} {q.trumps.length} · {api.t('dupe.ui.open')} {q.candidates.length}
-      </p>
-    </Card>
+    <Panel
+      title={api.t('dupe.ui.queue')}
+      more={
+        <PLink to="/admin/p/dupe/" navigate={api.navigate}>
+          {api.t('dupe.ui.approve')}
+        </PLink>
+      }
+    >
+      <dl className="ledger">
+        <dt>{api.t('dupe.ui.pending')}</dt>
+        <dd className="num">{q.trumps.length}</dd>
+        <dt>{api.t('dupe.ui.open')}</dt>
+        <dd className="num">{q.candidates.length}</dd>
+      </dl>
+    </Panel>
   );
 }
 

@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Button, Card, Field } from '@pt-studio/ui-kit';
+import { Button, CopyButton, Empty, Kpis, LoadMore, NavItem, PageHead, Panel, Sheet, SkeletonRows } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'attachments.ui.menu': '我的图片',
@@ -25,6 +25,9 @@ registerMessages('zh-CN', {
   'attachments.unsupported': '只支持 PNG、JPEG、GIF、WebP 图片',
   'attachments.invalid': '图片文件已损坏',
   'attachments.quota_exceeded': '已达到今天的上传上限',
+  'attachments.ui.today_count': '今日张数',
+  'attachments.ui.today_bytes': '今日容量',
+  'attachments.ui.total': '全部图片',
 });
 registerMessages('en', {
   'attachments.ui.menu': 'My images',
@@ -46,6 +49,9 @@ registerMessages('en', {
   'attachments.unsupported': 'Only PNG, JPEG, GIF and WebP images are accepted',
   'attachments.invalid': 'The image file is damaged',
   'attachments.quota_exceeded': "You have reached today's upload limit",
+  'attachments.ui.today_count': 'Today (images)',
+  'attachments.ui.today_bytes': 'Today (size)',
+  'attachments.ui.total': 'All images',
 });
 
 const errText = (api: PluginApi, e: unknown) => (e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e));
@@ -70,40 +76,24 @@ interface Listing {
 
 const uploadOne = (api: PluginApi, f: File) => api.json<Img>('/api/p/attachments/v1/images', { method: 'POST', body: f, headers: { 'content-type': f.type || 'application/octet-stream' } });
 
-function copy(api: PluginApi, text: string) {
-  void navigator.clipboard
-    ?.writeText(text)
-    .then(() => api.toast(api.t('attachments.ui.copied'), 'success'))
-    .catch(() => window.prompt('', text));
-}
-
-function Grid({ api, items, onDelete, showUser }: { api: PluginApi; items: Img[]; onDelete(id: number): void; showUser?: boolean }) {
-  if (items.length === 0) return <p className="pt-muted">{api.t('attachments.ui.empty')}</p>;
+function Gallery({ api, items, onDelete, showUser }: { api: PluginApi; items: Img[]; onDelete(img: Img): void; showUser?: boolean }) {
+  if (items.length === 0) return <Empty compact>{api.t('attachments.ui.empty')}</Empty>;
   return (
-    <div className="attachments-grid">
+    <div className="gallery">
       {items.map((x) => (
-        <figure key={x.id} className="attachments-item">
+        <figure key={x.id}>
           <a href={x.url} target="_blank" rel="noreferrer">
             <img src={x.url} alt="" loading="lazy" />
           </a>
-          <figcaption className="small">
-            <span className="pt-muted">
+          <figcaption>
+            <span className="num">
               {x.width}×{x.height} · {formatBytes(x.size)}
               {showUser && x.username ? ` · ${x.username}` : ''}
             </span>
-            <span>
-              <Button variant="ghost" onClick={() => copy(api, x.bbcode)}>
-                {api.t('attachments.ui.copy_bbcode')}
-              </Button>
-              <Button variant="ghost" onClick={() => copy(api, x.markdown)}>
-                {api.t('attachments.ui.copy_markdown')}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  if (window.confirm(api.t('attachments.ui.delete_confirm'))) onDelete(x.id);
-                }}
-              >
+            <span className="row">
+              <CopyButton size="xs" text={x.bbcode} label="BBCode" copiedLabel={api.t('attachments.ui.copied')} />
+              <CopyButton size="xs" text={x.markdown} label="Markdown" copiedLabel={api.t('attachments.ui.copied')} />
+              <Button size="xs" variant="ghost" className="push-right" onClick={() => onDelete(x)}>
                 {api.t('attachments.ui.delete')}
               </Button>
             </span>
@@ -115,15 +105,15 @@ function Grid({ api, items, onDelete, showUser }: { api: PluginApi; items: Img[]
 }
 
 function useListing(api: PluginApi, path: `/api/${string}`) {
-  const [items, setItems] = useState<Img[]>([]);
+  const [items, setItems] = useState<Img[] | null>(null);
   const [d, setD] = useState<Listing | null>(null);
   const load = async (page: number) => {
     const r = await api.json<Listing>(`${path}?page=${page}`);
     setD(r);
-    setItems((xs) => (page === 1 ? r.items : [...xs, ...r.items]));
+    setItems((xs) => (page === 1 ? r.items : [...(xs ?? []), ...r.items]));
   };
   useEffect(() => {
-    void load(1);
+    void load(1).catch(() => setItems([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
   const remove = async (id: number) => {
@@ -139,12 +129,12 @@ function useListing(api: PluginApi, path: `/api/${string}`) {
 
 function More({ api, d, load }: { api: PluginApi; d: Listing | null; load(p: number): Promise<void> }) {
   if (!d || d.page * d.page_size >= d.total) return null;
-  return <Button onClick={() => void load(d.page + 1)}>{api.t('attachments.ui.more')}</Button>;
+  return <LoadMore onClick={() => void load(d.page + 1)} label={api.t('attachments.ui.more')} />;
 }
 
-function Picker({ api, label, onFiles, busy }: { api: PluginApi; label: ReactNode; onFiles(fs: File[]): void; busy: boolean }) {
+function Picker({ label, onFiles, busy, variant }: { label: ReactNode; onFiles(fs: File[]): void; busy: boolean; variant?: 'primary' }) {
   return (
-    <label className="pt-btn attachments-picker">
+    <label className={variant === 'primary' ? 'btn btn-primary' : 'btn btn-sm'}>
       <input
         type="file"
         name="image_upload"
@@ -163,9 +153,31 @@ function Picker({ api, label, onFiles, busy }: { api: PluginApi; label: ReactNod
   );
 }
 
-function MyImages({ api }: { api: PluginApi }) {
-  const { items, d, load, remove } = useListing(api, '/api/p/attachments/v1/images');
+/** 删除确认抽屉 */
+function DeleteSheet({ api, img, onClose, onConfirm }: { api: PluginApi; img: Img | null; onClose(): void; onConfirm(id: number): void }) {
+  return (
+    <Sheet
+      open={img !== null}
+      onClose={onClose}
+      title={api.t('attachments.ui.delete')}
+      footer={
+        <Button variant="danger" onClick={() => img && onConfirm(img.id)}>
+          {api.t('attachments.ui.delete')}
+        </Button>
+      }
+    >
+      <div className="stack">
+        {img && <img src={img.url} alt="" className="sheet-img" />}
+        <p>{api.t('attachments.ui.delete_confirm')}</p>
+      </div>
+    </Sheet>
+  );
+}
+
+function ImagesPage({ api, admin }: { api: PluginApi; admin?: boolean }) {
+  const { items, d, load, remove } = useListing(api, admin ? '/api/p/attachments/v1/admin/images' : '/api/p/attachments/v1/images');
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState<Img | null>(null);
   const upload = async (fs: File[]) => {
     setBusy(true);
     for (const f of fs) {
@@ -180,27 +192,33 @@ function MyImages({ api }: { api: PluginApi }) {
   };
   const q = d?.quota;
   return (
-    <Card title={api.t('attachments.ui.title')} actions={<Picker api={api} label={api.t('attachments.ui.upload')} onFiles={(fs) => void upload(fs)} busy={busy} />}>
+    <div className="stack">
+      <PageHead
+        title={api.t(admin ? 'attachments.ui.admin' : 'attachments.ui.title')}
+        lede={q ? api.t('attachments.ui.hint', { size: formatBytes(q.max_bytes) }) : undefined}
+        actions={!admin && <Picker variant="primary" label={api.t('attachments.ui.upload')} onFiles={(fs) => void upload(fs)} busy={busy} />}
+      />
       {q && (
-        <p className="pt-muted small">
-          {api.t('attachments.ui.hint', { size: formatBytes(q.max_bytes) })}
-          <br />
-          {api.t('attachments.ui.quota', { count: q.count, max: q.daily_count, bytes: formatBytes(q.bytes), maxBytes: formatBytes(q.daily_bytes) })}
-        </p>
+        <Kpis
+          items={[
+            { label: api.t('attachments.ui.today_count'), value: `${q.count} / ${q.daily_count}` },
+            { label: api.t('attachments.ui.today_bytes'), value: `${formatBytes(q.bytes)} / ${formatBytes(q.daily_bytes)}` },
+            { label: api.t('attachments.ui.total'), value: d?.total ?? '…' },
+          ]}
+        />
       )}
-      <Grid api={api} items={items} onDelete={(id) => void remove(id)} />
+      <Panel primary>{items === null ? <SkeletonRows n={4} /> : <Gallery api={api} items={items} onDelete={setDeleting} showUser={admin} />}</Panel>
       <More api={api} d={d} load={load} />
-    </Card>
-  );
-}
-
-function Admin({ api }: { api: PluginApi }) {
-  const { items, d, load, remove } = useListing(api, '/api/p/attachments/v1/admin/images');
-  return (
-    <Card title={api.t('attachments.ui.admin')}>
-      <Grid api={api} items={items} onDelete={(id) => void remove(id)} showUser />
-      <More api={api} d={d} load={load} />
-    </Card>
+      <DeleteSheet
+        api={api}
+        img={deleting}
+        onClose={() => setDeleting(null)}
+        onConfirm={(id) => {
+          setDeleting(null);
+          void remove(id);
+        }}
+      />
+    </div>
   );
 }
 
@@ -227,28 +245,22 @@ function InsertImage({ api, ctx }: SlotProps<{ draft: Draft; update?: (p: Partia
     }
   };
   return (
-    <Field label="">
-      <Picker api={api} label={api.t('attachments.ui.insert')} onFiles={(fs) => void run(fs)} busy={busy} />
-    </Field>
+    <div className="form-acts">
+      <Picker label={api.t('attachments.ui.insert')} onFiles={(fs) => void run(fs)} busy={busy} />
+    </div>
   );
 }
 
 function MenuItem({ api }: SlotProps) {
   return (
-    <a
-      href="/p/attachments/"
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate('/p/attachments/');
-      }}
-    >
+    <NavItem to="/p/attachments/" navigate={api.navigate}>
       {api.t('attachments.ui.menu')}
-    </a>
+    </NavItem>
   );
 }
 
 function Pages({ api, path }: { api: PluginApi; path: string }) {
-  return path.startsWith('/admin/') ? <Admin api={api} /> : <MyImages api={api} />;
+  return <ImagesPage key={path.startsWith('/admin/') ? 'a' : 'm'} api={api} admin={path.startsWith('/admin/')} />;
 }
 
 export default {

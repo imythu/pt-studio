@@ -1,10 +1,10 @@
-// comments 前端：种子与作品页的评论区（tabs 插槽）——楼层、回复、引用、感谢、编辑、删除、举报、Markdown / BBCode 与预览、
-// 编辑历史（comments.moderate）；个人页“评论”标签（该用户最近的评论）。
+// comments 前端：种子、作品、求种页的评论区——楼层、回复、引用、感谢、编辑、删除、举报（抽屉）、Markdown / BBCode 与预览、
+// 编辑历史（comments.moderate）；个人页「评论」页签（该用户最近的评论）。
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import { Slot, type PluginApi, type PluginFrontend, type SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Empty, UserContent } from '@pt-studio/ui-kit';
+import { Avatar, Button, Empty, Field, LoadMore, Note, PLink, Segmented, Select, Sheet, SkeletonRows, Textarea, UserContent } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'comments.ui.tab': '评论',
@@ -12,6 +12,7 @@ registerMessages('zh-CN', {
   'comments.ui.placeholder': '写下你的评论…',
   'comments.ui.post': '发表',
   'comments.ui.preview': '预览',
+  'comments.ui.write': '编辑',
   'comments.ui.reply': '回复',
   'comments.ui.quote': '引用',
   'comments.ui.thanks': '感谢（{n}）',
@@ -26,6 +27,7 @@ registerMessages('zh-CN', {
   'comments.ui.replying': '回复 #{floor}',
   'comments.ui.quoting': '引用 #{floor}',
   'comments.ui.report': '举报',
+  'comments.ui.report_title': '举报评论',
   'comments.ui.reported': '已举报，感谢反馈',
   'comments.ui.reason': '举报理由',
   'comments.ui.history': '编辑历史',
@@ -36,6 +38,8 @@ registerMessages('zh-CN', {
   'comments.ui.on_torrent': '种子 #{id}',
   'comments.ui.on_group': '作品 #{id}',
   'comments.ui.on_request': '求种 #{id}',
+  'comments.ui.empty': '还没有评论',
+  'comments.ui.empty_hint': '说说你对这个资源的看法，或者感谢一下发布者。',
 });
 registerMessages('en', {
   'comments.ui.tab': 'Comments',
@@ -43,6 +47,7 @@ registerMessages('en', {
   'comments.ui.placeholder': 'Write a comment…',
   'comments.ui.post': 'Post',
   'comments.ui.preview': 'Preview',
+  'comments.ui.write': 'Write',
   'comments.ui.reply': 'Reply',
   'comments.ui.quote': 'Quote',
   'comments.ui.thanks': 'Thanks ({n})',
@@ -57,6 +62,7 @@ registerMessages('en', {
   'comments.ui.replying': 'Replying to #{floor}',
   'comments.ui.quoting': 'Quoting #{floor}',
   'comments.ui.report': 'Report',
+  'comments.ui.report_title': 'Report comment',
   'comments.ui.reported': 'Reported, thanks',
   'comments.ui.reason': 'Reason',
   'comments.ui.history': 'Edit history',
@@ -67,6 +73,8 @@ registerMessages('en', {
   'comments.ui.on_torrent': 'Torrent #{id}',
   'comments.ui.on_group': 'Title #{id}',
   'comments.ui.on_request': 'Request #{id}',
+  'comments.ui.empty': 'No comments yet',
+  'comments.ui.empty_hint': 'Share what you think about this release, or thank the uploader.',
 });
 
 interface Comment {
@@ -94,55 +102,70 @@ function errText(api: PluginApi, e: unknown): string {
   return String(e);
 }
 
-function ReportButton({ api, id }: { api: PluginApi; id: number }) {
-  const [reasons, setReasons] = useState<string[] | null>(null);
-  const [done, setDone] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  async function open() {
-    try {
-      const r = await api.json<{ items: { code: string }[] }>('/api/p/reports/v1/reasons?kind=comment');
-      setReasons(r.items.map((x) => x.code));
-    } catch {
-      setReasons([]);
-    }
-  }
-  async function send(code: string) {
+function rel(ms: number): string {
+  const s = Math.round((Date.now() - ms) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(document.documentElement.lang || 'zh-CN', { numeric: 'auto' });
+  if (s < 60) return rtf.format(-s, 'second');
+  if (s < 3600) return rtf.format(-Math.floor(s / 60), 'minute');
+  if (s < 86400) return rtf.format(-Math.floor(s / 3600), 'hour');
+  if (s < 7 * 86400) return rtf.format(-Math.floor(s / 86400), 'day');
+  return new Date(ms).toLocaleDateString();
+}
+
+/** 举报评论：理由在抽屉里选择 */
+function ReportSheet({ api, id, onClose }: { api: PluginApi; id: number | null; onClose(): void }) {
+  const [reasons, setReasons] = useState<string[]>([]);
+  const [code, setCode] = useState('');
+  useEffect(() => {
+    if (id === null) return;
+    void api
+      .json<{ items: { code: string }[] }>('/api/p/reports/v1/reasons?kind=comment')
+      .then((r) => {
+        const xs = r.items.map((x) => x.code).filter((c) => c !== 'other');
+        setReasons(xs);
+        setCode(xs[0] ?? '');
+      })
+      .catch(() => setReasons([]));
+  }, [api, id]);
+  const label = (c: string) => {
+    const k = `reports.reason.comment.${c}`;
+    const v = api.t(`term:${k}`);
+    return v === k ? c : v;
+  };
+  async function send() {
+    if (id === null) return;
     try {
       await api.json('/api/p/reports/v1/reports', { method: 'POST', json: { target: `comment:${id}`, reason_code: code, note: '' } });
-      setDone(true);
+      api.toast(api.t('comments.ui.reported'), 'success');
+      onClose();
     } catch (e) {
-      setErr(errText(api, e));
+      api.toast(errText(api, e), 'error');
     }
   }
-  if (done) return <span className="pt-muted">{api.t('comments.ui.reported')}</span>;
-  if (reasons === null)
-    return (
-      <Button variant="ghost" onClick={() => void open()}>
-        {api.t('comments.ui.report')}
-      </Button>
-    );
   return (
-    <span className="pt-row">
-      <select className="pt-input" aria-label={api.t('comments.ui.reason')} defaultValue="" onChange={(e) => e.target.value && void send(e.target.value)}>
-        <option value="">{api.t('comments.ui.reason')}</option>
-        {reasons
-          .filter((c) => c !== 'other')
-          .map((c) => (
-            <option key={c} value={c}>
-              {api.t(`term:reports.reason.comment.${c}`) === `reports.reason.comment.${c}` ? c : api.t(`term:reports.reason.comment.${c}`)}
-            </option>
-          ))}
-      </select>
-      {err && <span className="pt-error">{err}</span>}
-    </span>
+    <Sheet
+      open={id !== null}
+      onClose={onClose}
+      title={api.t('comments.ui.report_title')}
+      footer={
+        <Button variant="danger" disabled={!code} onClick={() => void send()}>
+          {api.t('comments.ui.report')}
+        </Button>
+      }
+    >
+      <Field label={api.t('comments.ui.reason')}>
+        <Select value={code} onChange={(e) => setCode(e.target.value)} options={reasons.map((c) => ({ value: c, label: label(c) }))} />
+      </Field>
+    </Sheet>
   );
 }
 
-function Item({ api, c, onReply, onQuote, reload }: { api: PluginApi; c: Comment; onReply?: (c: Comment) => void; onQuote: (c: Comment) => void; reload(): void }) {
+function Item({ api, c, onReply, onQuote, onReport, reload }: { api: PluginApi; c: Comment; onReply?: (c: Comment) => void; onQuote: (c: Comment) => void; onReport(id: number): void; reload(): void }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [history, setHistory] = useState<{ editor_id: number; old_source: string; edited_at: number }[] | null>(null);
   const [thanks, setThanks] = useState({ n: c.thanks, mine: c.thanked_by_me });
   const me = api.user();
+  const name = c.author ? (c.author.username ?? `#${c.author.id}`) : '';
   async function startEdit() {
     const r = await api.json<{ source: string }>(`/api/p/comments/v1/comments/${c.id}?raw=1`);
     setEditing(r.source);
@@ -172,99 +195,101 @@ function Item({ api, c, onReply, onQuote, reload }: { api: PluginApi; c: Comment
     setThanks({ n: thanks.n + 1, mine: true });
   }
   return (
-    <div className="pt-comment" data-testid="comment" id={`comment-${c.id}`}>
-      <div className="pt-row pt-muted">
-        <Badge>#{c.floor}</Badge>
-        {c.author ? (
-          <a
-            href={`/users/${c.author.id}`}
-            onClick={(e) => {
-              e.preventDefault();
-              api.navigate(`/users/${c.author?.id}`);
-            }}
-          >
-            {c.author.username ?? `#${c.author.id}`}
-          </a>
-        ) : null}
-        {c.author && <Slot name="user.name.decorations" ctx={{ user_id: c.author.id, size: 'sm' }} className="user-deco" />}
-        <span>{new Date(c.created_at).toLocaleString()}</span>
-        {c.edited_at && (
-          <span>
-            ·{' '}
-            <button type="button" className="link-btn" title={api.t('comments.ui.history')} onClick={() => void toggleHistory()}>
+    <article className="cmt" data-testid="comment" id={`comment-${c.id}`}>
+      <Avatar name={name} size={36} />
+      <div className="cmt-b">
+        <div className="cmt-h">
+          {c.author && (
+            <PLink to={`/users/${c.author.id}`} navigate={api.navigate} className="u">
+              {name}
+            </PLink>
+          )}
+          {c.author && <Slot name="user.name.decorations" ctx={{ user_id: c.author.id, size: 'sm' }} className="user-deco" />}
+          <span className="muted" title={new Date(c.created_at).toLocaleString()}>
+            {rel(c.created_at)}
+          </span>
+          {c.edited_at && (
+            <button type="button" className="txt-btn tiny" title={api.t('comments.ui.history')} onClick={() => void toggleHistory()}>
               {api.t(history ? 'comments.ui.hide' : 'comments.ui.edited')}
             </button>
-          </span>
+          )}
+          <span className="floor">#{c.floor}</span>
+        </div>
+        {history && (
+          <div className="stack-s small muted cmt-hist">
+            {history.map((h, i) => (
+              <div key={i}>
+                {api.t('comments.ui.history_item', { at: new Date(h.edited_at).toLocaleString(), editor: h.editor_id })}
+                <pre className="json">{h.old_source}</pre>
+              </div>
+            ))}
+          </div>
+        )}
+        {c.deleted && !c.html ? (
+          <p className="muted small">{api.t('comments.ui.deleted')}</p>
+        ) : editing !== null ? (
+          <div className="stack-s">
+            <Textarea rows={4} value={editing} onChange={(e) => setEditing(e.target.value)} />
+            <div className="row">
+              <Button size="sm" variant="primary" onClick={() => void save()}>
+                {api.t('comments.ui.save')}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                {api.t('comments.ui.cancel')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <UserContent html={c.html ?? ''} />
+        )}
+        {!c.deleted && me && editing === null && (
+          <div className="cmt-acts">
+            {onReply && (
+              <button type="button" className="txt-btn" onClick={() => onReply(c)}>
+                {api.t('comments.ui.reply')}
+              </button>
+            )}
+            <button type="button" className="txt-btn" onClick={() => onQuote(c)}>
+              {api.t('comments.ui.quote')}
+            </button>
+            {c.author?.id !== me.id ? (
+              <button type="button" className="txt-btn" aria-pressed={thanks.mine} disabled={thanks.mine} onClick={() => void thank()}>
+                {api.t(thanks.mine ? 'comments.ui.thanked' : 'comments.ui.thanks', { n: thanks.n })}
+              </button>
+            ) : (
+              thanks.n > 0 && <span className="small muted">{api.t('comments.ui.thanked', { n: thanks.n })}</span>
+            )}
+            {c.can_edit && (
+              <button type="button" className="txt-btn" onClick={() => void startEdit()}>
+                {api.t('comments.ui.edit')}
+              </button>
+            )}
+            {c.can_delete && (
+              <button type="button" className="txt-btn" onClick={() => void remove()}>
+                {api.t('comments.ui.delete')}
+              </button>
+            )}
+            {c.author?.id !== me.id && (
+              <button type="button" className="txt-btn" onClick={() => onReport(c.id)}>
+                {api.t('comments.ui.report')}
+              </button>
+            )}
+          </div>
+        )}
+        {c.replies && c.replies.length > 0 && (
+          <div className="cmt-replies">
+            {c.replies.map((r) => (
+              <Item key={r.id} api={api} c={r} onQuote={onQuote} onReport={onReport} reload={reload} />
+            ))}
+          </div>
         )}
       </div>
-      {history && (
-        <div className="pt-stack pt-muted small">
-          {history.map((h, i) => (
-            <div key={i}>
-              {api.t('comments.ui.history_item', { at: new Date(h.edited_at).toLocaleString(), editor: h.editor_id })}
-              <pre className="pt-mono pt-prewrap">{h.old_source}</pre>
-            </div>
-          ))}
-        </div>
-      )}
-      {c.deleted && !c.html ? (
-        <p className="pt-muted">{api.t('comments.ui.deleted')}</p>
-      ) : editing !== null ? (
-        <div className="pt-stack">
-          <textarea className="pt-input" rows={4} value={editing} onChange={(e) => setEditing(e.target.value)} />
-          <span className="pt-row">
-            <Button variant="primary" onClick={() => void save()}>
-              {api.t('comments.ui.save')}
-            </Button>
-            <Button variant="ghost" onClick={() => setEditing(null)}>
-              {api.t('comments.ui.cancel')}
-            </Button>
-          </span>
-        </div>
-      ) : (
-        <UserContent html={c.html ?? ''} />
-      )}
-      {!c.deleted && me && editing === null && (
-        <div className="pt-row">
-          {onReply && (
-            <Button variant="ghost" onClick={() => onReply(c)}>
-              {api.t('comments.ui.reply')}
-            </Button>
-          )}
-          <Button variant="ghost" onClick={() => onQuote(c)}>
-            {api.t('comments.ui.quote')}
-          </Button>
-          {c.author?.id !== me.id && (
-            <Button variant="ghost" disabled={thanks.mine} onClick={() => void thank()}>
-              {api.t(thanks.mine ? 'comments.ui.thanked' : 'comments.ui.thanks', { n: thanks.n })}
-            </Button>
-          )}
-          {c.can_edit && (
-            <Button variant="ghost" onClick={() => void startEdit()}>
-              {api.t('comments.ui.edit')}
-            </Button>
-          )}
-          {c.can_delete && (
-            <Button variant="ghost" onClick={() => void remove()}>
-              {api.t('comments.ui.delete')}
-            </Button>
-          )}
-          {c.author?.id !== me.id && <ReportButton api={api} id={c.id} />}
-        </div>
-      )}
-      {c.replies && c.replies.length > 0 && (
-        <div className="pt-replies">
-          {c.replies.map((r) => (
-            <Item key={r.id} api={api} c={r} onQuote={onQuote} reload={reload} />
-          ))}
-        </div>
-      )}
-    </div>
+    </article>
   );
 }
 
 function CommentSection({ api, target }: { api: PluginApi; target: string }) {
-  const [items, setItems] = useState<Comment[]>([]);
+  const [items, setItems] = useState<Comment[] | null>(null);
   const [total, setTotal] = useState(0);
   const [cursor, setCursor] = useState<string | null>(null);
   const [body, setBody] = useState('');
@@ -272,6 +297,7 @@ function CommentSection({ api, target }: { api: PluginApi; target: string }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const [quoteOf, setQuoteOf] = useState<Comment | null>(null);
+  const [report, setReport] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
@@ -281,12 +307,15 @@ function CommentSection({ api, target }: { api: PluginApi; target: string }) {
     setTotal(r.total);
   }, [api, target]);
   useEffect(() => {
-    void load().catch((e) => setErr(errText(api, e)));
+    void load().catch((e) => {
+      setItems([]);
+      setErr(errText(api, e));
+    });
   }, [api, load]);
   async function more() {
     if (!cursor) return;
     const r = await api.json<{ items: Comment[]; next_cursor: string | null }>(`/api/p/comments/v1/targets/${target}/comments?cursor=${cursor}`);
-    setItems([...items, ...r.items]);
+    setItems([...(items ?? []), ...r.items]);
     setCursor(r.next_cursor);
   }
   async function post() {
@@ -314,59 +343,72 @@ function CommentSection({ api, target }: { api: PluginApi; target: string }) {
     setPreview(r.html);
   }
   return (
-    <Card title={api.t('comments.ui.count', { n: total })}>
-      {items.length === 0 && <Empty>—</Empty>}
-      {items.map((c) => (
-        <Item key={c.id} api={api} c={c} onReply={(x) => setReplyTo(x)} onQuote={(x) => setQuoteOf(x)} reload={() => void load()} />
-      ))}
-      {cursor && (
-        <Button variant="ghost" onClick={() => void more()}>
-          {api.t('comments.ui.more')}
-        </Button>
+    <section className="comments">
+      {items === null ? (
+        <SkeletonRows n={3} />
+      ) : items.length === 0 ? (
+        <Empty compact hint={api.user() ? api.t('comments.ui.empty_hint') : undefined}>
+          {api.t('comments.ui.empty')}
+        </Empty>
+      ) : (
+        <>
+          <p className="small muted">{api.t('comments.ui.count', { n: total })}</p>
+          {items.map((c) => (
+            <Item key={c.id} api={api} c={c} onReply={(x) => setReplyTo(x)} onQuote={(x) => setQuoteOf(x)} onReport={setReport} reload={() => void load()} />
+          ))}
+        </>
       )}
+      {cursor && <LoadMore onClick={() => void more()} label={api.t('comments.ui.more')} />}
       {api.user() && (
-        <div className="pt-stack">
-          {replyTo && (
-            <span className="pt-row pt-muted">
-              {api.t('comments.ui.replying', { floor: replyTo.floor })}
-              <Button variant="ghost" onClick={() => setReplyTo(null)}>
-                ✕
-              </Button>
-            </span>
+        <form
+          className="cmt-compose"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void post();
+          }}
+        >
+          {(replyTo || quoteOf) && (
+            <div className="row small muted">
+              {replyTo && api.t('comments.ui.replying', { floor: replyTo.floor })}
+              {quoteOf && api.t('comments.ui.quoting', { floor: quoteOf.floor })}
+              <button
+                type="button"
+                className="txt-btn"
+                onClick={() => {
+                  setReplyTo(null);
+                  setQuoteOf(null);
+                }}
+              >
+                {api.t('comments.ui.cancel')}
+              </button>
+            </div>
           )}
-          {quoteOf && (
-            <span className="pt-row pt-muted">
-              {api.t('comments.ui.quoting', { floor: quoteOf.floor })}
-              <Button variant="ghost" onClick={() => setQuoteOf(null)}>
-                ✕
-              </Button>
-            </span>
+          {preview === null ? (
+            <Textarea rows={4} aria-label={api.t('comments.ui.placeholder')} placeholder={api.t('comments.ui.placeholder')} value={body} onChange={(e) => setBody(e.target.value)} />
+          ) : (
+            <UserContent html={preview} className="cmt-preview" />
           )}
-          <textarea
-            className="pt-input"
-            rows={4}
-            aria-label={api.t('comments.ui.placeholder')}
-            placeholder={api.t('comments.ui.placeholder')}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
-          <span className="pt-row">
-            <select className="pt-input" value={markup} onChange={(e) => setMarkup(e.target.value as 'markdown' | 'bbcode')}>
-              <option value="markdown">Markdown</option>
-              <option value="bbcode">BBCode</option>
-            </select>
-            <Button variant="ghost" disabled={!body.trim()} onClick={() => void doPreview()}>
-              {api.t('comments.ui.preview')}
+          <div className="form-acts">
+            <Segmented
+              value={markup}
+              onChange={(v) => setMarkup(v)}
+              options={[
+                { value: 'markdown', label: 'Markdown' },
+                { value: 'bbcode', label: 'BBCode' },
+              ]}
+            />
+            <Button size="sm" variant="ghost" disabled={!body.trim()} onClick={() => (preview === null ? void doPreview() : setPreview(null))}>
+              {api.t(preview === null ? 'comments.ui.preview' : 'comments.ui.write')}
             </Button>
-            <Button variant="primary" disabled={busy || !body.trim()} onClick={() => void post()}>
+            <Button type="submit" variant="primary" className="push-right" disabled={busy || !body.trim()}>
               {api.t('comments.ui.post')}
             </Button>
-          </span>
-          {err && <p className="pt-error">{err}</p>}
-          {preview !== null && <UserContent html={preview} className="pt-preview" />}
-        </div>
+          </div>
+          {err && <Note tone="bad">{err}</Note>}
+        </form>
       )}
-    </Card>
+      <ReportSheet api={api} id={report} onClose={() => setReport(null)} />
+    </section>
   );
 }
 
@@ -382,7 +424,7 @@ function RequestSection({ api, ctx }: SlotProps<{ request: { id: number } }>) {
   return <CommentSection api={api} target={`request:${ctx.request.id}`} />;
 }
 
-/** 个人页“评论”标签：该用户最近 50 条可见评论（只列出查看者可见的目标） */
+/** 个人页「评论」页签：该用户最近 50 条可见评论（只列出查看者可见的目标） */
 function ProfileTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   const [rows, setRows] = useState<{ id: number; target: string; floor: number; excerpt: string | null; created_at: number }[] | null>(null);
   useEffect(() => {
@@ -391,8 +433,8 @@ function ProfileTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
       .then((r) => setRows(r.items))
       .catch(() => setRows([]));
   }, [api, ctx.profile.id]);
-  if (!rows) return null;
-  if (rows.length === 0) return <Empty>—</Empty>;
+  if (!rows) return <SkeletonRows n={3} />;
+  if (rows.length === 0) return <Empty compact>{api.t('comments.ui.empty')}</Empty>;
   const where = (target: string, id: number): [string, string] => {
     const [kind, tid] = target.split(':');
     if (kind === 'torrent') return [`/torrents/${tid}#comment-${id}`, api.t('comments.ui.on_torrent', { id: tid })];
@@ -401,29 +443,23 @@ function ProfileTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
     return ['', target];
   };
   return (
-    <div className="pt-stack">
+    <div className="stack-s">
       {rows.map((r) => {
         const [to, label] = where(r.target, r.id);
         return (
-          <div key={r.id} className="pt-comment">
-            <div className="pt-row pt-muted small">
+          <div key={r.id} className="cmt-line">
+            <div className="row small muted">
               {to ? (
-                <a
-                  href={to}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    api.navigate(to);
-                  }}
-                >
+                <PLink to={to} navigate={api.navigate} className="link">
                   {label}
-                </a>
+                </PLink>
               ) : (
                 label
               )}
-              <Badge>#{r.floor}</Badge>
-              <span>{new Date(r.created_at).toLocaleString()}</span>
+              <span>#{r.floor}</span>
+              <span>{rel(r.created_at)}</span>
             </div>
-            <p>{r.excerpt}</p>
+            <p className="small">{r.excerpt}</p>
           </div>
         );
       })}

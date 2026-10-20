@@ -17,7 +17,7 @@ export function ErrorText({ error }: { error: unknown }) {
   const text = useErrorText();
   if (!error) return null;
   return (
-    <p className="pt-field-error" role="alert">
+    <p className="pt-error" role="alert">
       {text(error)}
     </p>
   );

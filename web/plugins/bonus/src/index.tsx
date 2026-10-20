@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Stat, Table, Tabs } from '@pt-studio/ui-kit';
+import { Kpis, LoadMore, NavItem, PageHead, Panel, PLink, SkeletonRows, Stat, Status, Table, Tabs } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'bonus.ui.menu': '魔力值',
@@ -14,6 +14,10 @@ registerMessages('zh-CN', {
   'bonus.ui.empty': '暂无记录',
   'bonus.ui.reversed': '已冲正',
   'bonus.ui.balance_after': '余额 {n}',
+  'bonus.ui.time': '时间',
+  'bonus.ui.event': '事项',
+  'bonus.ui.amount': '收支',
+  'bonus.ui.after': '余额',
   'bonus.reason.bonus.seeding': '做种奖励',
   'bonus.reason.bonus.award': '奖励',
   'bonus.reason.checkin.daily': '每日签到',
@@ -38,6 +42,10 @@ registerMessages('en', {
   'bonus.ui.empty': 'No entries',
   'bonus.ui.reversed': 'reversed',
   'bonus.ui.balance_after': 'balance {n}',
+  'bonus.ui.time': 'Time',
+  'bonus.ui.event': 'Event',
+  'bonus.ui.amount': 'Amount',
+  'bonus.ui.after': 'Balance',
   'bonus.reason.bonus.seeding': 'Seeding reward',
   'bonus.reason.bonus.award': 'Reward',
   'bonus.reason.checkin.daily': 'Daily check-in',
@@ -79,7 +87,16 @@ function BonusStat({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   return (
     <>
       {s.balances.map((b) => (
-        <Stat key={b.currency} label={<a href="/p/bonus/" onClick={(e) => (e.preventDefault(), api.navigate('/p/bonus/'))}>{api.t(`term:${b.name_term}`)}</a>} value={fmt(b.balance, b.scale)} />
+        <Stat
+          key={b.currency}
+          label={
+            <PLink to="/p/bonus/" navigate={api.navigate}>
+              {api.t(`term:${b.name_term}`)}
+            </PLink>
+          }
+          value={fmt(b.balance, b.scale)}
+          tone="gold"
+        />
       ))}
     </>
   );
@@ -107,7 +124,7 @@ function reasonText(api: PluginApi, r: string): string {
 function History({ api }: { api: PluginApi }) {
   const [s, setS] = useState<Summary | null>(null);
   const [cur, setCur] = useState('');
-  const [rows, setRows] = useState<Entry[]>([]);
+  const [rows, setRows] = useState<Entry[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const load = useCallback(
     async (cursor: string | null) => {
@@ -115,96 +132,87 @@ function History({ api }: { api: PluginApi }) {
       if (cur) q.set('currency', cur);
       if (cursor) q.set('cursor', cursor);
       const r = await api.json<{ items: Entry[]; next_cursor: string | null }>(`/api/p/ledger/v1/users/me/entries?${q.toString()}`);
-      setRows((old) => (cursor ? [...old, ...r.items] : r.items));
+      setRows((old) => (cursor ? [...(old ?? []), ...r.items] : r.items));
       setNext(r.next_cursor);
     },
     [api, cur],
   );
   useEffect(() => {
-    void api.json<Summary>('/api/p/bonus/v1/users/me/summary').then(setS);
+    void api.json<Summary>('/api/p/bonus/v1/users/me/summary').then(setS).catch(() => undefined);
   }, [api]);
   useEffect(() => {
-    void load(null);
+    void load(null).catch(() => setRows([]));
   }, [load]);
   const scaleOf = (c: string) => s?.balances.find((b) => b.currency === c)?.scale ?? 0;
   return (
-    <div className="pt-stack">
-      <div className="page-head">
-        <h1 className="page-title">{api.t('bonus.ui.history')}</h1>
-        <a
-          className="pt-btn"
-          href="/p/ledger/transfer"
-          onClick={(e) => {
-            e.preventDefault();
-            api.navigate('/p/ledger/transfer');
-          }}
-        >
-          {api.t('bonus.ui.transfer')}
-        </a>
-      </div>
+    <div className="stack">
+      <PageHead
+        title={api.t('bonus.ui.history')}
+        actions={
+          <PLink to="/p/ledger/transfer" navigate={api.navigate} className="btn">
+            {api.t('bonus.ui.transfer')}
+          </PLink>
+        }
+      />
       {s && (
-        <Card>
-          <div className="pt-row stats-row">
-            {s.balances.map((b) => (
-              <Stat key={b.currency} label={api.t(`term:${b.name_term}`)} value={fmt(b.balance, b.scale)} hint={api.t('bonus.ui.available', { n: fmt(b.available, b.scale) })} />
-            ))}
-          </div>
-        </Card>
+        <Kpis
+          items={s.balances.map((b) => ({ label: api.t(`term:${b.name_term}`), value: fmt(b.balance, b.scale), hint: api.t('bonus.ui.available', { n: fmt(b.available, b.scale) }), tone: 'gold' as const }))}
+        />
       )}
-      <Card>
+      <Panel flush primary>
         {s && s.balances.length > 1 && (
           <Tabs
+            variant="flush"
             value={cur}
             onChange={setCur}
             tabs={[{ id: '', label: api.t('bonus.ui.all') }, ...s.balances.map((b) => ({ id: b.currency, label: api.t(`term:${b.name_term}`) }))]}
           />
         )}
-        <Table
-          rows={rows}
-          rowKey={(r) => `${r.entry_id}:${r.currency}`}
-          empty={api.t('bonus.ui.empty')}
-          columns={[
-            { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-            {
-              key: 'r',
-              header: '',
-              render: (r) => (
-                <>
-                  {reasonText(api, r.reason)} {r.reversed && <Badge>{api.t('bonus.ui.reversed')}</Badge>}
-                  {r.memo && <div className="pt-muted small">{r.memo}</div>}
-                </>
-              ),
-            },
-            {
-              key: 'a',
-              header: '',
-              render: (r) => (
-                <span className={r.amount >= 0 ? 'ledger-in' : 'ledger-out'}>
-                  {r.amount >= 0 ? '+' : ''}
-                  {fmt(r.amount, scaleOf(r.currency))}
-                </span>
-              ),
-            },
-            { key: 'b', header: '', render: (r) => <span className="pt-muted small">{api.t('bonus.ui.balance_after', { n: fmt(r.balance_after, scaleOf(r.currency)) })}</span> },
-          ]}
-        />
-        {next && <Button onClick={() => void load(next)}>{api.t('bonus.ui.more')}</Button>}
-      </Card>
+        {rows === null ? (
+          <SkeletonRows n={6} />
+        ) : (
+          <Table
+            rows={rows}
+            rowKey={(r) => `${r.entry_id}:${r.currency}`}
+            empty={api.t('bonus.ui.empty')}
+            columns={[
+              { key: 't', header: api.t('bonus.ui.time'), render: (r) => <span className="small muted nowrap num">{new Date(r.created_at).toLocaleString()}</span> },
+              {
+                key: 'r',
+                header: api.t('bonus.ui.event'),
+                render: (r) => (
+                  <>
+                    {reasonText(api, r.reason)} {r.reversed && <Status tone="mute">{api.t('bonus.ui.reversed')}</Status>}
+                    {r.memo && <div className="tiny muted">{r.memo}</div>}
+                  </>
+                ),
+              },
+              {
+                key: 'a',
+                header: api.t('bonus.ui.amount'),
+                right: true,
+                render: (r) => (
+                  <span className={r.amount >= 0 ? 'num up' : 'num down'}>
+                    {r.amount >= 0 ? '+' : ''}
+                    {fmt(r.amount, scaleOf(r.currency))}
+                  </span>
+                ),
+              },
+              { key: 'b', header: api.t('bonus.ui.after'), right: true, render: (r) => <span className="num muted">{fmt(r.balance_after, scaleOf(r.currency))}</span> },
+            ]}
+          />
+        )}
+        {next && <LoadMore onClick={() => void load(next)} label={api.t('bonus.ui.more')} />}
+      </Panel>
     </div>
   );
 }
 
 function MenuItem({ api }: SlotProps) {
   return (
-    <a
-      href="/p/bonus/"
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate('/p/bonus/');
-      }}
-    >
+    <NavItem to="/p/bonus/" navigate={api.navigate}>
       {api.t('bonus.ui.menu')}
-    </a>
+    </NavItem>
   );
 }
 

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { PluginApi, PluginFrontend } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Card, Table, Tabs } from '@pt-studio/ui-kit';
+import { PageHead, Panel, PLink, SkeletonRows, Status, Table, Tabs } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'ai-moderation.ui.title': 'AI 内容审核',
@@ -45,57 +45,72 @@ interface Flag {
 }
 
 function Page({ api }: { api: PluginApi }) {
-  const [stats, setStats] = useState<Stat[]>([]);
+  const [stats, setStats] = useState<Stat[] | null>(null);
   const [state, setState] = useState('');
-  const [flags, setFlags] = useState<Flag[]>([]);
+  const [flags, setFlags] = useState<Flag[] | null>(null);
   useEffect(() => {
-    void api.json<{ items: Stat[] }>('/api/p/ai-moderation/v1/admin/stats').then((r) => setStats(r.items));
+    void api
+      .json<{ items: Stat[] }>('/api/p/ai-moderation/v1/admin/stats')
+      .then((r) => setStats(r.items))
+      .catch(() => setStats([]));
   }, [api]);
   useEffect(() => {
-    void api.json<{ items: Flag[] }>(`/api/p/ai-moderation/v1/admin/flags${state ? `?state=${state}` : ''}`).then((r) => setFlags(r.items));
+    setFlags(null);
+    void api
+      .json<{ items: Flag[] }>(`/api/p/ai-moderation/v1/admin/flags${state ? `?state=${state}` : ''}`)
+      .then((r) => setFlags(r.items))
+      .catch(() => setFlags([]));
   }, [api, state]);
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('ai-moderation.ui.title')}</h1>
-      <Card title={api.t('ai-moderation.ui.stats')}>
-        <Table
-          rows={stats}
-          rowKey={(r) => r.category}
-          columns={[
-            { key: 'c', header: api.t('ai-moderation.ui.category'), render: (r) => r.category },
-            { key: 'n', header: api.t('ai-moderation.ui.reported'), render: (r) => r.reported },
-            { key: 'o', header: '✓ / ✗', render: (r) => `${r.true_positive} / ${r.false_positive}` },
-            { key: 'p', header: api.t('ai-moderation.ui.precision'), render: (r) => (r.precision === null ? '—' : `${(r.precision * 100).toFixed(1)}%`) },
-          ]}
-        />
-      </Card>
-      <Card title={api.t('ai-moderation.ui.flags')}>
-        <Tabs
-          value={state}
-          onChange={setState}
-          tabs={['', 'reported', 'review', 'dismissed'].map((s) => ({ id: s, label: s || api.t('ai-moderation.ui.all') }))}
-        />
-        <Table
-          rows={flags}
-          rowKey={(r) => r.id}
-          columns={[
-            { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-            { key: 'g', header: '', render: (r) => <code>{r.target}</code> },
-            { key: 'c', header: '', render: (r) => <>{r.max_category} {r.max_score !== null && <span className="pt-muted small">{r.max_score.toFixed(2)}</span>}</> },
-            { key: 's', header: '', render: (r) => <Badge tone={r.outcome === 'true_positive' ? 'danger' : 'muted'}>{r.outcome ?? r.state}</Badge> },
-            {
-              key: 'r',
-              header: '',
-              render: (r) =>
-                r.report_case_id ? (
-                  <a href="/admin/p/moderation/" onClick={(e) => (e.preventDefault(), api.navigate('/admin/p/moderation/'))}>
-                    {api.t('ai-moderation.ui.case', { id: r.report_case_id })}
-                  </a>
-                ) : null,
-            },
-          ]}
-        />
-      </Card>
+    <div className="stack">
+      <PageHead title={api.t('ai-moderation.ui.title')} />
+      <Panel title={api.t('ai-moderation.ui.stats')} flush>
+        {stats === null ? (
+          <SkeletonRows n={3} />
+        ) : (
+          <Table
+            rows={stats}
+            rowKey={(r) => r.category}
+            empty="—"
+            columns={[
+              { key: 'c', header: api.t('ai-moderation.ui.category'), render: (r) => <b>{r.category}</b> },
+              { key: 'n', header: api.t('ai-moderation.ui.reported'), right: true, render: (r) => <span className="num">{r.reported}</span> },
+              { key: 'o', header: '✓ / ✗', right: true, render: (r) => <span className="num"><span className="up">{r.true_positive}</span> / <span className="down">{r.false_positive}</span></span> },
+              { key: 'p', header: api.t('ai-moderation.ui.precision'), right: true, render: (r) => <span className="num">{r.precision === null ? '—' : `${(r.precision * 100).toFixed(1)}%`}</span> },
+            ]}
+          />
+        )}
+      </Panel>
+      <Panel title={api.t('ai-moderation.ui.flags')} flush primary>
+        <Tabs variant="flush" value={state} onChange={setState} tabs={['', 'reported', 'review', 'dismissed'].map((s) => ({ id: s, label: s || api.t('ai-moderation.ui.all') }))} />
+        {flags === null ? (
+          <SkeletonRows n={4} />
+        ) : (
+          <Table
+            rows={flags}
+            rowKey={(r) => r.id}
+            empty="—"
+            minWidth={640}
+            columns={[
+              { key: 't', header: '', render: (r) => <span className="small muted num nowrap">{new Date(r.created_at).toLocaleString()}</span> },
+              { key: 'g', header: '', render: (r) => <span className="pt-mono small">{r.target}</span> },
+              { key: 'c', header: '', render: (r) => <>{r.max_category} {r.max_score !== null && <span className="tiny muted num">{r.max_score.toFixed(2)}</span>}</> },
+              { key: 's', header: '', render: (r) => <Status tone={r.outcome === 'true_positive' ? 'bad' : r.outcome === 'false_positive' ? 'ok' : 'mute'}>{r.outcome ?? r.state}</Status> },
+              {
+                key: 'r',
+                header: '',
+                right: true,
+                render: (r) =>
+                  r.report_case_id ? (
+                    <PLink to="/admin/p/moderation/" navigate={api.navigate}>
+                      {api.t('ai-moderation.ui.case', { id: r.report_case_id })}
+                    </PLink>
+                  ) : null,
+              },
+            ]}
+          />
+        )}
+      </Panel>
     </div>
   );
 }

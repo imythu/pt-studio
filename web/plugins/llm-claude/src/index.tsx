@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Button, Card, Table, Tabs } from '@pt-studio/ui-kit';
+import { Button, Kpis, Note, PageHead, Panel, Table, Tabs } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'llm-claude.ui.title': 'Claude 模型',
@@ -53,7 +53,10 @@ function Page({ api }: { api: PluginApi }) {
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    void api.json<{ items: Row[] }>(`/api/p/llm-claude/v1/admin/usage?group_by=${by}`).then((r) => setRows(r.items));
+    void api
+      .json<{ items: Row[] }>(`/api/p/llm-claude/v1/admin/usage?group_by=${by}`)
+      .then((r) => setRows(r.items))
+      .catch((e: unknown) => setResult(errText(api, e)));
   }, [api, by]);
   const test = async () => {
     setBusy(true);
@@ -66,11 +69,29 @@ function Page({ api }: { api: PluginApi }) {
       setBusy(false);
     }
   };
+  const sum = (k: keyof Omit<Row, 'key'>) => rows.reduce((t, r) => t + r[k], 0);
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('llm-claude.ui.title')}</h1>
-      <Card title={api.t('llm-claude.ui.usage')}>
+    <div className="stack">
+      <PageHead
+        title={api.t('llm-claude.ui.title')}
+        actions={
+          <Button onClick={() => void test()} disabled={busy}>
+            {api.t('llm-claude.ui.test')}
+          </Button>
+        }
+      />
+      {result && <Note tone="info">{result}</Note>}
+      <Kpis
+        items={[
+          { label: api.t('llm-claude.ui.calls'), value: n(sum('calls')) },
+          { label: api.t('llm-claude.ui.input'), value: n(sum('input_tokens')), hint: `${api.t('llm-claude.ui.cached')} ${n(sum('cached_input_tokens'))}` },
+          { label: api.t('llm-claude.ui.output'), value: n(sum('output_tokens')) },
+          { label: api.t('llm-claude.ui.refusals'), value: n(sum('refusals')), tone: sum('refusals') > 0 ? 'down' : undefined },
+        ]}
+      />
+      <Panel flush primary title={api.t('llm-claude.ui.usage')}>
         <Tabs
+          variant="flush"
           value={by}
           onChange={setBy}
           tabs={[
@@ -82,21 +103,16 @@ function Page({ api }: { api: PluginApi }) {
         <Table
           rows={rows}
           rowKey={(r) => r.key}
+          empty="—"
           columns={[
-            { key: 'k', header: '', render: (r) => <code>{r.key}</code> },
-            { key: 'c', header: api.t('llm-claude.ui.calls'), render: (r) => n(r.calls) },
-            { key: 'i', header: api.t('llm-claude.ui.input'), render: (r) => <>{n(r.input_tokens)} <span className="pt-muted small">({api.t('llm-claude.ui.cached')} {n(r.cached_input_tokens)})</span></> },
-            { key: 'o', header: api.t('llm-claude.ui.output'), render: (r) => n(r.output_tokens) },
-            { key: 'r', header: api.t('llm-claude.ui.refusals'), render: (r) => n(r.refusals) },
+            { key: 'k', header: api.t(`llm-claude.ui.by_${by}`), render: (r) => <span className="pt-mono small">{r.key}</span> },
+            { key: 'c', header: api.t('llm-claude.ui.calls'), right: true, render: (r) => <span className="num">{n(r.calls)}</span> },
+            { key: 'i', header: api.t('llm-claude.ui.input'), right: true, render: (r) => <span className="num">{n(r.input_tokens)} <span className="tiny muted">{`${api.t('llm-claude.ui.cached')} ${n(r.cached_input_tokens)}`}</span></span> },
+            { key: 'o', header: api.t('llm-claude.ui.output'), right: true, render: (r) => <span className="num">{n(r.output_tokens)}</span> },
+            { key: 'r', header: api.t('llm-claude.ui.refusals'), right: true, render: (r) => <span className={r.refusals ? 'num down' : 'num muted'}>{n(r.refusals)}</span> },
           ]}
         />
-      </Card>
-      <Card title={api.t('llm-claude.ui.test')}>
-        <Button onClick={() => void test()} disabled={busy}>
-          {api.t('llm-claude.ui.test')}
-        </Button>
-        {result && <p>{result}</p>}
-      </Card>
+      </Panel>
     </div>
   );
 }

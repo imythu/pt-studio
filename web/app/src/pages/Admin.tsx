@@ -1,123 +1,133 @@
-// 后台：插件列表（卡片、搜索、按可配置筛选）、插件设置（schema 可视化表单 + JSON 视图、未保存提示 / 恢复默认 / 插件自定义组件）、插件后台页面。
+// 后台：首页（插件 admin.dashboard.widgets + 常用入口）、插件列表、插件设置（schema 表单 / JSON、未保存提示、恢复默认、插件自定义组件）、插件后台页面。
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
-import { api } from '@pt-studio/sdk';
+import { api, ApiError } from '@pt-studio/sdk';
 import { PluginPage, Slot, usePluginApi, usePluginSettings } from '@pt-studio/slots';
 import { JsonField, SchemaForm, same, serverErrors, validate, withDefaults, type Errors, type Schema } from '@pt-studio/schema-form';
 import { useT } from '@pt-studio/terms';
-import { Badge, Button, Card, Empty, Spinner, Tabs, useToast } from '@pt-studio/ui-kit';
-import { ApiError } from '@pt-studio/sdk';
+import { Button, Empty, Input, Note, PageHead, Panel, Segmented, SkeletonRows, Spinner, Tag, useToast } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { useManifest } from '../manifest';
 import { useSession } from '../session';
+import { pluginLabel, usePluginList, type PluginInfo as NavPlugin } from '../shell/Layout';
 
-interface PluginInfo {
-  id: string;
-  name: string;
-  name_term?: string | null;
+interface PluginInfo extends NavPlugin {
   description?: string;
   version: string;
   kind: string;
-  /** 后台设置入口：`schema` 可视化表单、`custom` 插件自带组件、`none` 未声明 */
   settings?: 'schema' | 'custom' | 'none';
-  admin_routes?: string[];
 }
 
-function usePlugins() {
-  return useQuery({ queryKey: ['kernel-plugins'], queryFn: () => api<{ items: PluginInfo[] }>('/api/kernel/v1/plugins') });
-}
-
-/** 插件显示名：术语优先 */
-function displayName(p: PluginInfo, t: (k: string) => string): string {
-  if (p.name_term) {
-    const v = t(`term:${p.name_term}`);
-    if (v !== p.name_term) return v;
-  }
-  return p.name;
-}
-
-/** 插件后台页入口：`/admin/p/x/*` → `/admin/p/x/` */
-function adminHref(p: PluginInfo): string | null {
+const adminHref = (p: PluginInfo): string | null => {
   const r = p.admin_routes?.[0];
   return r ? r.replace(/\*$/, '') : null;
-}
-
-type Filter = 'configurable' | 'all';
+};
 
 export function AdminHome() {
   const t = useT();
   const s = useSession();
+  const list = usePluginList();
+  const items = (list.data?.items ?? []) as PluginInfo[];
+  const withAdmin = items.filter((p) => adminHref(p));
+  return (
+    <div className="stack">
+      <PageHead title={t('ui.admin.dashboard')} lede={t('ui.admin.hello', { name: s.me?.username ?? '' })} />
+      <Slot name="admin.dashboard.widgets" ctx={{ user: s.me }} className="g2 dash-widgets" />
+      <Panel title={t('ui.admin.shortcuts')} flush primary>
+        <div className="plug-grid">
+          {s.can('identity.users.read') && (
+            <Link className="plug" to="/admin/users">
+              <b>{t('ui.admin.users')}</b>
+              <span className="tiny muted">{t('ui.admin.users_hint')}</span>
+            </Link>
+          )}
+          {s.can('kernel.audit.read') && (
+            <Link className="plug" to="/admin/audit">
+              <b>{t('ui.audit.title')}</b>
+              <span className="tiny muted">{t('ui.admin.audit_hint')}</span>
+            </Link>
+          )}
+          <Link className="plug" to="/admin/plugins">
+            <b>{t('ui.admin.plugins')}</b>
+            <span className="tiny muted">{t('ui.admin.plugins_n', { n: items.length })}</span>
+          </Link>
+          {withAdmin.map((p) => (
+            <Link key={p.id} className="plug" to={adminHref(p) as string}>
+              <b>{pluginLabel(p, t)}</b>
+              <span className="mono">{p.id}</span>
+            </Link>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+export function AdminPlugins() {
+  const t = useT();
   const m = useManifest();
-  const list = usePlugins();
+  const list = usePluginList();
   const fe = new Map(m.plugins.map((p) => [p.id, p]));
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<Filter>('configurable');
-  const all = list.data?.items ?? [];
+  const [filter, setFilter] = useState<'configurable' | 'all'>('configurable');
+  const all = (list.data?.items ?? []) as PluginInfo[];
   const needle = q.trim().toLowerCase();
   const rows = all
     .filter((p) => filter === 'all' || p.settings !== 'none' || adminHref(p))
-    .filter((p) => !needle || [p.id, p.name, displayName(p, t), p.description ?? ''].some((x) => x.toLowerCase().includes(needle)));
+    .filter((p) => !needle || [p.id, p.name, pluginLabel(p, t), p.description ?? ''].some((x) => x.toLowerCase().includes(needle)));
   return (
-    <div>
-      <h1>{t('ui.admin.title')}</h1>
-      <nav className="admin-nav">
-        {s.can('identity.users.read') && <Link to="/admin/users">{t('ui.admin.users')}</Link>}{' '}
-        {s.can('kernel.audit.read') && <Link to="/admin/audit">{t('ui.audit.title')}</Link>} <Slot name="nav.admin" ctx={{ user: s.me }} />
-      </nav>
-      <Slot name="admin.dashboard.widgets" ctx={{ user: s.me }} />
-      <Card
-        title={`${t('ui.admin.plugins')} · ${all.length}`}
-        actions={
-          <div className="plugin-toolbar">
-            <input className="pt-input" type="search" placeholder={t('ui.admin.plugin_search')} value={q} onChange={(e) => setQ(e.target.value)} />
-            <Tabs
-              value={filter}
-              onChange={(v) => setFilter(v as Filter)}
-              tabs={[
-                { id: 'configurable', label: t('ui.admin.filter_configurable') },
-                { id: 'all', label: t('ui.admin.filter_all') },
-              ]}
-            />
-          </div>
-        }
-      >
+    <div className="stack">
+      <PageHead title={t('ui.admin.plugins')} lede={t('ui.admin.plugins_lede', { n: all.length })} />
+      <Panel flush primary>
+        <div className="fbar">
+          <Input type="search" placeholder={t('ui.admin.plugin_search')} value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} />
+          <span className="grow" />
+          <Segmented
+            value={filter}
+            onChange={(v) => setFilter(v)}
+            options={[
+              { value: 'configurable', label: t('ui.admin.filter_configurable') },
+              { value: 'all', label: t('ui.admin.filter_all') },
+            ]}
+          />
+        </div>
         {list.isLoading ? (
-          <Spinner />
+          <SkeletonRows n={6} />
         ) : list.error ? (
-          <ErrorText error={list.error} />
+          <div className="pad">
+            <ErrorText error={list.error} />
+          </div>
         ) : rows.length === 0 ? (
           <Empty>{t('ui.admin.no_plugins')}</Empty>
         ) : (
-          <div className="plugin-grid">
+          <div className="plug-grid">
             {rows.map((p) => {
               const admin = adminHref(p);
               return (
-                <div key={p.id} className="plugin-card">
-                  <div className="plugin-card-head">
-                    <div>
-                      <div className="plugin-card-name">{displayName(p, t)}</div>
-                      <div className="pt-muted pt-mono">
-                        {p.id} · v{p.version}
-                      </div>
-                    </div>
-                    <span>
-                      <Badge>{p.kind}</Badge>
-                      {fe.get(p.id)?.entry && <Badge tone="primary">UI</Badge>}
+                <div key={p.id} className="plug">
+                  <div className="row-sb">
+                    <b>{pluginLabel(p, t)}</b>
+                    <span className="row" style={{ gap: 4 }}>
+                      <Tag>{p.kind}</Tag>
+                      {fe.get(p.id)?.entry && <Tag tone="o">UI</Tag>}
                     </span>
                   </div>
-                  {p.description && <p className="plugin-card-desc">{p.description}</p>}
-                  <div className="plugin-card-foot">
-                    {p.settings === 'none' ? (
-                      <span className="pt-muted">{t('ui.admin.no_settings')}</span>
-                    ) : (
-                      <Link className="pt-btn" to={`/admin/p/${p.id}/settings`}>
+                  <span className="mono">
+                    {p.id} · v{p.version}
+                  </span>
+                  {p.description && <p className="tiny">{p.description}</p>}
+                  <div className="row plug-acts">
+                    {p.settings !== 'none' ? (
+                      <Link className="btn btn-xs" to={`/admin/p/${p.id}/settings`}>
                         {t('ui.admin.settings')}
                       </Link>
+                    ) : (
+                      <span className="tiny muted">{t('ui.admin.no_settings')}</span>
                     )}
                     {admin && (
-                      <Link className="pt-btn pt-btn-ghost" to={admin}>
-                        {t('ui.admin.manage')} →
+                      <Link className="btn btn-xs btn-ghost" to={admin}>
+                        {t('ui.admin.manage')}
                       </Link>
                     )}
                   </div>
@@ -126,7 +136,7 @@ export function AdminHome() {
             })}
           </div>
         )}
-      </Card>
+      </Panel>
     </div>
   );
 }
@@ -144,28 +154,48 @@ function CustomSettings({ pluginId }: { pluginId: string }) {
   return C ? <C api={apiFor} /> : null;
 }
 
-function SettingsHeader({ pluginId, info }: { pluginId: string; info?: PluginInfo }) {
+function SettingsHead({ pluginId, info }: { pluginId: string; info?: PluginInfo }) {
   const t = useT();
   const admin = info && adminHref(info);
   return (
-    <div className="settings-head">
-      <Link to="/admin" className="pt-muted">
-        ← {t('ui.admin.plugins')}
-      </Link>
-      <h1>
-        {info ? displayName(info, t) : pluginId} <span className="pt-muted settings-head-sub">{t('ui.admin.settings')}</span>
-      </h1>
-      <div className="pt-muted">
-        <span className="pt-mono">
-          {pluginId}
-          {info && ` · v${info.version}`}
-        </span>
-        {info && <Badge>{info.kind}</Badge>}
-        {admin && <Link to={admin}>{t('ui.admin.manage')} →</Link>}
-      </div>
-      {info?.description && <p className="settings-head-desc">{info.description}</p>}
-    </div>
+    <PageHead
+      crumb={
+        <>
+          <Link to="/admin/plugins">{t('ui.admin.plugins')}</Link>
+          <span>{pluginId}</span>
+        </>
+      }
+      title={
+        <>
+          {info ? pluginLabel(info, t) : pluginId} <span className="muted h-sub">{t('ui.admin.settings')}</span>
+        </>
+      }
+      lede={
+        <>
+          <span className="mono">
+            {pluginId}
+            {info && ` · v${info.version} · ${info.kind}`}
+          </span>
+          {info?.description && <> · {info.description}</>}
+        </>
+      }
+      actions={
+        admin && (
+          <Link className="btn btn-sm" to={admin}>
+            {t('ui.admin.manage')}
+          </Link>
+        )
+      }
+    />
   );
+}
+
+/** 改动的顶层字段（显示名） */
+function changedKeys(schema: Schema, draft: unknown, base: unknown): string[] {
+  const d = (draft ?? {}) as Record<string, unknown>;
+  const b = (base ?? {}) as Record<string, unknown>;
+  const keys = new Set([...Object.keys(d), ...Object.keys(b)]);
+  return [...keys].filter((k) => !same(d[k], b[k])).map((k) => schema.properties?.[k]?.title ?? k);
 }
 
 export function PluginSettings({ pluginId }: { pluginId: string }) {
@@ -175,7 +205,7 @@ export function PluginSettings({ pluginId }: { pluginId: string }) {
   const qc = useQueryClient();
   const key = ['plugin-settings', pluginId];
   const q = useQuery({ queryKey: key, queryFn: () => api<SettingsResp>(`/api/kernel/v1/admin/plugins/${pluginId}/settings`) });
-  const info = usePlugins().data?.items.find((p) => p.id === pluginId);
+  const info = (usePluginList().data?.items as PluginInfo[] | undefined)?.find((p) => p.id === pluginId);
   const [draft, setDraft] = useState<unknown>(undefined);
   const [errors, setErrors] = useState<Errors>({});
   const [mode, setMode] = useState<'form' | 'json'>('form');
@@ -192,12 +222,12 @@ export function PluginSettings({ pluginId }: { pluginId: string }) {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
-  if (q.isLoading || draft === undefined) return q.error ? <ErrorText error={q.error} /> : <Spinner />;
+  if (q.isLoading || draft === undefined) return q.error ? <ErrorText error={q.error} /> : <SkeletonRows n={6} />;
   const data = q.data as SettingsResp;
   if (data.settings_ui === 'custom') {
     return (
-      <div className="settings-page">
-        <SettingsHeader pluginId={pluginId} info={info} />
+      <div className="stack">
+        <SettingsHead pluginId={pluginId} info={info} />
         <Suspense fallback={<Spinner />}>
           <CustomSettings pluginId={pluginId} />
         </Suspense>
@@ -232,70 +262,60 @@ export function PluginSettings({ pluginId }: { pluginId: string }) {
   const noSchema = !data.schema;
   const empty = noSchema && same(data.settings, {});
   return (
-    <div className="settings-page">
-      <SettingsHeader pluginId={pluginId} info={info} />
-      {noSchema && (
-        <div className="settings-note">
-          {empty ? t('ui.admin.no_schema_empty') : t('ui.admin.no_schema')}
-        </div>
-      )}
-      <Card
-        title={
-          data.schema ? (
-            <Tabs
+    <div className="stack settings-page">
+      <SettingsHead pluginId={pluginId} info={info} />
+      {noSchema && <Note tone="info">{empty ? t('ui.admin.no_schema_empty') : t('ui.admin.no_schema')}</Note>}
+      <Panel
+        primary
+        title={data.schema && mode === 'form' ? t('ui.admin.mode_form') : 'JSON'}
+        actions={
+          data.schema && (
+            <Segmented
               value={mode}
               onChange={(v) => {
-                setMode(v as 'form' | 'json');
+                setMode(v);
                 setJsonKey((k) => k + 1);
               }}
-              tabs={[
-                { id: 'form', label: t('ui.admin.mode_form') },
-                { id: 'json', label: 'JSON' },
+              options={[
+                { value: 'form', label: t('ui.admin.mode_form') },
+                { value: 'json', label: 'JSON' },
               ]}
             />
-          ) : (
-            'JSON'
           )
         }
       >
         {data.schema && mode === 'form' ? (
-          <div className="settings-form">
+          <div className="form settings-form">
             <SchemaForm schema={data.schema} value={draft} onChange={setDraft} errors={errors} t={t} baseline={baseline} />
           </div>
         ) : (
           <JsonField key={jsonKey} label={data.schema ? t('ui.admin.json_hint') : 'settings'} value={draft} onChange={setDraft} error={errors['']} />
         )}
-      </Card>
-      <div className={`settings-bar${dirty ? ' settings-bar-dirty' : ''}`}>
-        <span className="settings-bar-msg">
+      </Panel>
+      <div className={dirty ? 'save-bar dirty' : 'save-bar'}>
+        <span className="small">
           {dirty ? (
             <>
-              {t('ui.admin.unsaved')}
-              {changed.length > 0 && <span className="pt-muted"> · {changed.join(', ')}</span>}
+              <b>{t('ui.admin.unsaved')}</b>
+              {changed.length > 0 && <span className="muted"> · {changed.join('、')}</span>}
             </>
           ) : (
-            <span className="pt-muted">
+            <span className="muted">
               {t('ui.admin.version')} {data.version}
             </span>
           )}
         </span>
-        <Button variant="ghost" onClick={discard} disabled={!dirty || saving}>
-          {t('ui.admin.discard')}
-        </Button>
-        <Button variant="primary" onClick={save} disabled={!dirty || saving}>
-          {saving ? t('ui.common.loading') : t('ui.admin.save')}
-        </Button>
+        <span className="row">
+          <Button variant="ghost" onClick={discard} disabled={!dirty || saving}>
+            {t('ui.admin.discard')}
+          </Button>
+          <Button variant="primary" onClick={save} disabled={!dirty || saving}>
+            {saving ? t('ui.common.loading') : t('ui.admin.save')}
+          </Button>
+        </span>
       </div>
     </div>
   );
-}
-
-/** 改动的顶层字段（显示名） */
-function changedKeys(schema: Schema, draft: unknown, base: unknown): string[] {
-  const d = (draft ?? {}) as Record<string, unknown>;
-  const b = (base ?? {}) as Record<string, unknown>;
-  const keys = new Set([...Object.keys(d), ...Object.keys(b)]);
-  return [...keys].filter((k) => !same(d[k], b[k])).map((k) => schema.properties?.[k]?.title ?? k);
 }
 
 /** `/admin/p/:plugin/*`：`settings` 为内核设置页，其余交给插件声明的后台路由 */
@@ -306,5 +326,5 @@ export function AdminPluginRoute() {
   // 插件声明了后台路由时，`/admin/p/x/` 交给插件；设置页固定在 `/settings`
   const hasAdmin = useManifest().plugins.some((p) => p.id === plugin && p.routes.some((r) => r.startsWith(`/admin/p/${plugin}`)));
   if (sub === '/settings' || (!hasAdmin && (sub === '' || sub === '/'))) return <PluginSettings key={plugin} pluginId={plugin} />;
-  return <PluginPage pluginId={plugin} path={loc.pathname} fallback={<Spinner />} />;
+  return <PluginPage pluginId={plugin} path={loc.pathname} fallback={<SkeletonRows n={6} />} />;
 }

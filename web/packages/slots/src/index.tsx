@@ -201,7 +201,7 @@ class PluginBoundary extends Component<{ plugin: string; staff: boolean; childre
   }
 }
 
-interface ResolvedEntry {
+export interface ResolvedEntry {
   plugin: string;
   entry: SlotEntry;
 }
@@ -261,11 +261,22 @@ function Rendered({ e, ctx }: { e: ResolvedEntry; ctx: unknown }) {
   const C = e.entry.component;
   return (
     <PluginBoundary plugin={e.plugin} staff={reg.host.isStaff()}>
-      <Suspense fallback={<span className="pt-skeleton" />}>
+      <Suspense fallback={<span className="skeleton" />}>
         <C ctx={ctx as Record<string, unknown>} api={reg.apiFor(e.plugin)} />
       </Suspense>
     </PluginBoundary>
   );
+}
+
+/** 渲染一个已解析的插槽条目（错误边界内）：宿主把插件标签页并入自己的页签栏时使用 */
+export function SlotEntryView({ entry, ctx }: { entry: ResolvedEntry; ctx: unknown }) {
+  return <Rendered e={entry} ctx={ctx} />;
+}
+
+/** 插槽条目的显示名（tabs 插槽的 title_term、columns 插槽的 header_term） */
+export function useSlotEntryTitle(): (e: ResolvedEntry) => string {
+  const reg = useRegistry();
+  return (e) => reg.host.translator.t(e.entry.title_term ?? e.entry.header_term ?? e.plugin);
 }
 
 function SlotInner({ name, ctx, className, empty }: { name: SlotName; ctx: unknown; className?: string; empty?: ReactNode }) {
@@ -279,14 +290,14 @@ function SlotInner({ name, ctx, className, empty }: { name: SlotName; ctx: unkno
     const cur = entries[Math.min(tab, entries.length - 1)] as ResolvedEntry;
     return (
       <div className={`pt-slot pt-slot-tabs ${className ?? ''}`} data-slot={name}>
-        <div role="tablist" className="pt-tabs">
+        <div role="tablist" className="tabs">
           {entries.map((e, i) => (
-            <button key={e.plugin} role="tab" aria-selected={i === tab} className="pt-tab" onClick={() => setTab(i)} type="button">
+            <button key={e.plugin} role="tab" aria-selected={i === tab} tabIndex={i === tab ? 0 : -1} onClick={() => setTab(i)} type="button">
               {reg.host.translator.t(e.entry.title_term ?? e.plugin)}
             </button>
           ))}
         </div>
-        <div role="tabpanel">
+        <div role="tabpanel" className="tabp">
           <Rendered e={cur} ctx={ctx} />
         </div>
       </div>
@@ -336,7 +347,7 @@ function PluginPageInner({ pluginId, path }: { pluginId: string; path: string })
   const pl = reg.host.manifest.plugins.find((p) => p.id === pluginId);
   const f = use(useMemo(() => track(pl ? reg.load(pl) : Promise.resolve(null)), [pl, reg]));
   const route = f?.routes?.find((r) => routeMatches(r.path, path));
-  if (!route) return <p className="pt-muted">404</p>;
+  if (!route) return <p className="muted">404</p>;
   const C = route.component;
   return (
     <PluginBoundary plugin={pluginId} staff={reg.host.isStaff()}>

@@ -1,14 +1,16 @@
-// 个人页（identity + accounting）；插件经 user.profile.* 插槽补充（等级、魔力、H&R、邀请…）。
+// 个人页（identity + accounting）：封面、头像与等级、数据带（插件 user.profile.stats 并入）、动态页签（做种中 / 下载中 / 已完成 + 插件页签）、
+// 侧栏（简介、插件 header / badges）；窄屏侧栏排在动态之后（P3）。
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { api } from '@pt-studio/sdk';
-import { Slot } from '@pt-studio/slots';
+import { Slot, SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-studio/slots';
 import { formatBytes, formatDuration, useT } from '@pt-studio/terms';
-import { Avatar, Badge, Card, Empty, SkeletonRows, Stat, Tabs } from '@pt-studio/ui-kit';
-import { SwarmCell } from './Torrents';
+import { Avatar, Panel, SkeletonRows, Status, Table, Tabs } from '@pt-studio/ui-kit';
 import { ErrorText } from '../errors';
+import { fmtRatio, fmtSeed, levelName, type LevelClass } from '../lib';
 import { useInstalled } from '../manifest';
+import { useSession } from '../session';
 
 interface Profile {
   id: number;
@@ -25,8 +27,12 @@ interface Stats {
   uploaded: number;
   downloaded: number;
   seed_secs: number;
-  /** accounting 以十进制字符串返回（如 "1.0000"），没有下载量时为 null */
   ratio: string | number | null;
+  uploaded_raw?: number;
+  downloaded_raw?: number;
+  seeding_count?: number;
+  leeching_count?: number;
+  completed_count?: number;
 }
 
 interface SnatchRow {
@@ -38,131 +44,189 @@ interface SnatchRow {
   last_action_at: string;
 }
 
-/** 做种中 / 下载中 / 已完成列表（accounting snatches + 种子标题） */
-function UserTorrents({ uid }: { uid: string }) {
+function Snatches({ uid, state }: { uid: number; state: string }) {
   const t = useT();
-  const [tab, setTab] = useState('seeding');
   const q = useQuery({
-    queryKey: ['snatches', uid, tab],
-    queryFn: () => api<{ items: SnatchRow[] }>(`/api/p/accounting/v1/users/${uid}/snatches?state=${tab}&limit=30`),
+    queryKey: ['snatches', uid, state],
+    queryFn: () => api<{ items: SnatchRow[] }>(`/api/p/accounting/v1/users/${uid}/snatches?state=${state}&limit=50`),
     retry: false,
   });
   const rows = q.data?.items ?? [];
   const titles = useQueries({
     queries: rows.map((r) => ({
       queryKey: ['torrent-title', r.torrent_id],
-      queryFn: () => api<{ id: number; title: string; size: number }>(`/api/p/torrent/v1/torrents/${r.torrent_id}`),
+      queryFn: () => api<{ id: number; title: string; subtitle: string | null; size: number }>(`/api/p/torrent/v1/torrents/${r.torrent_id}`),
       staleTime: 300_000,
       retry: false,
     })),
   });
+  if (q.isLoading) return <SkeletonRows n={3} />;
+  if (q.error) return <div className="pad"><ErrorText error={q.error} /></div>;
   return (
-    <Card className="list-card" title={t('ui.profile.activity')}>
-      <div className="card-pad">
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { id: 'seeding', label: t('ui.profile.seeding') },
-            { id: 'leeching', label: t('ui.profile.leeching') },
-            { id: 'completed', label: t('ui.profile.completed') },
-          ]}
-        />
-      </div>
-      {q.isLoading ? (
-        <div className="card-pad">
-          <SkeletonRows n={3} />
+    <Table
+      rows={rows}
+      rowKey={(r) => r.torrent_id}
+      empty={t('ui.profile.none')}
+      minWidth={640}
+      columns={[
+        {
+          key: 't',
+          header: t('ui.torrent.title'),
+          render: (r) => {
+            const d = titles[rows.indexOf(r)]?.data;
+            return (
+              <Link className="tt-name" to={`/torrents/${r.torrent_id}`}>
+                {d?.subtitle || d?.title || `#${r.torrent_id}`}
+              </Link>
+            );
+          },
+        },
+        { key: 's', header: t('ui.torrent.size'), right: true, render: (r) => <span className="num">{titles[rows.indexOf(r)]?.data ? formatBytes((titles[rows.indexOf(r)]?.data as { size: number }).size) : '-'}</span> },
+        { key: 'u', header: t('ui.profile.uploaded'), right: true, render: (r) => <span className="num up">{formatBytes(r.uploaded)}</span> },
+        { key: 'd', header: t('ui.profile.downloaded'), right: true, render: (r) => <span className="num down">{formatBytes(r.downloaded)}</span> },
+        { key: 'st', header: t('ui.profile.seed_time'), right: true, render: (r) => <span className="num">{formatDuration(r.seed_secs)}</span> },
+      ]}
+    />
+  );
+}
+
+function ActivityTabs({ profile, stats }: { profile: Profile; stats?: Stats }) {
+  const t = useT();
+  const hasAccounting = useInstalled('accounting');
+  const entries = useSlotEntries('user.profile.tabs');
+  const title = useSlotEntryTitle();
+  const own = [
+    { id: 'seeding', label: t('ui.profile.seeding'), count: stats?.seeding_count },
+    { id: 'leeching', label: t('ui.profile.leeching'), count: stats?.leeching_count },
+    { id: 'completed', label: t('ui.profile.completed'), count: stats?.completed_count },
+  ];
+  const tabs = [...(hasAccounting ? own : []), ...entries.map((e) => ({ id: `p:${e.plugin}`, label: title(e) }))];
+  const [tab, setTab] = useState(tabs[0]?.id ?? '');
+  if (tabs.length === 0) return null;
+  const cur = entries.find((e) => `p:${e.plugin}` === tab);
+  return (
+    <Panel flush>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} label={t('ui.profile.activity')} />
+      {cur ? (
+        <div className="tabp">
+          <SlotEntryView entry={cur} ctx={{ profile }} />
         </div>
-      ) : rows.length === 0 ? (
-        <Empty>{t('ui.profile.none')}</Empty>
       ) : (
-        <div className="pt-table-wrap">
-          <table className="pt-table">
-            <thead>
-              <tr>
-                <th>{t('ui.torrent.title')}</th>
-                <th>{t('ui.torrent.size')}</th>
-                <th>{t('ui.profile.uploaded')}</th>
-                <th>{t('ui.profile.downloaded')}</th>
-                <th>{t('ui.profile.seed_time')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const d = titles[i]?.data;
-                return (
-                  <tr key={r.torrent_id}>
-                    <td>
-                      <Link className="t-title" to={`/torrents/${r.torrent_id}`}>
-                        {d?.title ?? `#${r.torrent_id}`}
-                      </Link>
-                    </td>
-                    <td className="num">{d ? formatBytes(d.size) : '-'}</td>
-                    <td className="num">{formatBytes(r.uploaded)}</td>
-                    <td className="num">{formatBytes(r.downloaded)}</td>
-                    <td className="num">{formatDuration(r.seed_secs)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Snatches uid={profile.id} state={tab} />
       )}
-    </Card>
+    </Panel>
   );
 }
 
 export function ProfilePage() {
   const t = useT();
   const { id } = useParams();
+  const s = useSession();
   const hasAccounting = useInstalled('accounting');
+  const hasMessages = useInstalled('messages');
+  const hasLevels = useInstalled('levels');
   const p = useQuery({ queryKey: ['user', id], queryFn: () => api<Profile>(`/api/p/identity/v1/users/${id}`) });
-  const stats = useQuery({
-    queryKey: ['user-stats', id],
-    queryFn: () => api<Stats>(`/api/p/accounting/v1/users/${id}/stats`),
-    enabled: hasAccounting,
+  const stats = useQuery({ queryKey: ['user-stats', id], queryFn: () => api<Stats>(`/api/p/accounting/v1/users/${id}/stats`), enabled: hasAccounting, retry: false });
+  const cls = useQuery({
+    queryKey: ['level-classes'],
+    queryFn: () => api<{ items: LevelClass[] }>('/api/p/levels/v1/classes'),
+    enabled: hasLevels,
+    staleTime: 600_000,
     retry: false,
   });
-  if (p.isLoading) return <SkeletonRows n={4} />;
+  if (p.isLoading) return <SkeletonRows n={5} />;
   if (p.error) return <ErrorText error={p.error} />;
   const profile = p.data as Profile;
   const ctx = { profile };
-  const s = stats.data;
+  const st = stats.data;
+  const seed = st ? fmtSeed(st.seed_secs) : null;
+  const level = cls.data?.items.find((c) => c.id === profile.class_id);
+  const mine = s.me?.id === profile.id;
+  const days = Math.max(1, Math.ceil((Date.now() - profile.created_at) / 86_400_000));
   return (
     <div className="profile">
-      <div className="p-cover" style={{ backgroundImage: 'url(/frieren/frieren-sky-landscape.jpg)' }}>
-        <div className="p-cover-overlay" />
-      </div>
-      <section className="p-head">
-        <Avatar src={profile.avatar_url} name={profile.username} size={76} className="p-avatar" />
-        <div className="p-main">
-          <h1>
-            {profile.username} {profile.status !== 'active' && <Badge tone="danger">{profile.status}</Badge>}
-          </h1>
-          <p className="pt-muted">
-            {profile.title ? `${profile.title} · ` : ''}
-            {t('ui.profile.joined')} {new Date(profile.created_at).toLocaleDateString()}
-          </p>
-          {profile.bio && <p className="p-bio">{profile.bio}</p>}
-          <Slot name="user.profile.header" ctx={ctx} />
-          <Slot name="user.profile.badges" ctx={ctx} />
+      <div className="pf-cover" aria-hidden="true" />
+      <section className="pf-wrap" data-primary>
+        <div className="pf-head">
+          <Avatar src={profile.avatar_url} name={profile.username} size={112} ring className="pf-ava" />
+          <div className="pf-name">
+            <h1>
+              {profile.username}
+              {level && (
+                <span className="cls" style={level.color ? { color: level.color, borderColor: level.color } : undefined}>
+                  {levelName(t, level)}
+                </span>
+              )}
+              {profile.title && <span className="tag tag-g">{profile.title}</span>}
+              {profile.status !== 'active' && <Status tone="bad">{profile.status}</Status>}
+            </h1>
+            <p>{t('ui.profile.joined_line', { date: new Date(profile.created_at).toLocaleDateString(), n: days })}</p>
+            <Slot name="user.profile.header" ctx={ctx} className="row" />
+          </div>
+          <div className="pf-acts row">
+            {mine ? (
+              <Link className="btn btn-sm" to="/settings">
+                {t('ui.profile.edit')}
+              </Link>
+            ) : (
+              hasMessages && (
+                <Link className="btn btn-sm" to={`/p/messages/compose?to=${encodeURIComponent(profile.username)}`}>
+                  {t('ui.profile.message')}
+                </Link>
+              )
+            )}
+            {s.isStaff && !mine && (
+              <Link className="btn btn-sm btn-ghost" to={`/admin/users/${profile.id}`}>
+                {t('ui.nav.admin')}
+              </Link>
+            )}
+          </div>
         </div>
-      </section>
-      <Card>
-        <div className="pt-row stats-row">
-          {s && (
+        <div className="pf-stats">
+          {st && (
             <>
-              <Stat label={t('ui.profile.uploaded')} value={formatBytes(s.uploaded)} />
-              <Stat label={t('ui.profile.downloaded')} value={formatBytes(s.downloaded)} />
-              <Stat label={t('ui.profile.ratio')} value={s.ratio === null ? '∞' : Number(s.ratio).toFixed(2)} />
-              <Stat label={t('ui.profile.seed_time')} value={formatDuration(s.seed_secs)} />
+              <div className="stat">
+                <span>{t('ui.profile.uploaded')}</span>
+                <b className="up">{formatBytes(st.uploaded)}</b>
+                {st.uploaded_raw !== undefined && <small>{t('ui.profile.real', { v: formatBytes(st.uploaded_raw) })}</small>}
+              </div>
+              <div className="stat">
+                <span>{t('ui.profile.downloaded')}</span>
+                <b className="down">{formatBytes(st.downloaded)}</b>
+                {st.downloaded_raw !== undefined && <small>{t('ui.profile.real', { v: formatBytes(st.downloaded_raw) })}</small>}
+              </div>
+              <div className="stat">
+                <span>{t('ui.profile.ratio')}</span>
+                <b>{fmtRatio(st.ratio)}</b>
+              </div>
+              <div className="stat">
+                <span>{t('ui.profile.seed_time')}</span>
+                <b>
+                  {seed?.v}
+                  <small> {seed?.u}</small>
+                </b>
+                {st.seeding_count !== undefined && <small>{t('ui.profile.seeding_n', { n: st.seeding_count })}</small>}
+              </div>
             </>
           )}
-          <Slot name="user.profile.stats" ctx={ctx} />
+          <Slot name="user.profile.stats" ctx={ctx} className="pf-slot" />
         </div>
-      </Card>
-      {hasAccounting && <UserTorrents uid={String(profile.id)} />}
-      <Slot name="user.profile.tabs" ctx={ctx} />
+      </section>
+      <div className="pf-grid">
+        <div className="stack m-after">
+          {profile.bio && (
+            <Panel title={t('ui.profile.about')}>
+              <p className="pt-prewrap small">{profile.bio}</p>
+            </Panel>
+          )}
+          <Slot name="user.profile.badges" ctx={ctx} className="stack" />
+        </div>
+        <div className="stack">
+          <Suspense fallback={<SkeletonRows n={4} />}>
+            <ActivityTabs profile={profile} stats={st} />
+          </Suspense>
+        </div>
+      </div>
     </div>
   );
 }

@@ -98,7 +98,7 @@ const app = await esbuild.build({ ...common, entryPoints: [join(web, 'app/src/ma
 const appJs = textOf(app);
 const appFile = `app.${hash(appJs)}.js`;
 writeFileSync(join(out, 'static', appFile), appJs);
-const css = ['themes/tokens.css', 'packages/ui-kit/src/styles.css', 'app/src/app.css'].map((f) => readFileSync(join(web, f), 'utf8')).join('\n');
+const css = ['themes/fonts.css', 'themes/tokens.css', 'packages/ui-kit/src/styles.css', 'app/src/app.css'].map((f) => readFileSync(join(web, f), 'utf8')).join('\n');
 const cssMin = (await esbuild.transform(css, { loader: 'css', minify: !dev })).code;
 const cssFile = `app.${hash(cssMin)}.css`;
 writeFileSync(join(out, 'static', cssFile), cssMin);
@@ -128,12 +128,10 @@ const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PT Studio</title>
-<meta name="theme-color" content="#1f2a44">
+<meta name="theme-color" content="#eceff0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1120" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon.ico" sizes="48x48">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="manifest" href="/site.webmanifest">
 <script type="importmap" nonce="__CSP_NONCE__">${JSON.stringify({ imports: importMap })}</script>
 <link rel="stylesheet" href="/static/${cssFile}">
 <script type="module" src="/static/${appFile}"></script>

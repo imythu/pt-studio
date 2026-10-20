@@ -1,10 +1,10 @@
-// accounting 前端：后台用户详情页“流量”标签 —— 当前上传 / 下载 / 分享率、手动调整（GiB，可为负，需填写原因）与该用户的异常信号；
+// accounting 前端：后台用户详情页“流量”标签 —— 当前上传 / 下载 / 分享率、手动调整（GiB，可为负，需填写原因，抽屉填写）与该用户的异常信号；
 // 后台“流量异常信号”页（/admin/p/accounting/：按类型筛选、近 30 天，accounting.signals.read）。
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Stat, Table, Tabs } from '@pt-studio/ui-kit';
+import { Button, Field, Input, KeyFacts, LoadMore, PageHead, Panel, PLink, Sheet, SkeletonRows, Status, Table, Tabs, type Tone } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'accounting.ui.tab': '流量',
@@ -32,6 +32,7 @@ registerMessages('zh-CN', {
   'accounting.ui.severity.low': '低',
   'accounting.ui.severity.medium': '中',
   'accounting.ui.severity.high': '高',
+  'accounting.ui.cancel': '取消',
 });
 registerMessages('en', {
   'accounting.ui.tab': 'Traffic',
@@ -59,6 +60,7 @@ registerMessages('en', {
   'accounting.ui.severity.low': 'low',
   'accounting.ui.severity.medium': 'medium',
   'accounting.ui.severity.high': 'high',
+  'accounting.ui.cancel': 'Cancel',
 });
 
 interface Stats {
@@ -73,6 +75,7 @@ const GIB = 1024 ** 3;
 function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   const uid = ctx.profile.id;
   const [s, setS] = useState<Stats | null>(null);
+  const [open, setOpen] = useState(false);
   const [f, setF] = useState({ up: '', down: '', note: '' });
   const load = () => void api.json<Stats>(`/api/p/accounting/v1/users/${uid}/stats`).then(setS);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,39 +89,61 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
       });
       api.toast(api.t('accounting.ui.done'), 'success');
       setF({ up: '', down: '', note: '' });
+      setOpen(false);
       load();
     } catch (err) {
       api.toast(errText(api, err), 'error');
     }
   };
-  if (!s) return null;
+  if (!s) return <SkeletonRows n={3} />;
   const ratio = s.downloaded > 0 ? (s.uploaded / s.downloaded).toFixed(3) : '∞';
   return (
-    <Card>
-      <div className="pt-row stats-row">
-        <Stat label={api.t('accounting.ui.uploaded')} value={formatBytes(s.uploaded)} />
-        <Stat label={api.t('accounting.ui.downloaded')} value={formatBytes(s.downloaded)} />
-        <Stat label={api.t('accounting.ui.ratio')} value={ratio} />
+    <div className="stack">
+      <div className="row-sb">
+        <KeyFacts
+          items={[
+            { label: api.t('accounting.ui.uploaded'), value: formatBytes(s.uploaded), tone: 'up' },
+            { label: api.t('accounting.ui.downloaded'), value: formatBytes(s.downloaded), tone: 'down' },
+            { label: api.t('accounting.ui.ratio'), value: ratio },
+          ]}
+        />
+        <Button size="sm" variant="primary" onClick={() => setOpen(true)}>
+          {api.t('accounting.ui.apply')}
+        </Button>
       </div>
-      <form onSubmit={(e) => void submit(e)} className="upload-grid">
-        <Field label={api.t('accounting.ui.d_up')}>
-          <Input name="traffic_up" type="number" step="any" value={f.up} onChange={(e) => setF({ ...f, up: e.target.value })} />
-        </Field>
-        <Field label={api.t('accounting.ui.d_down')}>
-          <Input name="traffic_down" type="number" step="any" value={f.down} onChange={(e) => setF({ ...f, down: e.target.value })} />
-        </Field>
-        <div className="span2">
+      <Panel title={api.t('accounting.ui.signals')} flush>
+        <Signals api={api} uid={uid} />
+      </Panel>
+      <Sheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title={api.t('accounting.ui.apply')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              {api.t('accounting.ui.cancel')}
+            </Button>
+            <Button type="submit" form="traffic-adjust" variant="danger" disabled={!f.note.trim() || (!Number(f.up) && !Number(f.down))}>
+              {api.t('accounting.ui.apply')}
+            </Button>
+          </>
+        }
+      >
+        <form id="traffic-adjust" className="form" onSubmit={(e) => void submit(e)}>
+          <div className="form-2">
+            <Field label={api.t('accounting.ui.d_up')}>
+              <Input name="traffic_up" type="number" step="any" value={f.up} onChange={(e) => setF({ ...f, up: e.target.value })} />
+            </Field>
+            <Field label={api.t('accounting.ui.d_down')}>
+              <Input name="traffic_down" type="number" step="any" value={f.down} onChange={(e) => setF({ ...f, down: e.target.value })} />
+            </Field>
+          </div>
           <Field label={api.t('accounting.ui.note')}>
             <Input name="traffic_note" required maxLength={500} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
           </Field>
-          <Button type="submit" variant="danger" disabled={!f.note.trim() || (!Number(f.up) && !Number(f.down))}>
-            {api.t('accounting.ui.apply')}
-          </Button>
-        </div>
-      </form>
-      <h3>{api.t('accounting.ui.signals')}</h3>
-      <Signals api={api} uid={uid} />
-    </Card>
+        </form>
+      </Sheet>
+    </div>
   );
 }
 
@@ -135,26 +160,13 @@ interface Signal {
 }
 
 const KINDS = ['counter_jump', 'negative_delta', 'peer_not_in_swarm', 'speed_exceeded'];
-const SEV: Record<string, 'muted' | 'primary' | 'danger'> = { low: 'muted', medium: 'primary', high: 'danger' };
-
-function A({ api, to, children }: { api: PluginApi; to: string; children: string }) {
-  return (
-    <a
-      href={to}
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate(to);
-      }}
-    >
-      {children}
-    </a>
-  );
-}
+const SEV: Record<string, Tone> = { low: 'mute', medium: 'warn', high: 'bad' };
+const dt = (ms: number) => new Date(ms).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 /** 信号列表（近 30 天）；`uid` 为空时列出全站 */
 function Signals({ api, uid }: { api: PluginApi; uid: number | null }) {
   const [kind, setKind] = useState('');
-  const [rows, setRows] = useState<Signal[]>([]);
+  const [rows, setRows] = useState<Signal[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const load = useCallback(
     async (cursor: string | null) => {
@@ -163,13 +175,13 @@ function Signals({ api, uid }: { api: PluginApi; uid: number | null }) {
       if (kind) q.set('signal', kind);
       if (cursor) q.set('cursor', cursor);
       const r = await api.json<{ items: Signal[]; next_cursor: string | null }>(`/api/p/accounting/v1/admin/signals?${q.toString()}`);
-      setRows((old) => (cursor ? [...old, ...r.items] : r.items));
+      setRows((old) => (cursor ? [...(old ?? []), ...r.items] : r.items));
       setNext(r.next_cursor);
     },
     [api, uid, kind],
   );
   useEffect(() => {
-    void load(null).catch(() => undefined);
+    void load(null).catch(() => setRows([]));
   }, [load]);
   const label = (k: string) => {
     const key = `accounting.ui.signal.${k}`;
@@ -184,45 +196,68 @@ function Signals({ api, uid }: { api: PluginApi; uid: number | null }) {
       : '';
   return (
     <>
-      <Tabs value={kind} onChange={setKind} tabs={[{ id: '', label: api.t('accounting.ui.all') }, ...KINDS.map((k) => ({ id: k, label: label(k) }))]} />
-      <Table
-        rows={rows}
-        rowKey={(r) => r.id}
-        empty="—"
-        columns={[
-          ...(uid === null ? [{ key: 'u', header: api.t('accounting.ui.user'), render: (r: Signal) => <A api={api} to={`/admin/users/${r.user_id}`}>{`#${r.user_id}`}</A> }] : []),
-          { key: 't', header: api.t('accounting.ui.torrent'), render: (r) => (r.torrent_id === null ? '—' : <A api={api} to={`/torrents/${r.torrent_id}`}>{`#${r.torrent_id}`}</A>) },
-          {
-            key: 'k',
-            header: api.t('accounting.ui.kind'),
-            render: (r) => (
-              <>
-                <Badge tone={SEV[r.severity] ?? 'muted'}>{api.t(`accounting.ui.severity.${r.severity}`)}</Badge> {label(r.kind)}
-                {reason(r.details) && <div className="pt-muted small pt-prewrap">{reason(r.details)}</div>}
-              </>
-            ),
-          },
-          { key: 'h', header: api.t('accounting.ui.hits'), render: (r) => r.hits },
-          {
-            key: 'w',
-            header: api.t('accounting.ui.when'),
-            render: (r) => <span className="pt-muted small">{`${new Date(r.first_at).toLocaleString()} → ${new Date(r.last_at).toLocaleString()}`}</span>,
-          },
-        ]}
-      />
-      {next && <Button onClick={() => void load(next)}>{api.t('accounting.ui.more')}</Button>}
+      <Tabs variant="flush" value={kind} onChange={setKind} tabs={[{ id: '', label: api.t('accounting.ui.all') }, ...KINDS.map((k) => ({ id: k, label: label(k) }))]} />
+      {rows === null ? (
+        <SkeletonRows n={4} />
+      ) : (
+        <Table
+          rows={rows}
+          rowKey={(r) => r.id}
+          empty="—"
+          minWidth={820}
+          columns={[
+            ...(uid === null
+              ? [
+                  {
+                    key: 'u',
+                    header: api.t('accounting.ui.user'),
+                    render: (r: Signal) => (
+                      <PLink to={`/admin/users/${r.user_id}`} navigate={api.navigate}>
+                        {`#${r.user_id}`}
+                      </PLink>
+                    ),
+                  },
+                ]
+              : []),
+            {
+              key: 't',
+              header: api.t('accounting.ui.torrent'),
+              render: (r) =>
+                r.torrent_id === null ? (
+                  '—'
+                ) : (
+                  <PLink to={`/torrents/${r.torrent_id}`} navigate={api.navigate}>
+                    {`#${r.torrent_id}`}
+                  </PLink>
+                ),
+            },
+            {
+              key: 'k',
+              header: api.t('accounting.ui.kind'),
+              render: (r) => (
+                <>
+                  <Status tone={SEV[r.severity] ?? 'mute'}>{api.t(`accounting.ui.severity.${r.severity}`)}</Status> {label(r.kind)}
+                  {reason(r.details) && <div className="tiny muted pt-mono">{reason(r.details)}</div>}
+                </>
+              ),
+            },
+            { key: 'h', header: api.t('accounting.ui.hits'), right: true, render: (r) => <span className="num">{r.hits}</span> },
+            { key: 'w', header: api.t('accounting.ui.when'), render: (r) => <span className="small muted num nowrap">{`${dt(r.first_at)} → ${dt(r.last_at)}`}</span> },
+          ]}
+        />
+      )}
+      {next && <LoadMore onClick={() => void load(next)} label={api.t('accounting.ui.more')} />}
     </>
   );
 }
 
 function SignalsPage({ api }: { api: PluginApi }) {
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('accounting.ui.signals')}</h1>
-      <Card>
-        <p className="pt-muted small">{api.t('accounting.ui.signals_hint')}</p>
+    <div className="stack">
+      <PageHead title={api.t('accounting.ui.signals')} lede={api.t('accounting.ui.signals_hint')} />
+      <Panel flush primary>
         <Signals api={api} uid={null} />
-      </Card>
+      </Panel>
     </div>
   );
 }

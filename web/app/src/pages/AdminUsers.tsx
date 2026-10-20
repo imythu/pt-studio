@@ -1,11 +1,11 @@
-// 后台用户管理：列表（筛选、游标）、详情（资料、角色、限制、会话、安全记录）；插件经 admin.user.tabs 追加标签页。
+// 后台用户：列表（用户名前缀、状态、游标）、按 IP 查账户（抽屉）；详情（资料、角色、限制、会话、安全记录、IP 与关联账户 + 插件 admin.user.tabs 页签）。
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router';
+import { Suspense, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '@pt-studio/sdk';
-import { Slot } from '@pt-studio/slots';
+import { SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Spinner, Stat, Table, useToast } from '@pt-studio/ui-kit';
+import { Avatar, Button, Field, Input, Kpis, LoadMore, Note, PageHead, Panel, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, useToast, type Tone } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { useSession } from '../session';
 
@@ -22,10 +22,69 @@ interface Row {
 const STATUSES = ['', 'active', 'pending', 'leech_disabled', 'banned'];
 const ROLES = ['uploader', 'moderator', 'admin'];
 
+export function statusTone(s: string): Tone {
+  return s === 'active' ? 'ok' : s === 'pending' ? 'warn' : s === 'banned' ? 'bad' : 'warn';
+}
+
+interface IpUser {
+  user_id: number;
+  username: string;
+  status: string;
+  last_seen_at: number;
+  shared_ips?: number;
+  hits?: number;
+}
+
+function UserLinks({ rows, extra }: { rows: IpUser[]; extra: (u: IpUser) => string | number }) {
+  return (
+    <div className="side-list plain">
+      {rows.map((u) => (
+        <Link key={u.user_id} to={`/admin/users/${u.user_id}`}>
+          <span className="nm">
+            {u.username} <Status tone={statusTone(u.status)}>{u.status}</Status>
+          </span>
+          <span className="v">{extra(u)}</span>
+        </Link>
+      ))}
+      {rows.length === 0 && <div className="muted">—</div>}
+    </div>
+  );
+}
+
+function IpLookup({ open, onClose }: { open: boolean; onClose(): void }) {
+  const t = useT();
+  const toast = useToast();
+  const errText = useErrorText();
+  const [ip, setIp] = useState('');
+  const [rows, setRows] = useState<IpUser[] | null>(null);
+  const search = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      setRows((await api<{ items: IpUser[] }>(`/api/p/identity/v1/admin/ip-lookups?ip=${encodeURIComponent(ip.trim())}`)).items);
+    } catch (err) {
+      toast(errText(err), 'error');
+    }
+  };
+  return (
+    <Sheet open={open} onClose={onClose} title={t('ui.admin.ip_lookup')}>
+      <form className="row" onSubmit={search}>
+        <Input name="ip" placeholder="203.0.113.7 / 203.0.113.0/24" value={ip} onChange={(e) => setIp(e.target.value)} required style={{ flex: 1 }} />
+        <Button type="submit" variant="primary">
+          {t('ui.admin.ip_lookup_go')}
+        </Button>
+      </form>
+      <Note tone="warn">{t('ui.admin.sensitive_hint')}</Note>
+      {rows && <UserLinks rows={rows} extra={(u) => new Date(u.last_seen_at).toLocaleString()} />}
+    </Sheet>
+  );
+}
+
 export function AdminUsers() {
   const t = useT();
+  const nav = useNavigate();
   const [prefix, setPrefix] = useState('');
   const [filter, setFilter] = useState({ prefix: '', status: '' });
+  const [ipOpen, setIpOpen] = useState(false);
   const q = useInfiniteQuery({
     queryKey: ['admin-users', filter],
     initialPageParam: null as number | null,
@@ -41,39 +100,54 @@ export function AdminUsers() {
   const rows = q.data?.pages.flatMap((p) => p.items) ?? [];
   const sensitive = useSession().can('identity.users.read_sensitive');
   return (
-    <div>
-      <h1>{t('ui.admin.users')}</h1>
-      {sensitive && <IpLookup />}
-      <form
-        className="searchbar"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setFilter({ ...filter, prefix });
-        }}
-      >
-        <Input name="username_prefix" placeholder={t('ui.login.username')} value={prefix} onChange={(e) => setPrefix(e.target.value)} />
-        <select className="pt-input" name="status" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s || '—'}
-            </option>
-          ))}
-        </select>
-        <Button type="submit">{t('ui.admin.search')}</Button>
-      </form>
-      <ErrorText error={q.error} />
-      <Table
-        rows={rows}
-        rowKey={(r) => r.id}
-        columns={[
-          { key: 'id', header: 'ID', render: (r) => r.id },
-          { key: 'u', header: t('ui.login.username'), render: (r) => <Link to={`/admin/users/${r.id}`}>{r.username}</Link> },
-          { key: 's', header: t('ui.admin.status'), render: (r) => <Badge tone={r.status === 'active' ? 'muted' : 'danger'}>{r.status}</Badge> },
-          { key: 'r', header: t('ui.admin.roles'), render: (r) => r.roles.join(', ') },
-          { key: 'c', header: t('ui.profile.joined'), render: (r) => new Date(r.created_at).toLocaleDateString() },
-        ]}
+    <div className="stack">
+      <PageHead
+        title={t('ui.admin.users')}
+        actions={
+          sensitive && (
+            <Button size="sm" onClick={() => setIpOpen(true)}>
+              {t('ui.admin.ip_lookup')}
+            </Button>
+          )
+        }
       />
-      {q.hasNextPage && <Button onClick={() => void q.fetchNextPage()}>{t('ui.torrent.load_more')}</Button>}
+      <IpLookup open={ipOpen} onClose={() => setIpOpen(false)} />
+      <Panel flush primary>
+        <form
+          className="fbar"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setFilter({ ...filter, prefix });
+          }}
+        >
+          <Input name="username_prefix" placeholder={t('ui.admin.user_search')} value={prefix} onChange={(e) => setPrefix(e.target.value)} style={{ maxWidth: 280 }} />
+          <Select name="status" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })} options={STATUSES.map((s) => ({ value: s, label: s || t('ui.admin.all_status') }))} />
+          <Button type="submit" size="sm" variant="primary">
+            {t('ui.admin.search')}
+          </Button>
+        </form>
+        <ErrorText error={q.error} />
+        {q.isLoading ? (
+          <SkeletonRows n={8} />
+        ) : (
+          <Table
+            rows={rows}
+            rowKey={(r) => r.id}
+            minWidth={820}
+            empty={t('ui.admin.no_users')}
+            onRowClick={(r) => nav(`/admin/users/${r.id}`)}
+            columns={[
+              { key: 'id', header: 'ID', render: (r) => <span className="mono">{r.id}</span> },
+              { key: 'u', header: t('ui.login.username'), render: (r) => <Link className="u" to={`/admin/users/${r.id}`}>{r.username}</Link> },
+              { key: 's', header: t('ui.admin.status'), render: (r) => <Status tone={statusTone(r.status)}>{r.status}</Status> },
+              { key: 'r', header: t('ui.admin.roles'), render: (r) => <span className="row" style={{ gap: 4 }}>{r.roles.filter((x) => !x.startsWith('levels:') && x !== 'user' && x !== 'guest').map((x) => <Tag key={x}>{x}</Tag>)}</span> },
+              { key: 'c', header: t('ui.profile.joined'), render: (r) => <span className="small nowrap">{new Date(r.created_at).toLocaleDateString()}</span> },
+              { key: 'l', header: t('ui.settings.last_seen'), render: (r) => <span className="small nowrap">{r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : '—'}</span> },
+            ]}
+          />
+        )}
+        {q.hasNextPage && <LoadMore onClick={() => void q.fetchNextPage()} loading={q.isFetchingNextPage} label={t('ui.torrent.load_more')} />}
+      </Panel>
     </div>
   );
 }
@@ -98,30 +172,13 @@ interface IpRow {
   last_seen_at: number;
 }
 
-interface IpUser {
-  user_id: number;
-  username: string;
-  status: string;
-  last_seen_at: number;
-  shared_ips?: number;
-  hits?: number;
+interface SecurityEvent {
+  id: number;
+  kind: string;
+  details: { ip_prefix?: string; ua?: string; method?: string; new_device?: boolean };
+  created_at: number;
 }
 
-function UserLinks({ rows, extra }: { rows: IpUser[]; extra: (u: IpUser) => string | number }) {
-  return (
-    <ul>
-      {rows.map((u) => (
-        <li key={u.user_id}>
-          <Link to={`/admin/users/${u.user_id}`}>{u.username}</Link> <Badge tone={u.status === 'active' ? 'muted' : 'danger'}>{u.status}</Badge>{' '}
-          <span className="pt-muted small">{extra(u)}</span>
-        </li>
-      ))}
-      {rows.length === 0 && <li className="pt-muted">—</li>}
-    </ul>
-  );
-}
-
-/** IP 历史与同 IP 账户：敏感数据，点击后加载（服务端记审计） */
 function UserIps({ id }: { id: number }) {
   const t = useT();
   const toast = useToast();
@@ -138,109 +195,65 @@ function UserIps({ id }: { id: number }) {
       toast(errText(e), 'error');
     }
   };
+  if (!data)
+    return (
+      <Note tone="warn" actions={<Button size="xs" onClick={load}>{t('ui.admin.load_sensitive')}</Button>}>
+        <span>{t('ui.admin.sensitive_hint')}</span>
+      </Note>
+    );
   return (
-    <Card title={t('ui.admin.ip_and_accounts')} actions={data ? null : <Button onClick={load}>{t('ui.admin.load_sensitive')}</Button>}>
-      {data ? (
-        <>
-          <Table
-            rows={data.ips}
-            rowKey={(r) => `${r.ip}-${r.source}-${r.last_seen_at}`}
-            empty="—"
-            columns={[
-              { key: 'ip', header: 'IP', render: (r) => <code className="pt-mono">{r.ip}</code> },
-              { key: 's', header: t('ui.admin.source'), render: (r) => t(`ui.security.source.${r.source}`) },
-              { key: 'h', header: t('ui.settings.hits'), render: (r) => r.hits },
-              { key: 't', header: t('ui.settings.last_seen'), render: (r) => new Date(r.last_seen_at).toLocaleString() },
-            ]}
-          />
-          <h3>{t('ui.admin.shared_ip_users')}</h3>
-          <UserLinks rows={data.shared} extra={(u) => t('ui.admin.shared_ips_n', { n: u.shared_ips ?? 0 })} />
-        </>
-      ) : (
-        <p className="pt-muted small">{t('ui.admin.sensitive_hint')}</p>
-      )}
-    </Card>
+    <div className="g2">
+      <Table
+        rows={data.ips}
+        rowKey={(r) => `${r.ip}-${r.source}-${r.last_seen_at}`}
+        empty="—"
+        columns={[
+          { key: 'ip', header: 'IP', render: (r) => <code className="mono">{r.ip}</code> },
+          { key: 's', header: t('ui.admin.source'), render: (r) => t(`ui.security.source.${r.source}`) },
+          { key: 'h', header: t('ui.settings.hits'), right: true, render: (r) => <span className="num">{r.hits}</span> },
+          { key: 't', header: t('ui.settings.last_seen'), render: (r) => <span className="small nowrap">{new Date(r.last_seen_at).toLocaleString()}</span> },
+        ]}
+      />
+      <div className="stack-s">
+        <h3>{t('ui.admin.shared_ip_users')}</h3>
+        <UserLinks rows={data.shared} extra={(u) => t('ui.admin.shared_ips_n', { n: u.shared_ips ?? 0 })} />
+      </div>
+    </div>
   );
 }
 
-interface SecurityEvent {
-  id: number;
-  kind: string;
-  details: { ip_prefix?: string; ua?: string; method?: string; new_device?: boolean };
-  created_at: number;
-}
-
-/** 安全记录（登录、改密、两步验证、新设备等，最近 200 条） */
 function UserSecurityEvents({ id }: { id: number }) {
   const t = useT();
   const q = useQuery({ queryKey: ['admin-security-events', id], queryFn: () => api<{ items: SecurityEvent[] }>(`/api/p/identity/v1/admin/users/${id}/security-events`) });
+  if (q.error) return <ErrorText error={q.error} />;
   return (
-    <Card title={t('ui.settings.security_events')}>
-      {q.error ? (
-        <ErrorText error={q.error} />
-      ) : (
-        <Table
-          rows={q.data?.items ?? []}
-          rowKey={(e) => e.id}
-          empty="—"
-          columns={[
-            { key: 'k', header: t('ui.admin.kind'), render: (e) => <>{t(`ui.security.${e.kind}`)} {e.details.new_device && <Badge tone="danger">{t('ui.security.new_device')}</Badge>}</> },
-            { key: 'ip', header: 'IP', render: (e) => e.details.ip_prefix ?? '—' },
-            { key: 'ua', header: t('ui.settings.device'), render: (e) => <span className="small">{e.details.ua ?? '—'}</span> },
-            { key: 't', header: t('ui.settings.time'), render: (e) => new Date(e.created_at).toLocaleString() },
-          ]}
-        />
-      )}
-    </Card>
+    <Table
+      rows={q.data?.items ?? []}
+      rowKey={(e) => e.id}
+      empty="—"
+      minWidth={640}
+      columns={[
+        { key: 'k', header: t('ui.admin.kind'), render: (e) => <span className="row" style={{ gap: 6 }}>{t(`ui.security.${e.kind}`)} {e.details.new_device && <Tag tone="x">{t('ui.security.new_device')}</Tag>}</span> },
+        { key: 'ip', header: 'IP', render: (e) => <span className="mono">{e.details.ip_prefix ?? '—'}</span> },
+        { key: 'ua', header: t('ui.settings.device'), render: (e) => <span className="small">{e.details.ua ?? '—'}</span> },
+        { key: 't', header: t('ui.settings.time'), render: (e) => <span className="small nowrap">{new Date(e.created_at).toLocaleString()}</span> },
+      ]}
+    />
   );
 }
 
-/** 按 IP / CIDR 查账户 */
-export function IpLookup() {
+function Overview({ d, refresh }: { d: Detail; refresh(): Promise<unknown> }) {
   const t = useT();
   const toast = useToast();
   const errText = useErrorText();
-  const [ip, setIp] = useState('');
-  const [rows, setRows] = useState<IpUser[] | null>(null);
-  const search = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      setRows((await api<{ items: IpUser[] }>(`/api/p/identity/v1/admin/ip-lookups?ip=${encodeURIComponent(ip.trim())}`)).items);
-    } catch (err) {
-      toast(errText(err), 'error');
-    }
-  };
-  return (
-    <Card title={t('ui.admin.ip_lookup')}>
-      <form className="searchbar" onSubmit={search}>
-        <Input name="ip" placeholder="203.0.113.7 / 203.0.113.0/24" value={ip} onChange={(e) => setIp(e.target.value)} required />
-        <Button type="submit">{t('ui.admin.ip_lookup_go')}</Button>
-      </form>
-      {rows && <UserLinks rows={rows} extra={(u) => new Date(u.last_seen_at).toLocaleString()} />}
-    </Card>
-  );
-}
-
-export function AdminUser() {
-  const t = useT();
-  const toast = useToast();
-  const errText = useErrorText();
-  const qc = useQueryClient();
-  const s = useSession();
-  const { id } = useParams();
-  const key = ['admin-user', id];
-  const q = useQuery({ queryKey: key, queryFn: () => api<Detail>(`/api/p/identity/v1/admin/users/${id}`) });
   const [ban, setBan] = useState({ kind: 'ban', reason_code: '', days: '' });
   const [role, setRole] = useState('uploader');
   const [title, setTitle] = useState<string | null>(null);
-  if (q.isLoading) return <Spinner />;
-  if (q.error) return <ErrorText error={q.error} />;
-  const d = q.data as Detail;
   const act = async (f: () => Promise<unknown>, ok?: string) => {
     try {
       await f();
       if (ok) toast(ok, 'success');
-      await qc.invalidateQueries({ queryKey: key });
+      await refresh();
     } catch (e) {
       toast(errText(e), 'error');
     }
@@ -251,97 +264,164 @@ export function AdminUser() {
     void act(() => api(`/api/p/identity/v1/admin/users/${d.id}/restrictions`, { json: { kind: ban.kind, reason_code: ban.reason_code, until }, idempotent: true }), t('ui.admin.saved'));
   };
   return (
-    <div>
-      <h1>
-        {d.username} <Badge tone={d.status === 'active' ? 'muted' : 'danger'}>{d.status}</Badge>
-      </h1>
-      <Card>
-        <Stat label="ID" value={d.id} />
-        <Stat label={t('ui.admin.roles')} value={d.roles.join(', ')} />
-        <Stat label={t('ui.settings.sessions')} value={d.sessions} />
-        <Stat label={t('ui.profile.joined')} value={new Date(d.created_at).toLocaleDateString()} />
-        <p>
-          <Link to={`/users/${d.id}`}>{t('ui.nav.profile')}</Link>
-        </p>
-      </Card>
-      <Card title={t('ui.settings.title_field')}>
-        <form
-          className="searchbar"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void act(() => api(`/api/p/identity/v1/admin/users/${d.id}`, { method: 'PATCH', json: { title: (title ?? d.title) || null } }), t('ui.admin.saved'));
-          }}
-        >
-          <Input value={title ?? d.title ?? ''} maxLength={30} onChange={(e) => setTitle(e.target.value)} />
-          <Button type="submit">{t('ui.admin.save')}</Button>
-        </form>
-      </Card>
-      <Card title={t('ui.admin.roles')}>
-        <ul>
-          {d.granted_roles.map((r) => (
-            <li key={r.role}>
-              {r.role} <span className="pt-muted small">({r.granted_by})</span>{' '}
-              <Button variant="ghost" onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/roles/${r.role}`, { method: 'DELETE' }))}>
-                ✕
-              </Button>
-            </li>
-          ))}
-        </ul>
-        <div className="searchbar">
-          <select className="pt-input" value={role} onChange={(e) => setRole(e.target.value)}>
-            {ROLES.map((r) => (
-              <option key={r}>{r}</option>
+    <div className="g2">
+      <div className="stack">
+        <section className="stack-s">
+          <h3>{t('ui.settings.title_field')}</h3>
+          <form
+            className="row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void act(() => api(`/api/p/identity/v1/admin/users/${d.id}`, { method: 'PATCH', json: { title: (title ?? d.title) || null } }), t('ui.admin.saved'));
+            }}
+          >
+            <Input value={title ?? d.title ?? ''} maxLength={30} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
+            <Button type="submit" size="sm">
+              {t('ui.admin.save')}
+            </Button>
+          </form>
+        </section>
+        <section className="stack-s">
+          <h3>{t('ui.admin.roles')}</h3>
+          <div className="row">
+            {d.granted_roles.map((r) => (
+              <span key={r.role} className="chip-x" title={r.granted_by}>
+                {r.role}
+                <button type="button" className="txt-btn" aria-label={t('ui.common.remove')} onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/roles/${r.role}`, { method: 'DELETE' }))}>
+                  ×
+                </button>
+              </span>
             ))}
-          </select>
-          <Button onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/roles`, { json: { role } }), t('ui.admin.saved'))}>{t('ui.admin.grant')}</Button>
-        </div>
-      </Card>
-      <Card
-        title={t('ui.admin.restrictions')}
-        actions={
-          <Button variant="danger" onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/session-revocations`, { json: {}, idempotent: true }), t('ui.admin.saved'))}>
+            {d.granted_roles.length === 0 && <span className="small muted">—</span>}
+          </div>
+          <div className="row">
+            <Select value={role} onChange={(e) => setRole(e.target.value)} options={ROLES} style={{ width: 'auto' }} />
+            <Button size="sm" onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/roles`, { json: { role } }), t('ui.admin.saved'))}>
+              {t('ui.admin.grant')}
+            </Button>
+          </div>
+        </section>
+      </div>
+      <section className="stack-s">
+        <div className="row-sb">
+          <h3>{t('ui.admin.restrictions')}</h3>
+          <Button size="xs" variant="danger" onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/session-revocations`, { json: {}, idempotent: true }), t('ui.admin.saved'))}>
             {t('ui.admin.revoke_sessions')}
           </Button>
-        }
-      >
+        </div>
         <Table
           rows={d.restrictions}
           rowKey={(r) => r.id}
           empty="—"
           columns={[
-            { key: 'k', header: t('ui.admin.kind'), render: (r) => <Badge tone={r.lifted_at ? 'muted' : 'danger'}>{r.kind}</Badge> },
-            { key: 's', header: t('ui.admin.source'), render: (r) => r.source },
-            { key: 'r', header: t('ui.admin.reason'), render: (r) => r.reason_code },
-            { key: 'u', header: t('ui.admin.until'), render: (r) => (r.until ? new Date(r.until).toLocaleString() : '∞') },
+            { key: 'k', header: t('ui.admin.kind'), render: (r) => <Status tone={r.lifted_at ? 'mute' : 'bad'}>{r.kind}</Status> },
+            { key: 'r', header: t('ui.admin.reason'), render: (r) => <span className="small">{r.reason_code}<span className="muted"> · {r.source}</span></span> },
+            { key: 'u', header: t('ui.admin.until'), render: (r) => <span className="small nowrap">{r.until ? new Date(r.until).toLocaleString() : '∞'}</span> },
             {
               key: 'a',
               header: '',
               render: (r) =>
                 r.lifted_at ? (
-                  <span className="pt-muted small">{t('ui.admin.lifted')}</span>
+                  <span className="tiny muted">{t('ui.admin.lifted')}</span>
                 ) : (
-                  <Button onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/restrictions/${r.id}`, { method: 'DELETE' }), t('ui.admin.saved'))}>
-                    {t('ui.admin.lift')}
-                  </Button>
+                  <div className="acts">
+                    <Button size="xs" onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/restrictions/${r.id}`, { method: 'DELETE' }), t('ui.admin.saved'))}>
+                      {t('ui.admin.lift')}
+                    </Button>
+                  </div>
                 ),
             },
           ]}
         />
-        <form onSubmit={restrict} className="searchbar">
-          <select className="pt-input" name="kind" value={ban.kind} onChange={(e) => setBan({ ...ban, kind: e.target.value })}>
-            <option value="ban">ban</option>
-            <option value="leech_disabled">leech_disabled</option>
-          </select>
-          <Input name="reason_code" placeholder={t('ui.admin.reason')} value={ban.reason_code} onChange={(e) => setBan({ ...ban, reason_code: e.target.value })} required maxLength={64} />
-          <Input name="days" type="number" min={1} placeholder={t('ui.admin.days')} value={ban.days} onChange={(e) => setBan({ ...ban, days: e.target.value })} />
-          <Button type="submit" variant="danger">
-            {t('ui.admin.apply_restriction')}
-          </Button>
+        <form onSubmit={restrict} className="form-2">
+          <Field label={t('ui.admin.kind')}>
+            <Select name="kind" value={ban.kind} onChange={(e) => setBan({ ...ban, kind: e.target.value })} options={['ban', 'leech_disabled']} />
+          </Field>
+          <Field label={t('ui.admin.days')}>
+            <Input name="days" type="number" min={1} value={ban.days} onChange={(e) => setBan({ ...ban, days: e.target.value })} />
+          </Field>
+          <Field label={t('ui.admin.reason')} className="span2">
+            <Input name="reason_code" value={ban.reason_code} onChange={(e) => setBan({ ...ban, reason_code: e.target.value })} required maxLength={64} />
+          </Field>
+          <div className="span2">
+            <Button type="submit" size="sm" variant="danger">
+              {t('ui.admin.apply_restriction')}
+            </Button>
+          </div>
         </form>
-      </Card>
-      {s.can('identity.users.read') && <UserSecurityEvents id={d.id} />}
-      {s.can('identity.users.read_sensitive') && <UserIps id={d.id} />}
-      <Slot name="admin.user.tabs" ctx={{ profile: d, user: s.me }} />
+      </section>
+    </div>
+  );
+}
+
+function UserTabs({ d, refresh }: { d: Detail; refresh(): Promise<unknown> }) {
+  const t = useT();
+  const s = useSession();
+  const entries = useSlotEntries('admin.user.tabs');
+  const title = useSlotEntryTitle();
+  const [tab, setTab] = useState('overview');
+  const tabs = [
+    { id: 'overview', label: t('ui.admin.overview') },
+    ...(s.can('identity.users.read') ? [{ id: 'security', label: t('ui.settings.security_events') }] : []),
+    ...(s.can('identity.users.read_sensitive') ? [{ id: 'ips', label: t('ui.admin.ip_and_accounts') }] : []),
+    ...entries.map((e) => ({ id: `p:${e.plugin}`, label: title(e) })),
+  ];
+  const cur = entries.find((e) => `p:${e.plugin}` === tab);
+  return (
+    <Panel flush primary>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      <div className="tabp">
+        {tab === 'overview' && <Overview d={d} refresh={refresh} />}
+        {tab === 'security' && <UserSecurityEvents id={d.id} />}
+        {tab === 'ips' && <UserIps id={d.id} />}
+        {cur && <SlotEntryView entry={cur} ctx={{ profile: d, user: s.me }} />}
+      </div>
+    </Panel>
+  );
+}
+
+export function AdminUser() {
+  const t = useT();
+  const qc = useQueryClient();
+  const { id } = useParams();
+  const key = ['admin-user', id];
+  const q = useQuery({ queryKey: key, queryFn: () => api<Detail>(`/api/p/identity/v1/admin/users/${id}`) });
+  if (q.isLoading) return <SkeletonRows n={6} />;
+  if (q.error) return <ErrorText error={q.error} />;
+  const d = q.data as Detail;
+  return (
+    <div className="stack">
+      <PageHead
+        crumb={
+          <>
+            <Link to="/admin/users">{t('ui.admin.users')}</Link>
+            <span>#{d.id}</span>
+          </>
+        }
+        title={
+          <span className="row" style={{ gap: 12 }}>
+            <Avatar name={d.username} size={44} />
+            {d.username}
+            <Status tone={statusTone(d.status)}>{d.status}</Status>
+          </span>
+        }
+        actions={
+          <Link className="btn btn-sm" to={`/users/${d.id}`}>
+            {t('ui.nav.profile')}
+          </Link>
+        }
+      />
+      <Kpis
+        items={[
+          { label: 'ID', value: d.id },
+          { label: t('ui.admin.roles'), value: d.roles.filter((x) => !x.startsWith('levels:') && x !== 'guest').length },
+          { label: t('ui.settings.sessions'), value: d.sessions },
+          { label: t('ui.profile.joined'), value: new Date(d.created_at).toLocaleDateString() },
+        ]}
+      />
+      <Suspense fallback={<SkeletonRows n={4} />}>
+        <UserTabs d={d} refresh={() => qc.invalidateQueries({ queryKey: key })} />
+      </Suspense>
     </div>
   );
 }

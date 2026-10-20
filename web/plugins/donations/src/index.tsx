@@ -1,10 +1,10 @@
 // donations 前端：捐赠页（/p/donations/：说明、本月进度、捐赠名单、我的捐赠与 VIP 到期时间）、用户菜单入口（开放时显示）、
 // 后台登记与记录（/admin/p/donations/）。
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Progress, Table, UserContent } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, Kpis, NavItem, Note, PageHead, Panel, Progress, Sheet, SideLayout, SkeletonRows, Status, Table, Tag, UserContent } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'donations.ui.menu': '捐赠',
@@ -36,6 +36,13 @@ registerMessages('zh-CN', {
   'donations.ui.revoke_confirm': '撤销只把这笔捐赠排除出统计，已发放的奖励不会收回。继续？',
   'donations.ui.totals': '本月 {m} · 累计 {t}',
   'donations.user_not_found': '找不到该用户',
+  'donations.ui.goal': '本月目标',
+  'donations.ui.date': '日期',
+  'donations.ui.this_month': '本月',
+  'donations.ui.total': '累计',
+  'donations.ui.count': '笔数',
+  'donations.ui.by': '登记人',
+  'donations.ui.cancel': '取消',
 });
 registerMessages('en', {
   'donations.ui.menu': 'Donate',
@@ -67,6 +74,13 @@ registerMessages('en', {
   'donations.ui.revoke_confirm': 'Revoking only excludes this donation from totals; rewards are not taken back. Continue?',
   'donations.ui.totals': 'This month {m} · total {t}',
   'donations.user_not_found': 'User not found',
+  'donations.ui.goal': 'Monthly goal',
+  'donations.ui.date': 'Date',
+  'donations.ui.this_month': 'This month',
+  'donations.ui.total': 'Total',
+  'donations.ui.count': 'Records',
+  'donations.ui.by': 'By',
+  'donations.ui.cancel': 'Cancel',
 });
 
 interface Mine {
@@ -102,49 +116,72 @@ function rewards(api: PluginApi, r: { vip_days: number; bonus: number }): ReactN
 function Page({ api }: { api: PluginApi }) {
   const [s, setS] = useState<Summary | null>(null);
   useEffect(() => {
-    void api.json<Summary>('/api/p/donations/v1/summary').then(setS);
+    void api
+      .json<Summary>('/api/p/donations/v1/summary')
+      .then(setS)
+      .catch((e: unknown) => api.toast(errText(api, e), 'error'));
   }, [api]);
-  if (!s) return null;
+  if (!s) return <SkeletonRows n={6} />;
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('donations.ui.title')}</h1>
-      {!s.enabled && <Card>{api.t('donations.ui.closed')}</Card>}
-      {s.enabled && (
-        <Card>
-          <UserContent html={s.instructions_html} />
-          {s.monthly_goal > 0 && (
-            <div data-testid="donation-goal">
-              <Progress value={s.month_total} max={s.monthly_goal} />
-              <div className="pt-muted small">
-                {api.t('donations.ui.month', { got: money(s.currency_symbol, s.month_total), goal: money(s.currency_symbol, s.monthly_goal) })}
-              </div>
-            </div>
-          )}
-        </Card>
-      )}
-      {s.vip_until && <Card>{api.t('donations.ui.vip_until', { t: new Date(s.vip_until).toLocaleString() })}</Card>}
-      {s.mine.length > 0 && (
-        <Card title={api.t('donations.ui.mine')}>
-          <Table
-            rows={s.mine}
-            rowKey={(r) => r.id}
-            columns={[
-              { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleDateString()}</span> },
-              { key: 'a', header: api.t('donations.ui.amount'), render: (r) => <>{money(s.currency_symbol, r.amount)} {r.revoked && <Badge>{api.t('donations.ui.revoked')}</Badge>}</> },
-              { key: 'r', header: api.t('donations.ui.rewards'), render: (r) => rewards(api, r) },
-            ]}
-          />
-        </Card>
-      )}
-      {s.donors.length > 0 && (
-        <Card title={api.t('donations.ui.donors')}>
-          <div className="pt-row donor-list" data-testid="donor-list">
-            {s.donors.map((d) => (
-              <span key={d}>{d}</span>
-            ))}
-          </div>
-        </Card>
-      )}
+    <div className="stack">
+      <PageHead title={api.t('donations.ui.title')} />
+      {!s.enabled && <Note tone="warn">{api.t('donations.ui.closed')}</Note>}
+      <SideLayout
+        width={340}
+        side={
+          <>
+            {s.enabled && s.monthly_goal > 0 && (
+              <Panel title={api.t('donations.ui.goal')} primary>
+                <div className="stack-s" data-testid="donation-goal">
+                  <span className="big-n num">{Math.min(100, Math.round((s.month_total * 100) / s.monthly_goal))}%</span>
+                  <Progress value={s.month_total} max={s.monthly_goal} label={api.t('donations.ui.goal')} tone={s.month_total >= s.monthly_goal ? 'ok' : undefined} />
+                  <span className="small muted">{api.t('donations.ui.month', { got: money(s.currency_symbol, s.month_total), goal: money(s.currency_symbol, s.monthly_goal) })}</span>
+                </div>
+              </Panel>
+            )}
+            {s.vip_until && <Note tone="ok">{api.t('donations.ui.vip_until', { t: new Date(s.vip_until).toLocaleString() })}</Note>}
+            {s.donors.length > 0 && (
+              <Panel title={api.t('donations.ui.donors')}>
+                <div className="row" data-testid="donor-list">
+                  {s.donors.map((d) => (
+                    <Tag key={d} tone="o">
+                      {d}
+                    </Tag>
+                  ))}
+                </div>
+              </Panel>
+            )}
+          </>
+        }
+      >
+        {s.enabled && (
+          <Panel>
+            <UserContent html={s.instructions_html} />
+          </Panel>
+        )}
+        {s.mine.length > 0 && (
+          <Panel title={api.t('donations.ui.mine')} flush>
+            <Table
+              rows={s.mine}
+              rowKey={(r) => r.id}
+              columns={[
+                { key: 't', header: api.t('donations.ui.date'), render: (r) => <span className="small muted num">{new Date(r.created_at).toLocaleDateString()}</span> },
+                {
+                  key: 'a',
+                  header: api.t('donations.ui.amount'),
+                  right: true,
+                  render: (r) => (
+                    <>
+                      <span className="num">{money(s.currency_symbol, r.amount)}</span> {r.revoked && <Status tone="mute">{api.t('donations.ui.revoked')}</Status>}
+                    </>
+                  ),
+                },
+                { key: 'r', header: api.t('donations.ui.rewards'), render: (r) => <span className="small">{rewards(api, r)}</span> },
+              ]}
+            />
+          </Panel>
+        )}
+      </SideLayout>
     </div>
   );
 }
@@ -169,11 +206,14 @@ const EMPTY = { username: '', amount: '', method: '', note: '', vip_days: '', bo
 function Admin({ api }: { api: PluginApi }) {
   const [d, setD] = useState<{ items: Row[]; month_total: number; total: number } | null>(null);
   const [f, setF] = useState(EMPTY);
+  const [recording, setRecording] = useState(false);
+  const [revoking, setRevoking] = useState<Row | null>(null);
   const load = () => void api.json<{ items: Row[]; month_total: number; total: number }>('/api/p/donations/v1/admin/donations').then(setD);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, []);
   const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
-  const submit = async () => {
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
     try {
       const r = await api.json<{ failed: { reward: string }[] }>('/api/p/donations/v1/admin/donations', {
         json: {
@@ -190,87 +230,149 @@ function Admin({ api }: { api: PluginApi }) {
       if (r.failed.length) api.toast(api.t('donations.ui.partial', { list: r.failed.map((x) => x.reward).join(', ') }), 'error');
       else api.toast(api.t('donations.ui.recorded'), 'success');
       setF(EMPTY);
+      setRecording(false);
       load();
-    } catch (e) {
-      api.toast(errText(api, e), 'error');
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
+    }
+  };
+  const revoke = async () => {
+    if (!revoking) return;
+    try {
+      await api.json(`/api/p/donations/v1/admin/donations/${revoking.id}/revoke`, { json: {} });
+      setRevoking(null);
+      load();
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
     }
   };
   const set = (k: keyof typeof EMPTY) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('donations.ui.admin')}</h1>
-      <Card title={api.t('donations.ui.record')}>
-        <div className="upload-grid">
-          <Field label={api.t('donations.ui.username')}>
-            <Input name="donation_username" value={f.username} onChange={set('username')} />
-          </Field>
-          <Field label={api.t('donations.ui.amount_yuan')}>
-            <Input name="donation_amount" type="number" min={0} step="0.01" value={f.amount} onChange={set('amount')} />
-          </Field>
-          <Field label={api.t('donations.ui.method')}>
-            <Input value={f.method} onChange={set('method')} />
-          </Field>
-          <Field label={api.t('donations.ui.note')}>
-            <Input value={f.note} onChange={set('note')} />
-          </Field>
-          <Field label={api.t('donations.ui.vip_days_field')}>
-            <Input type="number" min={0} value={f.vip_days} onChange={set('vip_days')} />
-          </Field>
-          <Field label={api.t('donations.ui.bonus_field')}>
-            <Input type="number" min={0} value={f.bonus} onChange={set('bonus')} />
-          </Field>
-          <Field label={api.t('donations.ui.medal_field')}>
-            <Input type="number" min={1} value={f.medal_id} onChange={set('medal_id')} />
-          </Field>
-        </div>
-        <label className="pt-row">
-          <input type="checkbox" checked={f.public} onChange={(e) => setF({ ...f, public: e.target.checked })} />
-          {api.t('donations.ui.public')}
-        </label>
-        <Button variant="primary" disabled={!f.username || !(Number(f.amount) > 0)} onClick={() => void submit()}>
-          {api.t('donations.ui.submit')}
-        </Button>
-      </Card>
+    <div className="stack">
+      <PageHead
+        title={api.t('donations.ui.admin')}
+        actions={
+          <Button variant="primary" onClick={() => setRecording(true)}>
+            {api.t('donations.ui.record')}
+          </Button>
+        }
+      />
       {d && (
-        <Card title={api.t('donations.ui.totals', { m: money('', d.month_total), t: money('', d.total) })}>
+        <Kpis
+          items={[
+            { label: api.t('donations.ui.this_month'), value: money('', d.month_total), tone: 'gold' },
+            { label: api.t('donations.ui.total'), value: money('', d.total) },
+            { label: api.t('donations.ui.count'), value: d.items.length },
+          ]}
+        />
+      )}
+      <Panel flush primary>
+        {!d ? (
+          <SkeletonRows n={6} />
+        ) : (
           <Table
             rows={d.items}
             rowKey={(r) => r.id}
+            minWidth={820}
             columns={[
-              { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
+              { key: 't', header: api.t('donations.ui.date'), render: (r) => <span className="small muted num nowrap">{new Date(r.created_at).toLocaleString()}</span> },
               { key: 'u', header: api.t('donations.ui.username'), render: (r) => r.username ?? '—' },
               {
                 key: 'a',
                 header: api.t('donations.ui.amount'),
+                right: true,
                 render: (r) => (
                   <>
-                    {money('', r.amount)} {r.method && <span className="pt-muted small">{r.method}</span>} {r.revoked_at && <Badge>{api.t('donations.ui.revoked')}</Badge>}
-                    {r.note && <div className="pt-muted small">{r.note}</div>}
+                    <span className="num">{money('', r.amount)}</span> {r.revoked_at && <Status tone="mute">{api.t('donations.ui.revoked')}</Status>}
                   </>
                 ),
               },
-              { key: 'r', header: api.t('donations.ui.rewards'), render: (r) => rewards(api, r) },
-              { key: 'b', header: '', render: (r) => <span className="pt-muted small">{r.created_by}</span> },
+              {
+                key: 'm',
+                header: api.t('donations.ui.method'),
+                render: (r) => (
+                  <>
+                    <span className="small">{r.method}</span>
+                    {r.note && <div className="tiny muted">{r.note}</div>}
+                  </>
+                ),
+              },
+              { key: 'r', header: api.t('donations.ui.rewards'), render: (r) => <span className="small">{rewards(api, r)}</span> },
+              { key: 'b', header: api.t('donations.ui.by'), render: (r) => <span className="small muted">{r.created_by}</span> },
               {
                 key: 'x',
                 header: '',
+                right: true,
                 render: (r) =>
                   !r.revoked_at && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (window.confirm(api.t('donations.ui.revoke_confirm')))
-                          void api.json(`/api/p/donations/v1/admin/donations/${r.id}/revoke`, { json: {} }).then(load);
-                      }}
-                    >
+                    <Button size="xs" variant="ghost" onClick={() => setRevoking(r)}>
                       {api.t('donations.ui.revoke')}
                     </Button>
                   ),
               },
             ]}
           />
-        </Card>
-      )}
+        )}
+      </Panel>
+      <Sheet
+        open={recording}
+        onClose={() => setRecording(false)}
+        title={api.t('donations.ui.record')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRecording(false)}>
+              {api.t('donations.ui.cancel')}
+            </Button>
+            <Button type="submit" form="donation-record" variant="primary" disabled={!f.username || !(Number(f.amount) > 0)}>
+              {api.t('donations.ui.submit')}
+            </Button>
+          </>
+        }
+      >
+        <form id="donation-record" className="form" onSubmit={(e) => void submit(e)}>
+          <div className="form-2">
+            <Field label={api.t('donations.ui.username')}>
+              <Input name="donation_username" value={f.username} onChange={set('username')} />
+            </Field>
+            <Field label={api.t('donations.ui.amount_yuan')}>
+              <Input name="donation_amount" type="number" min={0} step="0.01" value={f.amount} onChange={set('amount')} />
+            </Field>
+            <Field label={api.t('donations.ui.method')}>
+              <Input name="donation_method" value={f.method} onChange={set('method')} />
+            </Field>
+            <Field label={api.t('donations.ui.medal_field')}>
+              <Input name="donation_medal" type="number" min={1} value={f.medal_id} onChange={set('medal_id')} />
+            </Field>
+            <Field label={api.t('donations.ui.vip_days_field')}>
+              <Input name="donation_vip" type="number" min={0} value={f.vip_days} onChange={set('vip_days')} />
+            </Field>
+            <Field label={api.t('donations.ui.bonus_field')}>
+              <Input name="donation_bonus" type="number" min={0} value={f.bonus} onChange={set('bonus')} />
+            </Field>
+          </div>
+          <Field label={api.t('donations.ui.note')}>
+            <Input name="donation_note" value={f.note} onChange={set('note')} />
+          </Field>
+          <Checkbox name="donation_public" checked={f.public} onChange={(v) => setF({ ...f, public: v })} label={api.t('donations.ui.public')} />
+        </form>
+      </Sheet>
+      <Sheet
+        open={revoking !== null}
+        onClose={() => setRevoking(null)}
+        title={api.t('donations.ui.revoke')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRevoking(null)}>
+              {api.t('donations.ui.cancel')}
+            </Button>
+            <Button variant="danger" onClick={() => void revoke()}>
+              {api.t('donations.ui.revoke')}
+            </Button>
+          </>
+        }
+      >
+        <p>{api.t('donations.ui.revoke_confirm')}</p>
+      </Sheet>
     </div>
   );
 }
@@ -288,15 +390,9 @@ function MenuItem({ api }: SlotProps) {
   }, [api]);
   if (!on) return null;
   return (
-    <a
-      href="/p/donations/"
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate('/p/donations/');
-      }}
-    >
+    <NavItem to="/p/donations/" navigate={api.navigate}>
       {api.t('donations.ui.menu')}
-    </a>
+    </NavItem>
   );
 }
 

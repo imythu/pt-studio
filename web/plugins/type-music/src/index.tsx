@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card } from '@pt-studio/ui-kit';
+import { Button, Status, type Tone } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'type-music.ui.log_check': '抓轨日志预检',
@@ -60,41 +60,45 @@ function LogCheck({ ctx, api }: SlotProps<{ draft: { type_id?: string; fields?: 
       setBusy(false);
     }
   };
+  const tone = (n: number): Tone => (n >= 100 ? 'ok' : n >= 80 ? 'warn' : 'bad');
   return (
-    <Card title={api.t('type-music.ui.log_check')}>
-      <p className="pt-muted small">{api.t('type-music.ui.log_hint')}</p>
-      <Button disabled={busy || logs.length === 0} onClick={() => void check()}>
-        {api.t(busy ? 'type-music.ui.checking' : 'type-music.ui.check', { n: logs.length })}
-      </Button>
+    <fieldset className="poll">
+      <div className="row-sb">
+        <b>{api.t('type-music.ui.log_check')}</b>
+        <Button size="sm" disabled={busy || logs.length === 0} onClick={() => void check()}>
+          {api.t(busy ? 'type-music.ui.checking' : 'type-music.ui.check', { n: logs.length })}
+        </Button>
+      </div>
+      <p className="small muted">{api.t('type-music.ui.log_hint')}</p>
       {reports?.map((r, i) => (
-        <div key={i} className="pt-stack">
-          <p className="pt-row">
-            <strong>{api.t('type-music.ui.log_n', { n: i + 1 })}</strong>
+        <div key={i} className="stack-s">
+          <div className="row">
+            <b>{api.t('type-music.ui.log_n', { n: i + 1 })}</b>
             {typeof r === 'string' ? (
-              <span className="pt-error">{r}</span>
+              <span className="down small">{r}</span>
             ) : (
               <>
-                <Badge tone={r.score >= 100 ? 'success' : r.score >= 80 ? 'primary' : 'danger'}>{api.t('type-music.ui.score', { n: r.score })}</Badge>
-                {r.software && <span className="pt-muted small">{`${r.software} ${r.version ?? ''}`}</span>}
+                <Status tone={tone(r.score)}>{api.t('type-music.ui.score', { n: r.score })}</Status>
+                {r.software && <span className="small muted">{`${r.software} ${r.version ?? ''}`}</span>}
               </>
             )}
-          </p>
+          </div>
           {typeof r !== 'string' &&
             (r.issues.length === 0 ? (
-              <p className="pt-muted small">{api.t('type-music.ui.no_issues')}</p>
+              <p className="small muted">{api.t('type-music.ui.no_issues')}</p>
             ) : (
               <ul className="small">
                 {r.issues.map((x, j) => (
                   <li key={j}>
                     {api.t(`term:${x.message_term}`)}
-                    {x.track !== null && ` · ${api.t('type-music.ui.track', { n: x.track })}`} <span className="pt-muted">{api.t('type-music.ui.deduction', { n: x.deduction })}</span>
+                    {x.track !== null && ` · ${api.t('type-music.ui.track', { n: x.track })}`} <span className="down num">{api.t('type-music.ui.deduction', { n: x.deduction })}</span>
                   </li>
                 ))}
               </ul>
             ))}
         </div>
       ))}
-    </Card>
+    </fieldset>
   );
 }
 

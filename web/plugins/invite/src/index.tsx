@@ -5,7 +5,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Stat, Table, Tabs } from '@pt-studio/ui-kit';
+import { Button, CodeBox, Field, Input, Kpis, LoadMore, NavItem, Note, PageHead, Panel, PLink, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, type Tone } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'invite.ui.tab': '邀请',
@@ -33,14 +33,14 @@ registerMessages('zh-CN', {
   'invite.ui.uses': '{u}/{m} 次',
   'invite.ui.code': '邀请码',
   'invite.ui.valid': '有效 · 邀请人 {inviter} · {expires} 到期',
-  'invite.ui.menu': '邀请（{n}）',
+  'invite.ui.menu': '邀请',
   'invite.ui.title': '我的邀请',
   'invite.ui.balance': '可用名额',
   'invite.ui.outstanding': '未使用',
   'invite.ui.issue': '生成邀请',
   'invite.ui.email': '绑定邮箱（可选）',
   'invite.ui.note': '备注',
-  'invite.ui.issued': '邀请已生成，请复制链接（关闭后无法再次查看）：',
+  'invite.ui.issued': '邀请已生成，请复制链接（关闭后无法再次查看）',
   'invite.ui.list': '已发出的邀请',
   'invite.ui.invitees': '我邀请的人',
   'invite.ui.revoke': '撤销',
@@ -89,6 +89,21 @@ registerMessages('zh-CN', {
   'invite.state.confirmed': '已确认',
   'invite.state.reversed': '已撤销',
   'invite.state.exempt': '已豁免',
+  'invite.ui.close': '完成',
+  'invite.ui.cancel': '取消',
+  'invite.ui.lede': '邀请朋友加入。每条邀请只显示一次链接，请发出前确认对方可信 —— 被邀请人违规会连带影响你。',
+  'invite.ui.user': '用户',
+  'invite.ui.registered': '注册时间',
+  'invite.ui.time': '时间',
+  'invite.ui.event': '事项',
+  'invite.ui.kind': '类型',
+  'invite.ui.uses_col': '使用',
+  'invite.ui.until': '截止',
+  'invite.ui.rule': '规则',
+  'invite.ui.target': '对象',
+  'invite.ui.action': '操作',
+  'invite.ui.adjust_hint': '调整会记入名额明细，用户可见原因。',
+  'invite.ui.suspend_title': '暂停邀请权',
 });
 registerMessages('en', {
   'invite.ui.tab': 'Invites',
@@ -116,14 +131,14 @@ registerMessages('en', {
   'invite.ui.uses': '{u}/{m} uses',
   'invite.ui.code': 'Invite code',
   'invite.ui.valid': 'Valid · from {inviter} · expires {expires}',
-  'invite.ui.menu': 'Invites ({n})',
+  'invite.ui.menu': 'Invites',
   'invite.ui.title': 'My invites',
   'invite.ui.balance': 'Available',
   'invite.ui.outstanding': 'Outstanding',
   'invite.ui.issue': 'Create invite',
   'invite.ui.email': 'Bind email (optional)',
   'invite.ui.note': 'Note',
-  'invite.ui.issued': 'Invite created — copy the link now (it will not be shown again):',
+  'invite.ui.issued': 'Invite created — copy the link now (it will not be shown again)',
   'invite.ui.list': 'Sent invites',
   'invite.ui.invitees': 'People I invited',
   'invite.ui.revoke': 'Revoke',
@@ -172,6 +187,21 @@ registerMessages('en', {
   'invite.state.confirmed': 'confirmed',
   'invite.state.reversed': 'reversed',
   'invite.state.exempt': 'exempt',
+  'invite.ui.close': 'Done',
+  'invite.ui.cancel': 'Cancel',
+  'invite.ui.lede': 'Invite friends. Each link is shown only once — invite people you trust; their violations affect you too.',
+  'invite.ui.user': 'User',
+  'invite.ui.registered': 'Registered',
+  'invite.ui.time': 'Time',
+  'invite.ui.event': 'Event',
+  'invite.ui.kind': 'Kind',
+  'invite.ui.uses_col': 'Uses',
+  'invite.ui.until': 'Until',
+  'invite.ui.rule': 'Rule',
+  'invite.ui.target': 'Target',
+  'invite.ui.action': 'Action',
+  'invite.ui.adjust_hint': 'Adjustments appear in the quota history with the reason.',
+  'invite.ui.suspend_title': 'Suspend inviting',
 });
 
 interface FormBinding {
@@ -186,6 +216,10 @@ function errText(api: PluginApi, e: unknown): string {
   }
   return String(e);
 }
+
+const when = (s: string) => <span className="small muted nowrap num">{new Date(s).toLocaleString()}</span>;
+const date = (s: string) => <span className="small muted nowrap num">{new Date(s).toLocaleDateString()}</span>;
+const STATUS_TONE: Record<string, Tone> = { active: 'ok', exhausted: 'info', expired: 'mute', revoked: 'bad', suspended: 'bad', banned: 'bad', disabled: 'bad' };
 
 function CodeField({ ctx, api }: SlotProps<{ form: FormBinding }>) {
   const [code, setCode] = useState(() => new URLSearchParams(window.location.search).get('invite') ?? '');
@@ -231,15 +265,9 @@ function MenuItem({ api }: SlotProps) {
     void api.json<Quota>('/api/p/invite/v1/users/me/quota').then(setQ).catch(() => undefined);
   }, [api]);
   return (
-    <a
-      href="/p/invite/"
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate('/p/invite/');
-      }}
-    >
-      {api.t('invite.ui.menu', { n: q?.balance ?? '…' })}
-    </a>
+    <NavItem to="/p/invite/" navigate={api.navigate} count={q?.balance}>
+      {api.t('invite.ui.menu')}
+    </NavItem>
   );
 }
 
@@ -257,23 +285,115 @@ interface Eligibility {
   checks: { name: string; ok: boolean; code: string | null }[];
 }
 
-function MyInvites({ api }: { api: PluginApi; path: string }) {
-  const [quota, setQuota] = useState<Quota | null>(null);
-  const [elig, setElig] = useState<Eligibility | null>(null);
-  const [list, setList] = useState<Invite[]>([]);
-  const [invitees, setInvitees] = useState<{ user_id: number; username: string | null; status: string | null; registered_at: string }[]>([]);
+interface InviteStats {
+  issued: number;
+  outstanding: number;
+  expired: number;
+  revoked: number;
+  invitees: number;
+}
+
+interface Invitee {
+  user_id: number;
+  username: string | null;
+  status: string | null;
+  registered_at: string;
+}
+
+function UserLink({ api, id, name }: { api: PluginApi; id: number; name: string | null }) {
+  return (
+    <PLink to={`/users/${id}`} navigate={api.navigate}>
+      {name ?? `#${id}`}
+    </PLink>
+  );
+}
+
+/** 生成邀请：抽屉表单，生成后在同一抽屉里展示一次性链接 */
+function IssueSheet({ api, open, onClose, blocker, onIssued }: { api: PluginApi; open: boolean; onClose(): void; blocker: string | null; onIssued(): void }) {
   const [email, setEmail] = useState('');
   const [note, setNote] = useState('');
   const [issued, setIssued] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const close = () => {
+    setIssued(null);
+    onClose();
+  };
+  const issue = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await api.json<{ url: string }>('/api/p/invite/v1/users/me/invites', {
+        json: { email: email || undefined, note: note || undefined, request_id: crypto.randomUUID() },
+      });
+      setIssued(`${window.location.origin}${r.url}`);
+      setEmail('');
+      setNote('');
+      onIssued();
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Sheet
+      open={open}
+      onClose={close}
+      title={api.t('invite.ui.issue')}
+      footer={
+        issued ? (
+          <Button variant="primary" onClick={close}>
+            {api.t('invite.ui.close')}
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={close}>
+              {api.t('invite.ui.cancel')}
+            </Button>
+            <Button variant="primary" type="submit" form="invite-issue" disabled={!!blocker || busy}>
+              {api.t('invite.ui.issue')}
+            </Button>
+          </>
+        )
+      }
+    >
+      {issued ? (
+        <div className="stack">
+          <Note tone="ok">{api.t('invite.ui.issued')}</Note>
+          <CodeBox copy={issued}>
+            <span data-testid="invite-url">{issued}</span>
+          </CodeBox>
+        </div>
+      ) : (
+        <form id="invite-issue" className="form" onSubmit={(e) => void issue(e)}>
+          {blocker && <Note tone="warn">{api.t('invite.ui.not_eligible', { reason: blocker })}</Note>}
+          <Field label={api.t('invite.ui.email')}>
+            <Input type="email" name="invite_email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label={api.t('invite.ui.note')}>
+            <Input name="invite_note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+        </form>
+      )}
+    </Sheet>
+  );
+}
+
+function MyInvites({ api }: { api: PluginApi; path: string }) {
+  const [quota, setQuota] = useState<Quota | null>(null);
+  const [elig, setElig] = useState<Eligibility | null>(null);
+  const [list, setList] = useState<Invite[] | null>(null);
+  const [invitees, setInvitees] = useState<Invitee[]>([]);
   const [stats, setStats] = useState<InviteStats | null>(null);
-  const [tab, setTab] = useState('tree');
+  const [tab, setTab] = useState('sent');
+  const [issuing, setIssuing] = useState(false);
   const reload = async () => {
     void api.json<InviteStats>('/api/p/invite/v1/users/me/stats').then(setStats).catch(() => undefined);
     const [q, e, l, t] = await Promise.all([
       api.json<Quota>('/api/p/invite/v1/users/me/quota'),
       api.json<Eligibility>('/api/p/invite/v1/users/me/eligibility').catch(() => null),
       api.json<{ items: Invite[] }>('/api/p/invite/v1/users/me/invites'),
-      api.json<{ items: { user_id: number; username: string | null; status: string | null; registered_at: string }[] }>('/api/p/invite/v1/users/me/invitees'),
+      api.json<{ items: Invitee[] }>('/api/p/invite/v1/users/me/invitees'),
     ]);
     setQuota(q);
     setElig(e);
@@ -284,19 +404,6 @@ function MyInvites({ api }: { api: PluginApi; path: string }) {
     void reload().catch((e: unknown) => api.toast(errText(api, e), 'error'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const issue = async () => {
-    try {
-      const r = await api.json<{ url: string }>('/api/p/invite/v1/users/me/invites', {
-        json: { email: email || undefined, note: note || undefined, request_id: crypto.randomUUID() },
-      });
-      setIssued(`${window.location.origin}${r.url}`);
-      setEmail('');
-      setNote('');
-      await reload();
-    } catch (e) {
-      api.toast(errText(api, e), 'error');
-    }
-  };
   const revoke = async (id: number) => {
     try {
       await api.json(`/api/p/invite/v1/users/me/invites/${id}`, { method: 'DELETE' });
@@ -305,123 +412,92 @@ function MyInvites({ api }: { api: PluginApi; path: string }) {
       api.toast(errText(api, e), 'error');
     }
   };
-  const blocker = elig?.checks.find((c) => !c.ok);
+  const b = elig?.checks.find((c) => !c.ok);
+  const blocker = b ? api.t(b.code ?? b.name) : null;
+  const uid = api.user()?.id ?? 0;
   return (
-    <div>
-      <h1>{api.t('invite.ui.title')}</h1>
-      <Card>
-        <div className="pt-row stats-row">
-          <Stat label={api.t('invite.ui.balance')} value={quota?.balance ?? '…'} />
-          <Stat label={api.t('invite.ui.outstanding')} value={quota ? `${quota.outstanding} / ${quota.max_outstanding}` : '…'} />
-          {stats && (
-            <>
-              <Stat label={api.t('invite.ui.stats_issued')} value={stats.issued} />
-              <Stat label={api.t('invite.ui.stats_invitees')} value={stats.invitees} />
-              <Stat label={api.t('invite.ui.stats_expired')} value={stats.expired} />
-              <Stat label={api.t('invite.ui.stats_revoked')} value={stats.revoked} />
-            </>
-          )}
-        </div>
-      </Card>
-      <Card title={api.t('invite.ui.issue')}>
-        {blocker && <p className="pt-field-error">{api.t('invite.ui.not_eligible', { reason: api.t(blocker.code ?? blocker.name) })}</p>}
-        <Field label={api.t('invite.ui.email')}>
-          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        </Field>
-        <Field label={api.t('invite.ui.note')}>
-          <Input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
-        </Field>
-        <Button variant="primary" onClick={() => void issue()} disabled={!!blocker}>
-          {api.t('invite.ui.issue')}
-        </Button>
-        {issued && (
-          <p className="issued">
-            {api.t('invite.ui.issued')} <code className="pt-mono" data-testid="invite-url">{issued}</code>
-          </p>
-        )}
-      </Card>
-      <Card title={api.t('invite.ui.list')}>
-        <Table
-          rows={list}
-          rowKey={(r) => r.id}
-          columns={[
-            { key: 'hint', header: '#', render: (r) => <span className="pt-mono">…{r.code_hint}</span> },
-            { key: 'status', header: api.t('invite.ui.status'), render: (r) => <Badge tone={r.status === 'active' ? 'primary' : 'muted'}>{r.status}</Badge> },
-            { key: 'exp', header: api.t('invite.ui.expires'), render: (r) => new Date(r.expires_at).toLocaleString() },
-            { key: 'note', header: api.t('invite.ui.note'), render: (r) => r.note ?? r.email_domain ?? '' },
-            {
-              key: 'act',
-              header: '',
-              render: (r) =>
-                r.status === 'active' ? (
-                  <Button variant="danger" onClick={() => void revoke(r.id)}>
-                    {api.t('invite.ui.revoke')}
-                  </Button>
-                ) : null,
-            },
-          ]}
-        />
-      </Card>
-      <Card title={api.t('invite.ui.invitees')}>
-        <Table
-          rows={invitees}
-          rowKey={(r) => r.user_id}
-          columns={[
-            {
-              key: 'u',
-              header: '',
-              render: (r) => (
-                <a
-                  href={`/users/${r.user_id}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    api.navigate(`/users/${r.user_id}`);
-                  }}
-                >
-                  {r.username ?? `#${r.user_id}`}
-                </a>
-              ),
-            },
-            { key: 's', header: api.t('invite.ui.status'), render: (r) => r.status ?? '' },
-            { key: 'd', header: '', render: (r) => new Date(r.registered_at).toLocaleDateString() },
-          ]}
-        />
-      </Card>
-      <Card>
+    <div className="stack">
+      <PageHead
+        title={api.t('invite.ui.title')}
+        lede={api.t('invite.ui.lede')}
+        actions={
+          <Button variant="primary" onClick={() => setIssuing(true)}>
+            {api.t('invite.ui.issue')}
+          </Button>
+        }
+      />
+      <Kpis
+        items={[
+          { label: api.t('invite.ui.balance'), value: quota?.balance ?? '…', tone: quota && quota.balance > 0 ? 'up' : undefined },
+          { label: api.t('invite.ui.outstanding'), value: quota ? `${quota.outstanding} / ${quota.max_outstanding}` : '…' },
+          { label: api.t('invite.ui.stats_issued'), value: stats?.issued ?? '…', hint: stats ? `${api.t('invite.ui.stats_expired')} ${stats.expired} · ${api.t('invite.ui.stats_revoked')} ${stats.revoked}` : undefined },
+          { label: api.t('invite.ui.stats_invitees'), value: stats?.invitees ?? '…' },
+        ]}
+      />
+      <Panel flush primary>
+        {blocker && <Note tone="warn">{api.t('invite.ui.not_eligible', { reason: blocker })}</Note>}
         <Tabs
+          variant="flush"
           value={tab}
           onChange={setTab}
           tabs={[
+            { id: 'sent', label: api.t('invite.ui.list'), count: list?.length },
+            { id: 'invitees', label: api.t('invite.ui.invitees'), count: invitees.length },
             { id: 'tree', label: api.t('invite.ui.tree') },
             { id: 'ledger', label: api.t('invite.ui.ledger') },
             { id: 'penalties', label: api.t('invite.ui.my_penalties') },
           ]}
         />
-        {tab === 'tree' ? <Tree api={api} uid={api.user()?.id ?? 0} /> : tab === 'ledger' ? <QuotaLedger api={api} /> : <MyPenalties api={api} />}
-      </Card>
+        {tab === 'sent' ? (
+          list === null ? (
+            <SkeletonRows n={3} />
+          ) : (
+            <Table
+              rows={list}
+              rowKey={(r) => r.id}
+              empty={api.t('invite.ui.empty')}
+              columns={[
+                { key: 'hint', header: api.t('invite.ui.code'), render: (r) => <span className="pt-mono">…{r.code_hint}</span> },
+                { key: 'status', header: api.t('invite.ui.status'), render: (r) => <Status tone={STATUS_TONE[r.status] ?? 'mute'}>{r.status}</Status> },
+                { key: 'exp', header: api.t('invite.ui.expires'), render: (r) => when(r.expires_at) },
+                { key: 'note', header: api.t('invite.ui.note'), render: (r) => <span className="small">{r.note ?? r.email_domain ?? ''}</span> },
+                {
+                  key: 'act',
+                  header: '',
+                  right: true,
+                  render: (r) =>
+                    r.status === 'active' ? (
+                      <Button size="sm" variant="ghost" onClick={() => void revoke(r.id)}>
+                        {api.t('invite.ui.revoke')}
+                      </Button>
+                    ) : null,
+                },
+              ]}
+            />
+          )
+        ) : tab === 'invitees' ? (
+          <Table
+            rows={invitees}
+            rowKey={(r) => r.user_id}
+            empty={api.t('invite.ui.empty')}
+            columns={[
+              { key: 'u', header: api.t('invite.ui.user'), render: (r) => <UserLink api={api} id={r.user_id} name={r.username} /> },
+              { key: 's', header: api.t('invite.ui.status'), render: (r) => (r.status ? <Status tone={STATUS_TONE[r.status] ?? 'mute'}>{r.status}</Status> : '') },
+              { key: 'd', header: api.t('invite.ui.registered'), right: true, render: (r) => date(r.registered_at) },
+            ]}
+          />
+        ) : tab === 'tree' ? (
+          <div className="pad">
+            <Tree api={api} uid={uid} />
+          </div>
+        ) : tab === 'ledger' ? (
+          <QuotaLedger api={api} />
+        ) : (
+          <MyPenalties api={api} />
+        )}
+      </Panel>
+      <IssueSheet api={api} open={issuing} onClose={() => setIssuing(false)} blocker={blocker} onIssued={() => void reload()} />
     </div>
-  );
-}
-
-interface InviteStats {
-  issued: number;
-  outstanding: number;
-  expired: number;
-  revoked: number;
-  invitees: number;
-}
-
-function UserLink({ api, id, name }: { api: PluginApi; id: number; name: string | null }) {
-  return (
-    <a
-      href={`/users/${id}`}
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate(`/users/${id}`);
-      }}
-    >
-      {name ?? `#${id}`}
-    </a>
   );
 }
 
@@ -436,9 +512,9 @@ interface TreeNode {
   registered_at: string;
 }
 
-/** 邀请树：按层加载（深度 3），以邀请人归组成嵌套列表 */
+/** 邀请树：按层加载（深度 3），按邀请人深度优先展开成缩进列表 */
 function Tree({ api, uid }: { api: PluginApi; uid: number }) {
-  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const [nodes, setNodes] = useState<TreeNode[] | null>(null);
   const [levels, setLevels] = useState<number[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
@@ -447,43 +523,43 @@ function Tree({ api, uid }: { api: PluginApi; uid: number }) {
     if (cursor) q.set('cursor', cursor);
     try {
       const r = await api.json<{ level_counts: number[]; items: TreeNode[]; next_cursor: string | null }>(`/api/p/invite/v1/users/${uid}/tree?${q.toString()}`);
-      setNodes((old) => (cursor ? [...old, ...r.items] : r.items));
+      setNodes((old) => (cursor ? [...(old ?? []), ...r.items] : r.items));
       setLevels(r.level_counts);
       setNext(r.next_cursor);
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) setDenied(true);
+      else setNodes([]);
     }
   };
   useEffect(() => {
     if (uid) void load(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
-  if (denied) return <p className="pt-muted">{api.t('invite.ui.denied')}</p>;
-  const children = (parent: number) => nodes.filter((n) => n.inviter_id === parent);
-  const render = (parent: number): ReactNode => {
-    const kids = children(parent);
-    if (kids.length === 0) return null;
-    return (
-      <ul className="invite-tree">
-        {kids.map((n) => (
-          <li key={n.user_id}>
-            {n.purged ? <span className="pt-muted">{`#${n.user_id} ${api.t('invite.ui.purged')}`}</span> : <UserLink api={api} id={n.user_id} name={n.username} />}{' '}
-            {n.status && n.status !== 'active' && <Badge tone="danger">{n.status}</Badge>}{' '}
-            <span className="pt-muted small">
-              {new Date(n.registered_at).toLocaleDateString()}
-              {n.direct_count > 0 && ` · ${api.t('invite.ui.direct', { n: n.direct_count })}`}
-            </span>
-            {render(n.user_id)}
-          </li>
-        ))}
-      </ul>
-    );
+  if (denied) return <Note>{api.t('invite.ui.denied')}</Note>;
+  if (nodes === null) return <SkeletonRows n={3} />;
+  const flat: ReactNode[] = [];
+  const walk = (parent: number, d: number) => {
+    for (const n of nodes.filter((x) => x.inviter_id === parent)) {
+      flat.push(
+        <div key={n.user_id} style={{ '--d': d } as React.CSSProperties}>
+          {d > 0 && <span className="muted">└</span>}
+          {n.purged ? <span className="muted">{`#${n.user_id} ${api.t('invite.ui.purged')}`}</span> : <UserLink api={api} id={n.user_id} name={n.username} />}
+          {n.status && n.status !== 'active' && <Status tone="bad">{n.status}</Status>}
+          <span className="tiny muted">
+            {new Date(n.registered_at).toLocaleDateString()}
+            {n.direct_count > 0 && ` · ${api.t('invite.ui.direct', { n: n.direct_count })}`}
+          </span>
+        </div>,
+      );
+      walk(n.user_id, d + 1);
+    }
   };
+  walk(uid, 0);
   return (
-    <div className="invite-tree-wrap">
-      {levels.length > 0 && <p className="pt-muted small">{api.t('invite.ui.tree_levels', { levels: levels.join(' / ') })}</p>}
-      {nodes.length === 0 ? <p className="pt-muted">{api.t('invite.ui.empty')}</p> : render(uid)}
-      {next && <Button onClick={() => void load(next)}>{api.t('invite.ui.more')}</Button>}
+    <div className="stack-s">
+      {levels.length > 0 && <p className="small muted">{api.t('invite.ui.tree_levels', { levels: levels.join(' / ') })}</p>}
+      {flat.length === 0 ? <p className="muted">{api.t('invite.ui.empty')}</p> : <div className="tree">{flat}</div>}
+      {next && <LoadMore onClick={() => void load(next)} label={api.t('invite.ui.more')} />}
     </div>
   );
 }
@@ -502,22 +578,24 @@ function ProfileTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
         if (e instanceof ApiError && e.status === 403) setDenied(true);
       });
   }, [api, uid]);
-  if (denied) return <p className="pt-muted">{api.t('invite.ui.denied')}</p>;
+  if (denied) return <Note>{api.t('invite.ui.denied')}</Note>;
   return (
-    <div className="pt-stack">
-      <p>
-        <strong>{api.t('invite.ui.chain')}</strong>:{' '}
-        {chain === null ? '…' : chain.length === 0 ? (
-          <span className="pt-muted">{api.t('invite.ui.chain_none')}</span>
-        ) : (
-          [...chain].reverse().map((a, i) => (
-            <span key={a.user_id}>
-              {i > 0 && ' → '}
-              <UserLink api={api} id={a.user_id} name={a.username} />
-            </span>
-          ))
-        )}
-      </p>
+    <div className="stack">
+      <dl className="kv">
+        <dt>{api.t('invite.ui.chain')}</dt>
+        <dd>
+          {chain === null ? '…' : chain.length === 0 ? (
+            <span className="muted">{api.t('invite.ui.chain_none')}</span>
+          ) : (
+            [...chain].reverse().map((a, i) => (
+              <span key={a.user_id}>
+                {i > 0 && ' → '}
+                <UserLink api={api} id={a.user_id} name={a.username} />
+              </span>
+            ))
+          )}
+        </dd>
+      </dl>
       <Tree key={uid} api={api} uid={uid} />
     </div>
   );
@@ -534,21 +612,22 @@ interface LedgerRow {
 }
 
 function QuotaLedger({ api }: { api: PluginApi }) {
-  const [rows, setRows] = useState<LedgerRow[]>([]);
+  const [rows, setRows] = useState<LedgerRow[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const load = async (cursor: string | null) => {
     const r = await api.json<{ items: LedgerRow[]; next_cursor: string | null }>(`/api/p/invite/v1/users/me/quota/ledger${cursor ? `?cursor=${cursor}` : ''}`);
-    setRows((old) => (cursor ? [...old, ...r.items] : r.items));
+    setRows((old) => (cursor ? [...(old ?? []), ...r.items] : r.items));
     setNext(r.next_cursor);
   };
   useEffect(() => {
-    void load(null).catch(() => undefined);
+    void load(null).catch(() => setRows([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const reason = (r: string) => {
     const k = `invite.reason.${r}`;
     return api.t(k) === k ? r : api.t(k);
   };
+  if (rows === null) return <SkeletonRows n={3} />;
   return (
     <>
       <Table
@@ -556,40 +635,43 @@ function QuotaLedger({ api }: { api: PluginApi }) {
         rowKey={(r) => r.id}
         empty={api.t('invite.ui.empty')}
         columns={[
-          { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-          { key: 'r', header: '', render: (r) => <>{reason(r.reason)}{r.note && <div className="pt-muted small">{r.note}</div>}</> },
-          { key: 'd', header: api.t('invite.ui.delta_col'), render: (r) => <span className={r.delta >= 0 ? 'ledger-in' : 'ledger-out'}>{r.delta >= 0 ? `+${r.delta}` : r.delta}</span> },
-          { key: 'b', header: api.t('invite.ui.after'), render: (r) => r.balance_after },
+          { key: 't', header: api.t('invite.ui.time'), render: (r) => when(r.created_at) },
+          { key: 'r', header: api.t('invite.ui.event'), render: (r) => <>{reason(r.reason)}{r.note && <div className="tiny muted">{r.note}</div>}</> },
+          { key: 'd', header: api.t('invite.ui.delta_col'), right: true, render: (r) => <span className={r.delta >= 0 ? 'num up' : 'num down'}>{r.delta >= 0 ? `+${r.delta}` : r.delta}</span> },
+          { key: 'b', header: api.t('invite.ui.after'), right: true, render: (r) => <span className="num">{r.balance_after}</span> },
         ]}
       />
-      {next && <Button onClick={() => void load(next)}>{api.t('invite.ui.more')}</Button>}
+      {next && <LoadMore onClick={() => void load(next)} label={api.t('invite.ui.more')} />}
     </>
   );
 }
 
+const PENALTY_TONE: Record<string, Tone> = { applied: 'bad', pending_review: 'warn', confirmed: 'bad', reversed: 'mute', exempt: 'mute' };
+
 function MyPenalties({ api }: { api: PluginApi }) {
-  const [rows, setRows] = useState<Penalty[]>([]);
+  const [rows, setRows] = useState<Penalty[] | null>(null);
   useEffect(() => {
     void api
       .json<{ items: Penalty[] }>('/api/p/invite/v1/users/me/penalties')
       .then((r) => setRows(r.items))
-      .catch(() => undefined);
+      .catch(() => setRows([]));
   }, [api]);
+  if (rows === null) return <SkeletonRows n={3} />;
   return (
     <Table
       rows={rows}
       rowKey={(r) => r.id}
       empty={api.t('invite.ui.no_penalties')}
       columns={[
-        { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-        { key: 'd', header: '', render: (r) => api.t('invite.ui.penalty_desc', { invitee: r.invitee_id, trigger: r.trigger, depth: r.depth }) },
-        { key: 's', header: '', render: (r) => <Badge tone={r.state === 'reversed' || r.state === 'exempt' ? 'muted' : 'danger'}>{api.t(`invite.state.${r.state}`)}</Badge> },
+        { key: 't', header: api.t('invite.ui.time'), render: (r) => when(r.created_at) },
+        { key: 'd', header: api.t('invite.ui.event'), render: (r) => api.t('invite.ui.penalty_desc', { invitee: r.invitee_id, trigger: r.trigger, depth: r.depth }) },
+        { key: 's', header: api.t('invite.ui.status'), right: true, render: (r) => <Status tone={PENALTY_TONE[r.state] ?? 'mute'}>{api.t(`invite.state.${r.state}`)}</Status> },
       ]}
     />
   );
 }
 
-interface Quota {
+interface AdminQuota {
   balance: number;
   permanent: number;
 }
@@ -604,14 +686,15 @@ interface Suspension {
 
 const day = (n: string) => (n.trim() ? Date.now() + Number(n) * 86_400_000 : null);
 
-/** 后台用户详情页“邀请”标签：名额（调整）与邀请权暂停 */
+/** 后台用户详情页“邀请”标签：名额（调整）与邀请权暂停；两个操作都在抽屉里填写 */
 function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   const uid = ctx.profile.id;
-  const [q, setQ] = useState<Quota | null>(null);
+  const [q, setQ] = useState<AdminQuota | null>(null);
   const [sus, setSus] = useState<Suspension[]>([]);
+  const [sheet, setSheet] = useState<'adjust' | 'suspend' | null>(null);
   const [f, setF] = useState({ delta: '', days: '', reason: '', sdays: '', sreason: '' });
   const load = () => {
-    void api.json<Quota>(`/api/p/invite/v1/admin/users/${uid}/quota`).then(setQ);
+    void api.json<AdminQuota>(`/api/p/invite/v1/admin/users/${uid}/quota`).then(setQ);
     void api.json<{ items: Suspension[] }>(`/api/p/invite/v1/admin/users/${uid}/suspensions`).then((r) => setSus(r.items));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -620,9 +703,12 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
     try {
       await fn();
       api.toast(api.t('invite.ui.done'), 'success');
+      setSheet(null);
       load();
+      return true;
     } catch (e) {
       api.toast(errText(api, e), 'error');
+      return false;
     }
   };
   const adjust = (e: FormEvent) => {
@@ -631,64 +717,107 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
       api.json(`/api/p/invite/v1/admin/users/${uid}/quota-adjustments`, {
         json: { delta: Number(f.delta), reason: f.reason, expires_at_ms: day(f.days), request_id: crypto.randomUUID() },
       }),
-    ).then(() => setF((o) => ({ ...o, delta: '', reason: '' })));
+    ).then((ok) => ok && setF((o) => ({ ...o, delta: '', days: '', reason: '' })));
   };
   const suspend = (e: FormEvent) => {
     e.preventDefault();
-    void act(() => api.json(`/api/p/invite/v1/admin/users/${uid}/suspensions`, { json: { until_ms: day(f.sdays), reason: f.sreason }, idempotent: true }));
+    void act(() => api.json(`/api/p/invite/v1/admin/users/${uid}/suspensions`, { json: { until_ms: day(f.sdays), reason: f.sreason }, idempotent: true })).then(
+      (ok) => ok && setF((o) => ({ ...o, sdays: '', sreason: '' })),
+    );
   };
-  if (!q) return null;
+  if (!q) return <SkeletonRows n={3} />;
+  const cancel = (
+    <Button variant="ghost" onClick={() => setSheet(null)}>
+      {api.t('invite.ui.cancel')}
+    </Button>
+  );
   return (
-    <Card>
-      <p>
-        <strong>{api.t('invite.ui.quota', { n: q.balance, p: q.permanent })}</strong>
-      </p>
-      <form onSubmit={adjust} className="upload-grid">
-        <Field label={api.t('invite.ui.delta')}>
-          <Input name="invite_delta" type="number" value={f.delta} onChange={(e) => setF({ ...f, delta: e.target.value })} />
-        </Field>
-        <Field label={api.t('invite.ui.expires_days')}>
-          <Input name="invite_days" type="number" min={1} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
-        </Field>
-        <div className="span2">
+    <div className="stack">
+      <div className="row-sb">
+        <strong className="num">{api.t('invite.ui.quota', { n: q.balance, p: q.permanent })}</strong>
+        <div className="form-acts">
+          <Button size="sm" onClick={() => setSheet('adjust')}>
+            {api.t('invite.ui.adjust')}
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => setSheet('suspend')}>
+            {api.t('invite.ui.suspend')}
+          </Button>
+        </div>
+      </div>
+      <Panel title={api.t('invite.ui.suspensions')} flush>
+        <Table
+          rows={sus}
+          rowKey={(r) => r.id}
+          empty={api.t('invite.ui.empty')}
+          columns={[
+            { key: 't', header: api.t('invite.ui.time'), render: (r) => when(r.created_at) },
+            { key: 'r', header: api.t('invite.ui.reason'), render: (r) => <><Tag>{r.source}</Tag> {r.reason ?? ''}</> },
+            { key: 'u', header: api.t('invite.ui.until'), render: (r) => (r.until ? when(r.until) : '∞') },
+            {
+              key: 'x',
+              header: '',
+              right: true,
+              render: (r) =>
+                r.lifted_at ? (
+                  <Status tone="mute">{api.t('invite.ui.lifted')}</Status>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={() => void act(() => api.json(`/api/p/invite/v1/admin/users/${uid}/suspensions/${r.id}`, { method: 'DELETE' }))}>
+                    {api.t('invite.ui.lift')}
+                  </Button>
+                ),
+            },
+          ]}
+        />
+      </Panel>
+      <Sheet
+        open={sheet === 'adjust'}
+        onClose={() => setSheet(null)}
+        title={api.t('invite.ui.adjust')}
+        footer={
+          <>
+            {cancel}
+            <Button type="submit" form="invite-adjust" variant="primary" disabled={!Number(f.delta) || !f.reason.trim()}>
+              {api.t('invite.ui.adjust')}
+            </Button>
+          </>
+        }
+      >
+        <form id="invite-adjust" className="form" onSubmit={adjust}>
+          <p className="small muted">{api.t('invite.ui.adjust_hint')}</p>
+          <Field label={api.t('invite.ui.delta')}>
+            <Input name="invite_delta" type="number" value={f.delta} onChange={(e) => setF({ ...f, delta: e.target.value })} />
+          </Field>
+          <Field label={api.t('invite.ui.expires_days')}>
+            <Input name="invite_days" type="number" min={1} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
+          </Field>
           <Field label={api.t('invite.ui.reason')}>
             <Input name="invite_reason" maxLength={500} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
           </Field>
-          <Button type="submit" disabled={!Number(f.delta) || !f.reason.trim()}>
-            {api.t('invite.ui.adjust')}
-          </Button>
-        </div>
-      </form>
-      <h3>{api.t('invite.ui.suspensions')}</h3>
-      <Table
-        rows={sus}
-        rowKey={(r) => r.id}
-        columns={[
-          { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-          { key: 'r', header: '', render: (r) => `${r.source} · ${r.reason ?? ''}` },
-          { key: 'u', header: '', render: (r) => (r.until ? new Date(r.until).toLocaleString() : '∞') },
-          {
-            key: 'x',
-            header: '',
-            render: (r) =>
-              r.lifted_at ? (
-                <Badge>{api.t('invite.ui.lifted')}</Badge>
-              ) : (
-                <Button variant="ghost" onClick={() => void act(() => api.json(`/api/p/invite/v1/admin/users/${uid}/suspensions/${r.id}`, { method: 'DELETE' }))}>
-                  {api.t('invite.ui.lift')}
-                </Button>
-              ),
-          },
-        ]}
-      />
-      <form onSubmit={suspend} className="searchbar">
-        <Input name="suspend_days" type="number" min={1} placeholder={api.t('invite.ui.suspend_days')} value={f.sdays} onChange={(e) => setF({ ...f, sdays: e.target.value })} />
-        <Input name="suspend_reason" placeholder={api.t('invite.ui.reason')} maxLength={500} value={f.sreason} onChange={(e) => setF({ ...f, sreason: e.target.value })} />
-        <Button type="submit" variant="danger" disabled={!f.sreason.trim()}>
-          {api.t('invite.ui.suspend')}
-        </Button>
-      </form>
-    </Card>
+        </form>
+      </Sheet>
+      <Sheet
+        open={sheet === 'suspend'}
+        onClose={() => setSheet(null)}
+        title={api.t('invite.ui.suspend_title')}
+        footer={
+          <>
+            {cancel}
+            <Button type="submit" form="invite-suspend" variant="danger" disabled={!f.sreason.trim()}>
+              {api.t('invite.ui.suspend')}
+            </Button>
+          </>
+        }
+      >
+        <form id="invite-suspend" className="form" onSubmit={suspend}>
+          <Field label={api.t('invite.ui.suspend_days')}>
+            <Input name="suspend_days" type="number" min={1} value={f.sdays} onChange={(e) => setF({ ...f, sdays: e.target.value })} />
+          </Field>
+          <Field label={api.t('invite.ui.reason')}>
+            <Input name="suspend_reason" maxLength={500} value={f.sreason} onChange={(e) => setF({ ...f, sreason: e.target.value })} />
+          </Field>
+        </form>
+      </Sheet>
+    </div>
   );
 }
 
@@ -719,9 +848,9 @@ interface Penalty {
 
 const STATUSES = ['', 'active', 'exhausted', 'expired', 'revoked'];
 
-function Codes({ api }: { api: PluginApi }) {
+function Codes({ api, issuing, setIssuing }: { api: PluginApi; issuing: boolean; setIssuing(v: boolean): void }) {
   const [status, setStatus] = useState('active');
-  const [rows, setRows] = useState<AdminInvite[]>([]);
+  const [rows, setRows] = useState<AdminInvite[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [f, setF] = useState({ kind: 'system', max_uses: '1', expires_days: '7', note: '' });
   const [issued, setIssued] = useState<string | null>(null);
@@ -730,11 +859,11 @@ function Codes({ api }: { api: PluginApi }) {
     if (status) q.set('status', status);
     if (cursor) q.set('cursor', cursor);
     const r = await api.json<{ items: AdminInvite[]; next_cursor: string | null }>(`/api/p/invite/v1/admin/invites?${q.toString()}`);
-    setRows((old) => (cursor ? [...old, ...r.items] : r.items));
+    setRows((old) => (cursor ? [...(old ?? []), ...r.items] : r.items));
     setNext(r.next_cursor);
   };
   useEffect(() => {
-    void load(null);
+    void load(null).catch((e: unknown) => api.toast(errText(api, e), 'error'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const issue = async (e: FormEvent) => {
@@ -757,71 +886,107 @@ function Codes({ api }: { api: PluginApi }) {
       api.toast(errText(api, err), 'error');
     }
   };
+  const close = () => {
+    setIssued(null);
+    setIssuing(false);
+  };
   return (
     <>
-      <Card title={api.t('invite.ui.issue')}>
-        <form onSubmit={(e) => void issue(e)} className="upload-grid">
-          <Field label="">
-            <select className="pt-input" name="invite_kind" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value, max_uses: e.target.value === 'campaign' ? '50' : '1' })}>
-              <option value="system">{api.t('invite.ui.kind_system')}</option>
-              <option value="campaign">{api.t('invite.ui.kind_campaign')}</option>
-            </select>
-          </Field>
-          <Field label={api.t('invite.ui.max_uses')}>
-            <Input name="invite_max_uses" type="number" min={1} value={f.max_uses} onChange={(e) => setF({ ...f, max_uses: e.target.value })} />
-          </Field>
-          <Field label={api.t('invite.ui.expires_days')}>
-            <Input name="invite_expires" type="number" min={1} value={f.expires_days} onChange={(e) => setF({ ...f, expires_days: e.target.value })} />
-          </Field>
-          <Field label={api.t('invite.ui.reason')}>
-            <Input name="invite_note" maxLength={200} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
-          </Field>
-          <div className="span2">
-            <Button type="submit" variant="primary">
-              {api.t('invite.ui.issue')}
-            </Button>
-            {issued && (
-              <p data-testid="issued-invite">
-                {api.t('invite.ui.issued')} 
-                <code>{issued}</code>
-              </p>
-            )}
-          </div>
-        </form>
-      </Card>
-      <Card>
-        <Tabs value={status} onChange={setStatus} tabs={STATUSES.map((s) => ({ id: s, label: s || api.t('invite.ui.all') }))} />
+      <Tabs variant="flush" value={status} onChange={setStatus} tabs={STATUSES.map((s) => ({ id: s, label: s || api.t('invite.ui.all') }))} />
+      {rows === null ? (
+        <SkeletonRows n={4} />
+      ) : (
         <Table
           rows={rows}
           rowKey={(r) => r.id}
+          empty={api.t('invite.ui.empty')}
+          minWidth={820}
           columns={[
-            { key: 'c', header: '', render: (r) => <code>{r.code_hint}…</code> },
-            { key: 'k', header: '', render: (r) => <><Badge>{r.kind}</Badge> <span className="pt-muted small">{r.source}</span></> },
-            { key: 's', header: '', render: (r) => r.status },
-            { key: 'u', header: '', render: (r) => api.t('invite.ui.uses', { u: r.use_count, m: r.max_uses }) },
-            { key: 'e', header: '', render: (r) => <span className="pt-muted small">{new Date(r.expires_at).toLocaleDateString()}</span> },
-            { key: 'n', header: '', render: (r) => <span className="pt-muted small">{r.note}</span> },
+            { key: 'c', header: api.t('invite.ui.code'), render: (r) => <span className="pt-mono">{r.code_hint}…</span> },
+            { key: 'k', header: api.t('invite.ui.kind'), render: (r) => <><Tag tone={r.kind === 'campaign' ? 'o' : undefined}>{r.kind}</Tag> <span className="tiny muted">{r.source}</span></> },
+            { key: 's', header: api.t('invite.ui.status'), render: (r) => <Status tone={STATUS_TONE[r.status] ?? 'mute'}>{r.status}</Status> },
+            { key: 'u', header: api.t('invite.ui.uses_col'), right: true, render: (r) => <span className="num">{api.t('invite.ui.uses', { u: r.use_count, m: r.max_uses })}</span> },
+            { key: 'e', header: api.t('invite.ui.expires'), render: (r) => date(r.expires_at) },
+            { key: 'n', header: api.t('invite.ui.note'), render: (r) => <span className="small muted">{r.note}</span> },
             {
               key: 'x',
               header: '',
+              right: true,
               render: (r) =>
                 r.status === 'active' && (
-                  <Button variant="ghost" onClick={() => void revoke(r.id)}>
+                  <Button size="sm" variant="ghost" onClick={() => void revoke(r.id)}>
                     {api.t('invite.ui.revoke')}
                   </Button>
                 ),
             },
           ]}
         />
-        {next && <Button onClick={() => void load(next)}>{api.t('invite.ui.more')}</Button>}
-      </Card>
+      )}
+      {next && <LoadMore onClick={() => void load(next)} label={api.t('invite.ui.more')} />}
+      <Sheet
+        open={issuing}
+        onClose={close}
+        title={api.t('invite.ui.issue')}
+        footer={
+          issued ? (
+            <Button variant="primary" onClick={close}>
+              {api.t('invite.ui.close')}
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={close}>
+                {api.t('invite.ui.cancel')}
+              </Button>
+              <Button type="submit" form="invite-admin-issue" variant="primary">
+                {api.t('invite.ui.issue')}
+              </Button>
+            </>
+          )
+        }
+      >
+        {issued ? (
+          <div className="stack" data-testid="issued-invite">
+            <Note tone="ok">{api.t('invite.ui.issued')}</Note>
+            <CodeBox copy={issued}>{issued}</CodeBox>
+          </div>
+        ) : (
+          <form id="invite-admin-issue" className="form" onSubmit={(e) => void issue(e)}>
+            <Field label={api.t('invite.ui.kind')}>
+              <Select
+                name="invite_kind"
+                value={f.kind}
+                onChange={(e) => setF({ ...f, kind: e.target.value, max_uses: e.target.value === 'campaign' ? '50' : '1' })}
+                options={[
+                  { value: 'system', label: api.t('invite.ui.kind_system') },
+                  { value: 'campaign', label: api.t('invite.ui.kind_campaign') },
+                ]}
+              />
+            </Field>
+            <div className="form-2">
+              <Field label={api.t('invite.ui.max_uses')}>
+                <Input name="invite_max_uses" type="number" min={1} value={f.max_uses} onChange={(e) => setF({ ...f, max_uses: e.target.value })} />
+              </Field>
+              <Field label={api.t('invite.ui.expires_days')}>
+                <Input name="invite_expires" type="number" min={1} value={f.expires_days} onChange={(e) => setF({ ...f, expires_days: e.target.value })} />
+              </Field>
+            </div>
+            <Field label={api.t('invite.ui.note')}>
+              <Input name="invite_note" maxLength={200} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+            </Field>
+          </form>
+        )}
+      </Sheet>
     </>
   );
 }
 
 function Penalties({ api }: { api: PluginApi }) {
-  const [rows, setRows] = useState<Penalty[]>([]);
-  const load = () => void api.json<{ items: Penalty[] }>('/api/p/invite/v1/admin/penalties?status=pending_review,applied').then((r) => setRows(r.items));
+  const [rows, setRows] = useState<Penalty[] | null>(null);
+  const load = () =>
+    void api
+      .json<{ items: Penalty[] }>('/api/p/invite/v1/admin/penalties?status=pending_review,applied')
+      .then((r) => setRows(r.items))
+      .catch(() => setRows([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, []);
   const review = async (p: Penalty, decision: string) => {
@@ -832,40 +997,57 @@ function Penalties({ api }: { api: PluginApi }) {
       api.toast(errText(api, err), 'error');
     }
   };
+  if (rows === null) return <SkeletonRows n={4} />;
   return (
-    <Card>
-      <Table
-        rows={rows}
-        rowKey={(r) => r.id}
-        columns={[
-          { key: 't', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-          { key: 'r', header: '', render: (r) => `${r.rule_id} · ${r.trigger}` },
-          { key: 'u', header: '', render: (r) => `#${r.target_user_id} ← #${r.invitee_id} (${r.depth})` },
-          { key: 's', header: '', render: (r) => <Badge tone={r.state === 'pending_review' ? 'danger' : 'muted'}>{r.state}</Badge> },
-          {
-            key: 'x',
-            header: '',
-            render: (r) => (
-              <>
-                {r.state === 'pending_review' && <Button onClick={() => void review(r, 'confirm')}>{api.t('invite.ui.confirm')}</Button>}{' '}
-                <Button variant="ghost" onClick={() => void review(r, 'reverse')}>
-                  {api.t('invite.ui.reverse')}
+    <Table
+      rows={rows}
+      rowKey={(r) => r.id}
+      empty={api.t('invite.ui.no_penalties')}
+      minWidth={640}
+      columns={[
+        { key: 't', header: api.t('invite.ui.time'), render: (r) => when(r.created_at) },
+        { key: 'r', header: api.t('invite.ui.rule'), render: (r) => <span className="small">{`${r.rule_id} · ${r.trigger}`}</span> },
+        { key: 'u', header: api.t('invite.ui.target'), render: (r) => <span className="num small">{`#${r.target_user_id} ← #${r.invitee_id} (${r.depth})`}</span> },
+        { key: 's', header: api.t('invite.ui.status'), render: (r) => <Status tone={PENALTY_TONE[r.state] ?? 'mute'}>{api.t(`invite.state.${r.state}`)}</Status> },
+        {
+          key: 'x',
+          header: '',
+          right: true,
+          render: (r) => (
+            <div className="form-acts">
+              {r.state === 'pending_review' && (
+                <Button size="sm" onClick={() => void review(r, 'confirm')}>
+                  {api.t('invite.ui.confirm')}
                 </Button>
-              </>
-            ),
-          },
-        ]}
-      />
-    </Card>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => void review(r, 'reverse')}>
+                {api.t('invite.ui.reverse')}
+              </Button>
+            </div>
+          ),
+        },
+      ]}
+    />
   );
 }
 
 function Admin({ api }: { api: PluginApi }) {
   const [tab, setTab] = useState('codes');
+  const [issuing, setIssuing] = useState(false);
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('invite.ui.admin')}</h1>
+    <div className="stack">
+      <PageHead
+        title={api.t('invite.ui.admin')}
+        actions={
+          tab === 'codes' && (
+            <Button variant="primary" onClick={() => setIssuing(true)}>
+              {api.t('invite.ui.issue')}
+            </Button>
+          )
+        }
+      />
       <Tabs
+        variant="sub"
         value={tab}
         onChange={setTab}
         tabs={[
@@ -873,7 +1055,9 @@ function Admin({ api }: { api: PluginApi }) {
           { id: 'penalties', label: api.t('invite.ui.penalties') },
         ]}
       />
-      {tab === 'codes' ? <Codes api={api} /> : <Penalties api={api} />}
+      <Panel flush primary>
+        {tab === 'codes' ? <Codes api={api} issuing={issuing} setIssuing={setIssuing} /> : <Penalties api={api} />}
+      </Panel>
     </div>
   );
 }

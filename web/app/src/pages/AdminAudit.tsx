@@ -1,10 +1,10 @@
-// 后台：管理操作日志（kernel.audit_log）——按插件、动作前缀、目标、操作者筛选，游标翻页，展开查看详情。
+// 后台：管理操作日志（kernel.audit_log）——动作前缀常驻一行，插件 / 目标 / 操作者折叠在筛选里（P1）；点击行在抽屉里看详情。
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api } from '@pt-studio/sdk';
 import { useT } from '@pt-studio/terms';
-import { Badge, Button, Card, Input, Spinner, Table } from '@pt-studio/ui-kit';
+import { ActiveFilters, Button, Field, FilterBar, Input, LoadMore, PageHead, Panel, Sheet, SkeletonRows, Status, Table } from '@pt-studio/ui-kit';
 import { ErrorText } from '../errors';
 
 interface Entry {
@@ -20,12 +20,14 @@ interface Entry {
 }
 
 type Filter = { plugin: string; action: string; target: string; actor: string };
+const EMPTY: Filter = { plugin: '', action: '', target: '', actor: '' };
 
 export function AdminAudit() {
   const t = useT();
-  const [draft, setDraft] = useState<Filter>({ plugin: '', action: '', target: '', actor: '' });
-  const [filter, setFilter] = useState<Filter>(draft);
-  const [open, setOpen] = useState<number | null>(null);
+  const [draft, setDraft] = useState<Filter>(EMPTY);
+  const [filter, setFilter] = useState<Filter>(EMPTY);
+  const [adv, setAdv] = useState(false);
+  const [open, setOpen] = useState<Entry | null>(null);
   const q = useInfiniteQuery({
     queryKey: ['admin-audit', filter],
     initialPageParam: null as number | null,
@@ -38,70 +40,100 @@ export function AdminAudit() {
     getNextPageParam: (last) => last.next_before,
   });
   const rows = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const apply = (f: Filter) => {
+    setDraft(f);
+    setFilter(f);
+  };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    setFilter(draft);
+    apply(draft);
   };
   const set = (k: keyof Filter) => (e: { target: { value: string } }) => setDraft({ ...draft, [k]: e.target.value });
+  const labels: Record<keyof Filter, string> = { plugin: t('ui.audit.plugin'), action: t('ui.audit.action'), target: t('ui.audit.target'), actor: t('ui.audit.actor') };
+  const active = (['plugin', 'target', 'actor'] as const).filter((k) => filter[k].trim());
   return (
-    <div>
-      <h1>{t('ui.audit.title')}</h1>
-      <form className="searchbar" onSubmit={submit}>
-        <Input name="plugin" placeholder={t('ui.audit.plugin')} value={draft.plugin} onChange={set('plugin')} />
-        <Input name="action" placeholder={t('ui.audit.action')} value={draft.action} onChange={set('action')} />
-        <Input name="target" placeholder={t('ui.audit.target')} value={draft.target} onChange={set('target')} />
-        <Input name="actor" type="number" placeholder={t('ui.audit.actor')} value={draft.actor} onChange={set('actor')} />
-        <Button type="submit">{t('ui.admin.search')}</Button>
-      </form>
-      <ErrorText error={q.error} />
-      <Card>
+    <div className="stack">
+      <PageHead title={t('ui.audit.title')} />
+      <Panel flush primary>
+        <form onSubmit={submit}>
+          <FilterBar
+            open={adv}
+            onOpenChange={setAdv}
+            activeCount={active.length}
+            onReset={() => apply({ ...EMPTY, action: draft.action })}
+            title={t('ui.torrent.filters')}
+            quick={<Input name="action" placeholder={t('ui.audit.action')} value={draft.action} onChange={set('action')} style={{ width: 240 }} />}
+            right={
+              <Button type="submit" size="sm" variant="primary">
+                {t('ui.admin.search')}
+              </Button>
+            }
+            active={<ActiveFilters items={active.map((k) => ({ key: k, label: labels[k], value: filter[k], onRemove: () => apply({ ...filter, [k]: '' }) }))} onClear={() => apply({ ...EMPTY, action: filter.action })} />}
+            advanced={
+              <div className="form-2">
+                <Field label={labels.plugin}>
+                  <Input name="plugin" value={draft.plugin} onChange={set('plugin')} />
+                </Field>
+                <Field label={labels.target}>
+                  <Input name="target" placeholder="user:12" value={draft.target} onChange={set('target')} />
+                </Field>
+                <Field label={labels.actor}>
+                  <Input name="actor" type="number" value={draft.actor} onChange={set('actor')} />
+                </Field>
+                <div className="fl">
+                  <span className="fl-label">&nbsp;</span>
+                  <Button type="submit" variant="primary" onClick={() => setAdv(false)}>
+                    {t('ui.admin.search')}
+                  </Button>
+                </div>
+              </div>
+            }
+          />
+        </form>
+        <ErrorText error={q.error} />
         {q.isLoading ? (
-          <Spinner />
+          <SkeletonRows n={8} />
         ) : (
           <Table
             rows={rows}
             rowKey={(r) => r.id}
             empty="—"
+            minWidth={820}
+            onRowClick={(r) => setOpen(r)}
             columns={[
               { key: 't', header: t('ui.settings.time'), render: (r) => <span className="nowrap small">{new Date(r.occurred_at).toLocaleString()}</span> },
-              {
-                key: 'a',
-                header: t('ui.audit.actor'),
-                render: (r) => (r.actor.user_id ? <Link to={`/admin/users/${r.actor.user_id}`}>#{r.actor.user_id}</Link> : <span className="pt-muted">{r.actor.kind ?? '—'}</span>),
-              },
-              {
-                key: 'x',
-                header: t('ui.audit.action'),
-                render: (r) => (
-                  <>
-                    <code className="pt-mono">{r.action}</code> {r.outcome !== 'ok' && <Badge tone="danger">{r.outcome}</Badge>}
-                  </>
-                ),
-              },
-              { key: 'g', header: t('ui.audit.target'), render: (r) => <code className="pt-mono small">{r.target ?? ''}</code> },
-              {
-                key: 'd',
-                header: '',
-                render: (r) =>
-                  open === r.id ? (
-                    <pre className="pt-mono small audit-details" onClick={() => setOpen(null)}>
-                      {JSON.stringify(r.details, null, 2)}
-                    </pre>
-                  ) : (
-                    <Button variant="ghost" onClick={() => setOpen(r.id)}>
-                      {t('ui.audit.details')}
-                    </Button>
-                  ),
-              },
+              { key: 'a', header: t('ui.audit.actor'), render: (r) => (r.actor.user_id ? <Link to={`/admin/users/${r.actor.user_id}`}>#{r.actor.user_id}</Link> : <span className="muted">{r.actor.kind ?? '—'}</span>) },
+              { key: 'p', header: t('ui.audit.plugin'), render: (r) => <span className="small">{r.plugin_id}</span> },
+              { key: 'x', header: t('ui.audit.action'), render: (r) => <span className="row" style={{ gap: 6 }}><code className="mono">{r.action}</code>{r.outcome !== 'ok' && <Status tone="bad">{r.outcome}</Status>}</span> },
+              { key: 'g', header: t('ui.audit.target'), render: (r) => <code className="mono">{r.target ?? ''}</code> },
             ]}
           />
         )}
-        {q.hasNextPage && (
-          <Button onClick={() => void q.fetchNextPage()} disabled={q.isFetchingNextPage}>
-            {t('ui.audit.more')}
-          </Button>
+        {q.hasNextPage && <LoadMore onClick={() => void q.fetchNextPage()} loading={q.isFetchingNextPage} label={t('ui.audit.more')} />}
+      </Panel>
+      <Sheet open={!!open} onClose={() => setOpen(null)} title={open ? open.action : ''} width={560}>
+        {open && (
+          <>
+            <dl className="kv">
+              <dt>{t('ui.settings.time')}</dt>
+              <dd>{new Date(open.occurred_at).toLocaleString()}</dd>
+              <dt>{t('ui.audit.plugin')}</dt>
+              <dd>{open.plugin_id}</dd>
+              <dt>{t('ui.audit.target')}</dt>
+              <dd className="mono">{open.target ?? '—'}</dd>
+              <dt>{t('ui.audit.actor')}</dt>
+              <dd>{open.actor.user_id ? `#${open.actor.user_id}` : (open.actor.kind ?? '—')}</dd>
+              {open.request_id && (
+                <>
+                  <dt>request</dt>
+                  <dd className="mono">{open.request_id}</dd>
+                </>
+              )}
+            </dl>
+            <pre className="json">{JSON.stringify(open.details, null, 2)}</pre>
+          </>
         )}
-      </Card>
+      </Sheet>
     </div>
   );
 }

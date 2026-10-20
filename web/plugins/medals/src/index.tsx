@@ -1,9 +1,9 @@
 // medals 前端：个人页头衔与佩戴勋章、勋章墙；“我的勋章”页（佩戴设置、成就进度）；后台（物品、图标、授予与收回、成就规则）。
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Progress, Table, Tabs } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Empty, Field, Input, NavItem, PageHead, Panel, Progress, Segmented, Select, Sheet, SkeletonRows, Status, Switch, Table, Tabs, Tag, Textarea } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'medals.ui.mine': '我的勋章',
@@ -52,6 +52,13 @@ registerMessages('zh-CN', {
   'medals.ui.disable': '停用',
   'medals.ui.kind.medal': '勋章',
   'medals.ui.kind.title': '头衔',
+  'medals.ui.cancel': '取消',
+  'medals.ui.worn': '佩戴中',
+  'medals.ui.user': '用户',
+  'medals.ui.expires_col': '到期',
+  'medals.ui.hidden_short': '隐藏',
+  'medals.ui.limits': '有效期 · 限量',
+  'medals.ui.edit': '编辑',
   'medals.inactive': '该勋章已停用',
   'medals.limit_reached': '该勋章已达到限量',
   'medals.not_held': '只能佩戴已持有的勋章',
@@ -104,6 +111,13 @@ registerMessages('en', {
   'medals.ui.disable': 'Disable',
   'medals.ui.kind.medal': 'Medal',
   'medals.ui.kind.title': 'Title',
+  'medals.ui.cancel': 'Cancel',
+  'medals.ui.worn': 'Wearing',
+  'medals.ui.user': 'User',
+  'medals.ui.expires_col': 'Expires',
+  'medals.ui.hidden_short': 'hidden',
+  'medals.ui.limits': 'Validity · limit',
+  'medals.ui.edit': 'Edit',
   'medals.inactive': 'This medal is disabled',
   'medals.limit_reached': 'This medal has reached its holder limit',
   'medals.not_held': 'You can only wear medals you hold',
@@ -111,20 +125,6 @@ registerMessages('en', {
 });
 
 const errText = (api: PluginApi, e: unknown) => (e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e));
-
-function A({ api, to, children }: { api: PluginApi; to: string; children: ReactNode }) {
-  return (
-    <a
-      href={to}
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate(to);
-      }}
-    >
-      {children}
-    </a>
-  );
-}
 
 interface Mini {
   id: number;
@@ -144,15 +144,14 @@ interface Holding extends Mini {
   reason: string | null;
 }
 
-/** 勋章小图标：有图用图，没有图用名称徽章 */
-function MedalChip({ m, size = 24 }: { m: Mini & { description?: string }; size?: number }) {
-  return m.icon ? (
-    <img className="medal-icon" src={m.icon} alt={m.name} title={m.description ? `${m.name} — ${m.description}` : m.name} width={size} height={size} />
-  ) : (
-    <Badge tone="primary" title={m.description}>
-      {m.name}
-    </Badge>
-  );
+/** 勋章章面：有图用图，没有图用名称首字 */
+function MedalFace({ m }: { m: Mini }) {
+  return <span className="medal-i">{m.icon ? <img src={m.icon} alt="" /> : m.name.slice(0, 1)}</span>;
+}
+
+/** 名字旁的小图标：只显示有图的勋章 */
+function MedalMini({ m, size = 16 }: { m: Mini & { description?: string }; size?: number }) {
+  return m.icon ? <img src={m.icon} alt={m.name} title={m.description ? `${m.name} — ${m.description}` : m.name} width={size} height={size} /> : null;
 }
 
 // 同一页面的两个插槽共用一次请求
@@ -181,12 +180,12 @@ function ProfileHeader({ api, ctx }: SlotProps<{ profile: { id: number } }>) {
   const w = useWall(api, ctx.profile.id);
   if (!w || (!w.display.title && w.display.worn.length === 0)) return null;
   return (
-    <p className="medal-row" data-testid="medal-display">
-      {w.display.title && <Badge tone="success">{w.display.title.name}</Badge>}
+    <span className="user-deco" data-testid="medal-display">
+      {w.display.title && <Tag tone="o">{w.display.title.name}</Tag>}
       {w.display.worn.map((m) => (
-        <MedalChip key={m.id} m={m} />
+        <MedalMini key={m.id} m={m} size={20} />
       ))}
-    </p>
+    </span>
   );
 }
 
@@ -210,12 +209,10 @@ function NameDecoration({ api, ctx }: SlotProps<{ user_id: number; size?: 'sm' |
   const px = ctx.size === 'md' ? 20 : 16;
   return (
     <>
-      {d.title && <Badge tone="success">{d.title.name}</Badge>}
-      {d.worn
-        .filter((m) => m.icon)
-        .map((m) => (
-          <MedalChip key={m.id} m={m} size={px} />
-        ))}
+      {d.title && <Tag tone="o">{d.title.name}</Tag>}
+      {d.worn.map((m) => (
+        <MedalMini key={m.id} m={m} size={px} />
+      ))}
     </>
   );
 }
@@ -223,26 +220,26 @@ function NameDecoration({ api, ctx }: SlotProps<{ user_id: number; size?: 'sm' |
 function ProfileWall({ api, ctx }: SlotProps<{ profile: { id: number } }>) {
   const w = useWall(api, ctx.profile.id);
   const medals = (w?.holdings ?? []).filter((h) => h.kind === 'medal');
-  if (medals.length <= (w?.display.worn.length ?? 0)) return null;
+  if (medals.length === 0) return null;
   return (
-    <details className="medal-wall">
-      <summary>
-        {api.t('medals.ui.wall')} ({medals.length})
-      </summary>
-      <div className="medal-row">
+    <Panel title={api.t('medals.ui.wall')} sub={String(medals.length)}>
+      <div className="medals">
         {medals.map((m) => (
-          <MedalChip key={m.id} m={m} size={32} />
+          <div key={m.id} className="medal" title={m.description}>
+            <MedalFace m={m} />
+            <span>{m.name}</span>
+          </div>
         ))}
       </div>
-    </details>
+    </Panel>
   );
 }
 
 function MenuItem({ api }: SlotProps) {
   return (
-    <A api={api} to="/p/medals/">
+    <NavItem to="/p/medals/" navigate={api.navigate}>
       {api.t('medals.ui.mine')}
-    </A>
+    </NavItem>
   );
 }
 
@@ -264,13 +261,16 @@ function Mine({ api }: { api: PluginApi }) {
   const [worn, setWorn] = useState<number[]>([]);
   const [title, setTitle] = useState('');
   useEffect(() => {
-    void api.json<NonNullable<typeof d>>('/api/p/medals/v1/me').then((r) => {
-      setD(r);
-      setWorn(r.display.worn.map((m) => m.id));
-      setTitle(r.display.title ? String(r.display.title.id) : '');
-    });
+    void api
+      .json<NonNullable<typeof d>>('/api/p/medals/v1/me')
+      .then((r) => {
+        setD(r);
+        setWorn(r.display.worn.map((m) => m.id));
+        setTitle(r.display.title ? String(r.display.title.id) : '');
+      })
+      .catch((e: unknown) => api.toast(errText(api, e), 'error'));
   }, [api]);
-  if (!d) return null;
+  if (!d) return <SkeletonRows n={6} />;
   const medals = d.holdings.filter((h) => h.kind === 'medal');
   const titles = d.holdings.filter((h) => h.kind === 'title');
   const toggle = (id: number) => setWorn((w) => (w.includes(id) ? w.filter((x) => x !== id) : w.length < d.max_worn ? [...w, id] : w));
@@ -282,65 +282,74 @@ function Mine({ api }: { api: PluginApi }) {
       api.toast(errText(api, e), 'error');
     }
   };
+  const has = medals.length > 0 || titles.length > 0;
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('medals.ui.mine')}</h1>
-      <Card title={api.t('medals.ui.wear', { n: d.max_worn })}>
-        {medals.length === 0 && titles.length === 0 && <p className="pt-muted">{api.t('medals.ui.none')}</p>}
-        <div className="medal-grid">
-          {medals.map((m) => (
-            <label key={m.id} className="medal-pick">
-              <input type="checkbox" checked={worn.includes(m.id)} onChange={() => toggle(m.id)} />
-              <MedalChip m={m} size={40} />
-              <span>
-                <strong>{m.name}</strong>
-                <span className="pt-muted small">
-                  {' '}
-                  {m.description}
-                  {m.expires_at && ` · ${api.t('medals.ui.expires', { d: new Date(m.expires_at).toLocaleDateString() })}`}
-                </span>
-              </span>
-            </label>
-          ))}
-        </div>
-        {titles.length > 0 && (
-          <Field label={api.t('medals.ui.title_label')}>
-            <select className="pt-input" name="medal_title" value={title} onChange={(e) => setTitle(e.target.value)}>
-              <option value="">{api.t('medals.ui.no_title')}</option>
-              {titles.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </Field>
+    <div className="stack">
+      <PageHead
+        title={api.t('medals.ui.mine')}
+        lede={api.t('medals.ui.wear', { n: d.max_worn })}
+        actions={
+          has && (
+            <Button variant="primary" onClick={() => void save()}>
+              {api.t('medals.ui.save')}
+            </Button>
+          )
+        }
+      />
+      <Panel
+        title={api.t('medals.ui.wall')}
+        sub={`${worn.length} / ${d.max_worn}`}
+        primary
+        actions={
+          titles.length > 0 && (
+            <Select
+              name="medal_title"
+              aria-label={api.t('medals.ui.title_label')}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              options={[{ value: '', label: api.t('medals.ui.no_title') }, ...titles.map((t) => ({ value: String(t.id), label: t.name }))]}
+            />
+          )
+        }
+      >
+        {medals.length === 0 ? (
+          <Empty compact>{api.t('medals.ui.none')}</Empty>
+        ) : (
+          <div className="medal-wall">
+            {medals.map((m) => (
+              <button key={m.id} type="button" className={worn.includes(m.id) ? 'mcard held' : 'mcard'} aria-pressed={worn.includes(m.id)} onClick={() => toggle(m.id)}>
+                <MedalFace m={m} />
+                <b>{m.name}</b>
+                <span>{m.description}</span>
+                {m.expires_at && <span className="tiny">{api.t('medals.ui.expires', { d: new Date(m.expires_at).toLocaleDateString() })}</span>}
+                {worn.includes(m.id) && <Tag tone="g">{api.t('medals.ui.worn')}</Tag>}
+              </button>
+            ))}
+          </div>
         )}
-        {(medals.length > 0 || titles.length > 0) && (
-          <Button variant="primary" onClick={() => void save()}>
-            {api.t('medals.ui.save')}
-          </Button>
-        )}
-      </Card>
+      </Panel>
       {d.achievements.length > 0 && (
-        <Card title={api.t('medals.ui.achievements')}>
-          <div className="pt-stack">
+        <Panel title={api.t('medals.ui.achievements')}>
+          <div className="medal-wall">
             {d.achievements.map((a) => (
-              <div key={a.rule_id} className="medal-ach">
-                <MedalChip m={{ id: a.medal_id, name: a.name, icon: a.icon }} size={32} />
-                <div>
-                  <strong>{a.name}</strong> <span className="pt-muted small">{a.description}</span>
-                  {a.held ? (
-                    <div>
-                      <Badge tone="success">{api.t('medals.ui.held')}</Badge>
-                    </div>
-                  ) : (
-                    <Progress value={Math.min(a.value, a.threshold)} max={a.threshold} label={`${a.value} / ${a.threshold}`} />
-                  )}
-                </div>
+              <div key={a.rule_id} className={a.held ? 'mcard held' : 'mcard'}>
+                <span className={a.held ? 'medal' : 'medal locked'}>
+                  <MedalFace m={{ id: a.medal_id, name: a.name, icon: a.icon }} />
+                </span>
+                <b>{a.name}</b>
+                <span>{a.description}</span>
+                {a.held ? (
+                  <Status tone="ok">{api.t('medals.ui.held')}</Status>
+                ) : (
+                  <>
+                    <Progress value={Math.min(a.value, a.threshold)} max={a.threshold} label={a.name} />
+                    <span className="num tiny">{`${a.value} / ${a.threshold}`}</span>
+                  </>
+                )}
               </div>
             ))}
           </div>
-        </Card>
+        </Panel>
       )}
     </div>
   );
@@ -362,93 +371,145 @@ interface Item extends Mini {
 type Draft = { kind: string; name: string; description: string; max_holders: string; validity_days: string; hidden: boolean; active: boolean };
 const blank: Draft = { kind: 'medal', name: '', description: '', max_holders: '', validity_days: '', hidden: false, active: true };
 const optNum = (s: string) => (s.trim() === '' ? null : Number(s));
+const draftOf = (r: Item): Draft => ({ kind: r.kind, name: r.name, description: r.description, max_holders: r.max_holders?.toString() ?? '', validity_days: r.validity_days?.toString() ?? '', hidden: r.hidden, active: r.active });
 
-function ItemForm({ api, init, id, done }: { api: PluginApi; init: Draft; id?: number; done(): void }) {
-  const [f, setF] = useState<Draft>(init);
-  const save = async () => {
-    try {
-      const body = { kind: f.kind, name: f.name, description: f.description, max_holders: optNum(f.max_holders), validity_days: optNum(f.validity_days), hidden: f.hidden, active: f.active };
-      if (id) await api.json(`/api/p/medals/v1/admin/items/${id}`, { method: 'PATCH', json: body });
-      else await api.json('/api/p/medals/v1/admin/items', { json: body });
-      api.toast(api.t('medals.ui.saved'), 'success');
-      if (!id) setF(blank);
-      done();
-    } catch (e) {
-      api.toast(errText(api, e), 'error');
-    }
-  };
+function SheetFoot({ api, form, label, onCancel }: { api: PluginApi; form: string; label: string; onCancel(): void }) {
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save();
-      }}
-    >
-      <Field label={api.t('medals.ui.kind')}>
-        <select className="pt-input" name="medal_kind" value={f.kind} disabled={!!id} onChange={(e) => setF({ ...f, kind: e.target.value })}>
-          <option value="medal">{api.t('medals.ui.kind.medal')}</option>
-          <option value="title">{api.t('medals.ui.kind.title')}</option>
-        </select>
-      </Field>
-      <Field label={api.t('medals.ui.name')}>
-        <Input name="medal_name" value={f.name} maxLength={40} required onChange={(e) => setF({ ...f, name: e.target.value })} />
-      </Field>
-      <Field label={api.t('medals.ui.description')}>
-        <Input value={f.description} maxLength={300} onChange={(e) => setF({ ...f, description: e.target.value })} />
-      </Field>
-      <Field label={api.t('medals.ui.max_holders')}>
-        <Input type="number" min={1} value={f.max_holders} onChange={(e) => setF({ ...f, max_holders: e.target.value })} />
-      </Field>
-      <Field label={api.t('medals.ui.validity')}>
-        <Input type="number" min={1} max={3650} value={f.validity_days} onChange={(e) => setF({ ...f, validity_days: e.target.value })} />
-      </Field>
-      <label className="pt-check">
-        <input type="checkbox" checked={f.hidden} onChange={(e) => setF({ ...f, hidden: e.target.checked })} /> {api.t('medals.ui.hidden')}
-      </label>
-      <label className="pt-check">
-        <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> {api.t('medals.ui.active')}
-      </label>
-      <Button type="submit" variant="primary">
-        {api.t('medals.ui.save')}
+    <>
+      <Button variant="ghost" onClick={onCancel}>
+        {api.t('medals.ui.cancel')}
       </Button>
-    </form>
+      <Button type="submit" form={form} variant="primary">
+        {label}
+      </Button>
+    </>
   );
 }
 
-function Holders({ api, item, done }: { api: PluginApi; item: number; done(): void }) {
-  const [rows, setRows] = useState<{ grant_id: number; username: string | null; source: string; reason: string; expires_at: number | null }[]>([]);
-  const load = () => void api.json<{ items: typeof rows }>(`/api/p/medals/v1/admin/items/${item}/holders`).then((r) => setRows(r.items));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(load, [item]);
-  const revoke = async (id: number) => {
-    const reason = window.prompt(api.t('medals.ui.revoke_reason'));
-    if (!reason) return;
+/** 物品新建 / 编辑抽屉 */
+function ItemSheet({ api, item, open, onClose, done }: { api: PluginApi; item?: Item; open: boolean; onClose(): void; done(): void }) {
+  const [f, setF] = useState<Draft>(item ? draftOf(item) : blank);
+  const formId = item ? 'medal-item-edit' : 'medal-item-new';
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
     try {
-      await api.json(`/api/p/medals/v1/admin/grants/${id}/revoke`, { json: { reason } });
-      load();
+      const body = { kind: f.kind, name: f.name, description: f.description, max_holders: optNum(f.max_holders), validity_days: optNum(f.validity_days), hidden: f.hidden, active: f.active };
+      if (item) await api.json(`/api/p/medals/v1/admin/items/${item.id}`, { method: 'PATCH', json: body });
+      else await api.json('/api/p/medals/v1/admin/items', { json: body });
+      api.toast(api.t('medals.ui.saved'), 'success');
+      if (!item) setF(blank);
       done();
-    } catch (e) {
-      api.toast(errText(api, e), 'error');
+      onClose();
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
     }
   };
   return (
-    <Table
-      rows={rows}
-      rowKey={(r) => r.grant_id}
-      empty="—"
-      columns={[
-        { key: 'u', header: '', render: (r) => r.username ?? '?' },
-        { key: 's', header: '', render: (r) => <span className="pt-muted small">{`${r.source} · ${r.reason}`}</span> },
-        { key: 'e', header: '', render: (r) => (r.expires_at ? new Date(r.expires_at).toLocaleDateString() : '∞') },
-        { key: 'a', header: '', render: (r) => <Button onClick={() => void revoke(r.grant_id)}>{api.t('medals.ui.revoke')}</Button> },
-      ]}
-    />
+    <Sheet open={open} onClose={onClose} title={item ? item.name : api.t('medals.ui.new_item')} footer={<SheetFoot api={api} form={formId} label={api.t('medals.ui.save')} onCancel={onClose} />}>
+      <form id={formId} className="form" onSubmit={(e) => void save(e)}>
+        <Field label={api.t('medals.ui.kind')}>
+          <Segmented
+            label={api.t('medals.ui.kind')}
+            value={f.kind}
+            onChange={(v) => !item && setF({ ...f, kind: v })}
+            options={[
+              { value: 'medal', label: api.t('medals.ui.kind.medal') },
+              { value: 'title', label: api.t('medals.ui.kind.title') },
+            ]}
+          />
+        </Field>
+        <Field label={api.t('medals.ui.name')}>
+          <Input name="medal_name" value={f.name} maxLength={40} required onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </Field>
+        <Field label={api.t('medals.ui.description')}>
+          <Input name="medal_description" value={f.description} maxLength={300} onChange={(e) => setF({ ...f, description: e.target.value })} />
+        </Field>
+        <div className="form-2">
+          <Field label={api.t('medals.ui.max_holders')}>
+            <Input name="medal_max" type="number" min={1} value={f.max_holders} onChange={(e) => setF({ ...f, max_holders: e.target.value })} />
+          </Field>
+          <Field label={api.t('medals.ui.validity')}>
+            <Input name="medal_validity" type="number" min={1} max={3650} value={f.validity_days} onChange={(e) => setF({ ...f, validity_days: e.target.value })} />
+          </Field>
+        </div>
+        <Checkbox checked={f.hidden} onChange={(v) => setF({ ...f, hidden: v })} label={api.t('medals.ui.hidden')} />
+        <Checkbox checked={f.active} onChange={(v) => setF({ ...f, active: v })} label={api.t('medals.ui.active')} />
+      </form>
+    </Sheet>
+  );
+}
+
+type HolderRow = { grant_id: number; username: string | null; source: string; reason: string; expires_at: number | null };
+
+/** 持有者抽屉：列表与收回（收回理由在同一抽屉底部填写） */
+function HoldersSheet({ api, item, onClose, done }: { api: PluginApi; item: Item | null; onClose(): void; done(): void }) {
+  const [rows, setRows] = useState<HolderRow[] | null>(null);
+  const [revoking, setRevoking] = useState<HolderRow | null>(null);
+  const [reason, setReason] = useState('');
+  const load = () => {
+    if (item) void api.json<{ items: HolderRow[] }>(`/api/p/medals/v1/admin/items/${item.id}/holders`).then((r) => setRows(r.items));
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [item?.id]);
+  const revoke = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!revoking || !reason.trim()) return;
+    try {
+      await api.json(`/api/p/medals/v1/admin/grants/${revoking.grant_id}/revoke`, { json: { reason: reason.trim() } });
+      setRevoking(null);
+      setReason('');
+      load();
+      done();
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
+    }
+  };
+  return (
+    <Sheet open={item !== null} onClose={onClose} title={item ? `${item.name} · ${api.t('medals.ui.holders', { n: item.holders })}` : ''} width={640} flush>
+      {rows === null ? (
+        <SkeletonRows n={4} />
+      ) : (
+        <Table
+          rows={rows}
+          rowKey={(r) => r.grant_id}
+          empty="—"
+          selected={revoking?.grant_id ?? null}
+          columns={[
+            { key: 'u', header: api.t('medals.ui.user'), render: (r) => r.username ?? '?' },
+            { key: 's', header: api.t('medals.ui.reason'), render: (r) => <span className="small muted">{`${r.source} · ${r.reason}`}</span> },
+            { key: 'e', header: api.t('medals.ui.expires_col'), render: (r) => <span className="num small">{r.expires_at ? new Date(r.expires_at).toLocaleDateString() : '∞'}</span> },
+            {
+              key: 'a',
+              header: '',
+              right: true,
+              render: (r) => (
+                <Button size="xs" variant="ghost" onClick={() => setRevoking(r)}>
+                  {api.t('medals.ui.revoke')}
+                </Button>
+              ),
+            },
+          ]}
+        />
+      )}
+      {revoking && (
+        <form className="toolbar" onSubmit={(e) => void revoke(e)}>
+          <span className="small">{`${api.t('medals.ui.revoke')} · ${revoking.username ?? '?'}`}</span>
+          <Input name="revoke_reason" aria-label={api.t('medals.ui.revoke_reason')} placeholder={api.t('medals.ui.revoke_reason')} value={reason} onChange={(e) => setReason(e.target.value)} required />
+          <Button type="submit" size="sm" variant="danger" disabled={!reason.trim()}>
+            {api.t('medals.ui.revoke')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setRevoking(null)}>
+            {api.t('medals.ui.cancel')}
+          </Button>
+        </form>
+      )}
+    </Sheet>
   );
 }
 
 function ItemsTab({ api, items, load }: { api: PluginApi; items: Item[]; load(): void }) {
-  const [editing, setEditing] = useState<number | null>(null);
-  const [open, setOpen] = useState<number | null>(null);
+  const [editing, setEditing] = useState<Item | null>(null);
+  const [holders, setHolders] = useState<Item | null>(null);
   const icon = async (id: number, f: File | undefined) => {
     if (!f) return;
     try {
@@ -459,74 +520,77 @@ function ItemsTab({ api, items, load }: { api: PluginApi; items: Item[]; load():
     }
   };
   return (
-    <div className="pt-stack">
-      <Card title={api.t('medals.ui.items')}>
-        <Table
-          rows={items}
-          rowKey={(r) => r.id}
-          empty="—"
-          columns={[
-            {
-              key: 'i',
-              header: '',
-              render: (r) =>
-                editing === r.id ? (
-                  <ItemForm
-                    api={api}
-                    id={r.id}
-                    init={{ kind: r.kind, name: r.name, description: r.description, max_holders: r.max_holders?.toString() ?? '', validity_days: r.validity_days?.toString() ?? '', hidden: r.hidden, active: r.active }}
-                    done={() => {
-                      setEditing(null);
-                      load();
-                    }}
-                  />
-                ) : (
-                  <div className="medal-ach">
-                    <MedalChip m={r} size={32} />
-                    <div>
-                      <strong>{r.name}</strong> <Badge tone={r.active ? 'success' : 'muted'}>{api.t(`medals.ui.kind.${r.kind}`)}</Badge>
-                      <div className="pt-muted small">
-                        {r.description}
-                        {r.validity_days ? ` · ${r.validity_days} d` : ''}
-                        {r.max_holders ? ` · ≤ ${r.max_holders}` : ''}
-                      </div>
-                      <button type="button" className="pt-btn pt-btn-ghost small" onClick={() => setOpen(open === r.id ? null : r.id)}>
-                        {api.t('medals.ui.holders', { n: r.holders })}
-                      </button>
-                      {open === r.id && <Holders api={api} item={r.id} done={load} />}
-                    </div>
-                  </div>
-                ),
-            },
-            {
-              key: 'a',
-              header: '',
-              render: (r) =>
-                editing === r.id ? null : (
-                  <span className="pt-row">
-                    <label className="pt-btn pt-btn-ghost small">
-                      {api.t('medals.ui.icon')}
-                      <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => void icon(r.id, e.target.files?.[0])} />
-                    </label>
-                    <Button variant="ghost" onClick={() => setEditing(r.id)}>
-                      ✎
-                    </Button>
-                  </span>
-                ),
-            },
-          ]}
-        />
-      </Card>
-      <Card title={api.t('medals.ui.new_item')}>
-        <ItemForm api={api} init={blank} done={load} />
-      </Card>
-    </div>
+    <>
+      <Table
+        rows={items}
+        rowKey={(r) => r.id}
+        empty="—"
+        minWidth={820}
+        columns={[
+          {
+            key: 'i',
+            header: api.t('medals.ui.item'),
+            render: (r) => (
+              <div className="row">
+                <span className="medal">
+                  <MedalFace m={r} />
+                </span>
+                <div>
+                  <b>{r.name}</b>
+                  <div className="tiny muted">{r.description}</div>
+                </div>
+              </div>
+            ),
+          },
+          {
+            key: 'k',
+            header: api.t('medals.ui.kind'),
+            render: (r) => (
+              <div className="row">
+                <Tag tone={r.kind === 'title' ? 'o' : undefined}>{api.t(`medals.ui.kind.${r.kind}`)}</Tag>
+                {!r.active && <Status tone="mute">{api.t('medals.ui.disable')}</Status>}
+                {r.hidden && <Tag>{api.t('medals.ui.hidden_short')}</Tag>}
+              </div>
+            ),
+          },
+          { key: 'l', header: api.t('medals.ui.limits'), render: (r) => <span className="num small">{[r.validity_days ? `${r.validity_days} d` : '∞', r.max_holders ? `≤ ${r.max_holders}` : ''].filter(Boolean).join(' · ')}</span> },
+          {
+            key: 'h',
+            header: '',
+            render: (r) => (
+              <Button size="xs" variant="ghost" onClick={() => setHolders(r)}>
+                {api.t('medals.ui.holders', { n: r.holders })}
+              </Button>
+            ),
+          },
+          {
+            key: 'a',
+            header: '',
+            right: true,
+            render: (r) => (
+              <div className="form-acts">
+                <label className="btn btn-xs btn-ghost">
+                  {api.t('medals.ui.icon')}
+                  <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => void icon(r.id, e.target.files?.[0])} />
+                </label>
+                <Button size="xs" variant="ghost" onClick={() => setEditing(r)}>
+                  {api.t('medals.ui.edit')}
+                </Button>
+              </div>
+            ),
+          },
+        ]}
+      />
+      <ItemSheet key={editing?.id ?? 'none'} api={api} item={editing ?? undefined} open={editing !== null} onClose={() => setEditing(null)} done={load} />
+      <HoldersSheet api={api} item={holders} onClose={() => setHolders(null)} done={load} />
+    </>
   );
 }
 
-function GrantTab({ api, items, load }: { api: PluginApi; items: Item[]; load(): void }) {
+function GrantSheet({ api, items, open, onClose, load }: { api: PluginApi; items: Item[]; open: boolean; onClose(): void; load(): void }) {
   const [f, setF] = useState({ item: '', users: '', reason: '', days: '' });
-  const submit = async () => {
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
     try {
       const r = await api.json<{ granted: number; missing: string[] }>('/api/p/medals/v1/admin/grants', {
         json: { item_id: Number(f.item), usernames: f.users.split(/\s+/).filter(Boolean), reason: f.reason, expires_days: optNum(f.days) },
@@ -535,44 +599,34 @@ function GrantTab({ api, items, load }: { api: PluginApi; items: Item[]; load():
       if (r.missing.length) api.toast(api.t('medals.ui.missing', { names: r.missing.join(', ') }), 'error');
       setF({ ...f, users: '' });
       load();
-    } catch (e) {
-      api.toast(errText(api, e), 'error');
+      if (!r.missing.length) onClose();
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
     }
   };
   return (
-    <Card title={api.t('medals.ui.grants')}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
+    <Sheet open={open} onClose={onClose} title={api.t('medals.ui.grants')} footer={<SheetFoot api={api} form="medal-grant" label={api.t('medals.ui.grant')} onCancel={onClose} />}>
+      <form id="medal-grant" className="form" onSubmit={(e) => void submit(e)}>
         <Field label={api.t('medals.ui.item')}>
-          <select className="pt-input" name="grant_item" value={f.item} required onChange={(e) => setF({ ...f, item: e.target.value })}>
-            <option value="" />
-            {items
-              .filter((i) => i.active)
-              .map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
-                </option>
-              ))}
-          </select>
+          <Select
+            name="grant_item"
+            value={f.item}
+            required
+            onChange={(e) => setF({ ...f, item: e.target.value })}
+            options={[{ value: '', label: '—' }, ...items.filter((i) => i.active).map((i) => ({ value: String(i.id), label: `${i.name} · ${api.t(`medals.ui.kind.${i.kind}`)}` }))]}
+          />
         </Field>
         <Field label={api.t('medals.ui.usernames')}>
-          <textarea className="pt-input" name="grant_users" rows={4} value={f.users} required onChange={(e) => setF({ ...f, users: e.target.value })} />
+          <Textarea name="grant_users" rows={5} value={f.users} required onChange={(e) => setF({ ...f, users: e.target.value })} />
         </Field>
         <Field label={api.t('medals.ui.reason')}>
           <Input name="grant_reason" value={f.reason} maxLength={300} required onChange={(e) => setF({ ...f, reason: e.target.value })} />
         </Field>
         <Field label={api.t('medals.ui.expires_days')}>
-          <Input type="number" min={1} max={3650} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
+          <Input name="grant_days" type="number" min={1} max={3650} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
         </Field>
-        <Button type="submit" variant="primary">
-          {api.t('medals.ui.grant')}
-        </Button>
       </form>
-    </Card>
+    </Sheet>
   );
 }
 
@@ -590,151 +644,147 @@ interface Rule {
   granted: number;
 }
 
-function RulesTab({ api, items }: { api: PluginApi; items: Item[] }) {
+function RulesTab({ api, items, adding, setAdding }: { api: PluginApi; items: Item[]; adding: boolean; setAdding(v: boolean): void }) {
   const [d, setD] = useState<{ items: Rule[]; events: string[]; stat_fields: string[] } | null>(null);
   const [f, setF] = useState({ item: '', kind: 'event', event: '', measure: 'count', stat_field: '', threshold: '1', description: '' });
   const load = () => void api.json<NonNullable<typeof d>>('/api/p/medals/v1/admin/rules').then(setD);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, []);
-  if (!d) return null;
+  if (!d) return <SkeletonRows n={4} />;
   const run = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
       load();
+      return true;
     } catch (e) {
       api.toast(errText(api, e), 'error');
+      return false;
     }
   };
-  const create = () =>
-    run(() =>
+  const create = (e: FormEvent) => {
+    e.preventDefault();
+    void run(() =>
       api.json('/api/p/medals/v1/admin/rules', {
         json: { item_id: Number(f.item), kind: f.kind, event: f.event, measure: f.measure, stat_field: f.stat_field, threshold: Number(f.threshold), description: f.description },
       }),
-    );
+    ).then((ok) => ok && setAdding(false));
+  };
   const evaluate = (id: number) =>
     run(async () => {
       const r = await api.json<{ granted: number }>(`/api/p/medals/v1/admin/rules/${id}/evaluate`, { json: {} });
       api.toast(api.t('medals.ui.evaluated', { n: r.granted }), 'success');
     });
   return (
-    <div className="pt-stack">
-      <Card title={api.t('medals.ui.rules')}>
-        <Table
-          rows={d.items}
-          rowKey={(r) => r.id}
-          empty="—"
-          columns={[
-            {
-              key: 'r',
-              header: '',
-              render: (r) => (
-                <>
-                  <strong>{r.item_name}</strong> {!r.active && <Badge>{api.t('medals.ui.disable')}</Badge>}
-                  <div className="pt-muted small pt-mono">{r.kind === 'event' ? `${r.event} ${r.measure} ≥ ${r.threshold}` : `${r.stat_field} ≥ ${r.threshold}`}</div>
-                  <div className="small">
-                    {r.description} · {api.t('medals.ui.holders', { n: r.granted })}
-                  </div>
-                </>
-              ),
-            },
-            {
-              key: 'a',
-              header: '',
-              render: (r) => (
-                <span className="pt-row">
-                  <Button onClick={() => void run(() => api.json(`/api/p/medals/v1/admin/rules/${r.id}`, { method: 'PATCH', json: { active: !r.active } }))}>
-                    {api.t(r.active ? 'medals.ui.disable' : 'medals.ui.enable')}
+    <>
+      <Table
+        rows={d.items}
+        rowKey={(r) => r.id}
+        empty="—"
+        minWidth={820}
+        columns={[
+          { key: 'n', header: api.t('medals.ui.item'), render: (r) => <b>{r.item_name}</b> },
+          { key: 'r', header: api.t('medals.ui.rule_kind'), render: (r) => <span className="pt-mono small">{r.kind === 'event' ? `${r.event} ${r.measure} ≥ ${r.threshold}` : `${r.stat_field} ≥ ${r.threshold}`}</span> },
+          { key: 'd', header: api.t('medals.ui.description'), render: (r) => <span className="small">{r.description}</span> },
+          { key: 'g', header: '', right: true, render: (r) => <span className="num small muted">{api.t('medals.ui.holders', { n: r.granted })}</span> },
+          {
+            key: 'a',
+            header: '',
+            right: true,
+            render: (r) => (
+              <div className="form-acts">
+                <Switch checked={r.active} label={api.t('medals.ui.active')} onChange={() => void run(() => api.json(`/api/p/medals/v1/admin/rules/${r.id}`, { method: 'PATCH', json: { active: !r.active } }))} />
+                {r.kind === 'stat' && (
+                  <Button size="xs" onClick={() => void evaluate(r.id)}>
+                    {api.t('medals.ui.evaluate')}
                   </Button>
-                  {r.kind === 'stat' && <Button onClick={() => void evaluate(r.id)}>{api.t('medals.ui.evaluate')}</Button>}
-                </span>
-              ),
-            },
-          ]}
-        />
-      </Card>
-      <Card title={api.t('medals.ui.add_rule')}>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void create();
-          }}
-        >
+                )}
+              </div>
+            ),
+          },
+        ]}
+      />
+      <Sheet open={adding} onClose={() => setAdding(false)} title={api.t('medals.ui.add_rule')} footer={<SheetFoot api={api} form="medal-rule" label={api.t('medals.ui.add_rule')} onCancel={() => setAdding(false)} />}>
+        <form id="medal-rule" className="form" onSubmit={create}>
           <Field label={api.t('medals.ui.item')}>
-            <select className="pt-input" name="rule_item" value={f.item} required onChange={(e) => setF({ ...f, item: e.target.value })}>
-              <option value="" />
-              {items.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
-                </option>
-              ))}
-            </select>
+            <Select name="rule_item" value={f.item} required onChange={(e) => setF({ ...f, item: e.target.value })} options={[{ value: '', label: '—' }, ...items.map((i) => ({ value: String(i.id), label: i.name }))]} />
           </Field>
           <Field label={api.t('medals.ui.rule_kind')}>
-            <select className="pt-input" name="rule_kind" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
-              <option value="event">event</option>
-              <option value="stat">stat</option>
-            </select>
+            <Segmented
+              label={api.t('medals.ui.rule_kind')}
+              value={f.kind}
+              onChange={(v) => setF({ ...f, kind: v })}
+              options={[
+                { value: 'event', label: 'event' },
+                { value: 'stat', label: 'stat' },
+              ]}
+            />
           </Field>
           {f.kind === 'event' ? (
-            <>
+            <div className="form-2">
               <Field label={api.t('medals.ui.event')}>
-                <select className="pt-input" name="rule_event" value={f.event} required onChange={(e) => setF({ ...f, event: e.target.value })}>
-                  <option value="" />
-                  {d.events.map((e) => (
-                    <option key={e}>{e}</option>
-                  ))}
-                </select>
+                <Select name="rule_event" value={f.event} required onChange={(e) => setF({ ...f, event: e.target.value })} options={['', ...d.events]} />
               </Field>
               <Field label={api.t('medals.ui.measure')}>
-                <Input className="pt-mono" value={f.measure} onChange={(e) => setF({ ...f, measure: e.target.value })} />
+                <Input name="rule_measure" className="in pt-mono" value={f.measure} onChange={(e) => setF({ ...f, measure: e.target.value })} />
               </Field>
-            </>
+            </div>
           ) : (
             <Field label={api.t('medals.ui.stat_field')}>
-              <select className="pt-input" name="rule_stat" value={f.stat_field} required onChange={(e) => setF({ ...f, stat_field: e.target.value })}>
-                <option value="" />
-                {d.stat_fields.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
+              <Select name="rule_stat" value={f.stat_field} required onChange={(e) => setF({ ...f, stat_field: e.target.value })} options={['', ...d.stat_fields]} />
             </Field>
           )}
           <Field label={api.t('medals.ui.threshold')}>
             <Input name="rule_threshold" type="number" min={1} value={f.threshold} onChange={(e) => setF({ ...f, threshold: e.target.value })} />
           </Field>
           <Field label={api.t('medals.ui.description')}>
-            <Input value={f.description} maxLength={300} onChange={(e) => setF({ ...f, description: e.target.value })} />
+            <Input name="rule_description" value={f.description} maxLength={300} onChange={(e) => setF({ ...f, description: e.target.value })} />
           </Field>
-          <Button type="submit" variant="primary">
-            {api.t('medals.ui.add_rule')}
-          </Button>
         </form>
-      </Card>
-    </div>
+      </Sheet>
+    </>
   );
 }
 
 function Admin({ api }: { api: PluginApi }) {
   const [tab, setTab] = useState('items');
   const [items, setItems] = useState<Item[]>([]);
+  const [sheet, setSheet] = useState<'item' | 'grant' | 'rule' | null>(null);
   const load = () => void api.json<{ items: Item[] }>('/api/p/medals/v1/admin/items').then((r) => setItems(r.items));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, []);
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('medals.ui.admin')}</h1>
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { id: 'items', label: api.t('medals.ui.items') },
-          { id: 'grant', label: api.t('medals.ui.grants') },
-          { id: 'rules', label: api.t('medals.ui.rules') },
-        ]}
+    <div className="stack">
+      <PageHead
+        title={api.t('medals.ui.admin')}
+        actions={
+          <>
+            <Button onClick={() => setSheet('grant')}>{api.t('medals.ui.grants')}</Button>
+            {tab === 'items' ? (
+              <Button variant="primary" onClick={() => setSheet('item')}>
+                {api.t('medals.ui.new_item')}
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={() => setSheet('rule')}>
+                {api.t('medals.ui.add_rule')}
+              </Button>
+            )}
+          </>
+        }
       />
-      {tab === 'items' && <ItemsTab api={api} items={items} load={load} />}
-      {tab === 'grant' && <GrantTab api={api} items={items} load={load} />}
-      {tab === 'rules' && <RulesTab api={api} items={items} />}
+      <Panel flush primary>
+        <Tabs
+          variant="flush"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { id: 'items', label: api.t('medals.ui.items'), count: items.length },
+            { id: 'rules', label: api.t('medals.ui.rules') },
+          ]}
+        />
+        {tab === 'items' ? <ItemsTab api={api} items={items} load={load} /> : <RulesTab api={api} items={items} adding={sheet === 'rule'} setAdding={(v) => setSheet(v ? 'rule' : null)} />}
+      </Panel>
+      <ItemSheet api={api} open={sheet === 'item'} onClose={() => setSheet(null)} done={load} />
+      <GrantSheet api={api} items={items} open={sheet === 'grant'} onClose={() => setSheet(null)} load={load} />
     </div>
   );
 }

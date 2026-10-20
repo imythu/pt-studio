@@ -2,11 +2,29 @@
 // 等级说明页（/p/levels/：全部等级、说明、升级与保级条件、我的进度）、用户菜单入口；
 // 后台等级总览（/admin/p/levels/：设置同步状态与错误、每个等级对应的权限角色）。
 // 等级的名称 / 说明可在插件设置中修改；为空时用内置术语（随界面语言）。
-import { useEffect, useState, type FormEvent } from 'react';
-import { ApiError } from '@pt-studio/sdk';
-import { registerMessages } from '@pt-studio/terms';
-import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
-import { Badge, Button, Card, Field, Input, Progress, Stat, Table } from '@pt-studio/ui-kit';
+import { useEffect, useState, type FormEvent } from "react";
+import { ApiError } from "@pt-studio/sdk";
+import { registerMessages } from "@pt-studio/terms";
+import type { PluginApi, PluginFrontend, SlotProps } from "@pt-studio/slots";
+import {
+  Button,
+  Field,
+  Input,
+  NavItem,
+  Note,
+  PageHead,
+  Panel,
+  PLink,
+  Progress,
+  Select,
+  Sheet,
+  SideLayout,
+  SkeletonRows,
+  Stat,
+  Status,
+  Table,
+  Tag,
+} from "@pt-studio/ui-kit";
 
 interface Cond {
   metric: string;
@@ -17,7 +35,7 @@ interface Cond {
 interface ClassInfo {
   id: number;
   key: string;
-  type: 'normal' | 'vip' | 'honor' | 'staff';
+  type: "normal" | "vip" | "honor" | "staff";
   name: string;
   name_key: string;
   description: string;
@@ -40,128 +58,146 @@ interface Brief {
 
 interface Me {
   class: Brief & { source: string };
-  next: (Brief & { progress: { metric: string; op: string; target: string; current: string; met: boolean }[] }) | null;
+  next:
+    | (Brief & {
+        progress: {
+          metric: string;
+          op: string;
+          target: string;
+          current: string;
+          met: boolean;
+        }[];
+      })
+    | null;
   warning: { deadline: number } | null;
   protected: boolean;
 }
 
-registerMessages('zh-CN', {
-  'levels.ui.class': '等级',
-  'levels.ui.menu': '等级说明',
-  'levels.ui.title': '用户等级',
-  'levels.ui.warning': '保级警告：{date} 前未达标将降级',
-  'levels.ui.my': '我的等级',
-  'levels.ui.next': '下一等级',
-  'levels.ui.top': '已是最高的普通等级',
-  'levels.ui.name': '等级',
-  'levels.ui.desc': '说明',
-  'levels.ui.promote': '升级条件',
-  'levels.ui.keep': '保级条件',
-  'levels.ui.none': '—',
-  'levels.ui.never_demoted': '不降级',
-  'levels.ui.manual': '由管理员授予',
-  'levels.ui.default': '新用户',
-  'levels.ui.no_invite': '不能发邀请',
-  'levels.ui.current': '当前',
-  'levels.ui.note': '普通等级按条件自动评估：流量结算后 15 分钟内升级，每日凌晨全量检查保级条件。不满足保级条件时先发出警告，警告期满仍未达标才降级；升级后有一段保护期。',
-  'levels.metric.account_age_days': '注册天数',
-  'levels.metric.uploaded_gib': '上传量（GiB）',
-  'levels.metric.downloaded_gib': '下载量（GiB）',
-  'levels.metric.ratio': '分享率',
-  'levels.metric.seed_hours': '做种时长（小时）',
-  'levels.metric.avg_seed_hours': '平均做种时长（小时）',
-  'levels.metric.seeding_size_gib': '做种体积（GiB）',
-  'levels.metric.uploads_count': '发布数',
-  'levels.ui.tab': '等级',
-  'levels.ui.source': '来源：{s}',
-  'levels.ui.overrides': '生效中的覆盖',
-  'levels.ui.until': '至 {t}',
-  'levels.ui.forever': '永久',
-  'levels.ui.set_class': '设置等级',
-  'levels.ui.lock_days': '锁定天数（留空为永久）',
-  'levels.ui.reason': '原因',
-  'levels.ui.apply': '设置',
-  'levels.ui.unlock': '解除手动锁定',
-  'levels.ui.protect_days': '保号天数（0 取消）',
-  'levels.ui.protect': '保号',
-  'levels.ui.protected_until': '保号至 {t}',
-  'levels.ui.done': '已保存',
-  'levels.ui.admin': '等级总览',
-  'levels.ui.synced': '设置最近一次生效于 {t}',
-  'levels.ui.sync_error': '最新的等级设置未能生效：{e}',
-  'levels.ui.edit_settings': '编辑等级',
-  'levels.ui.role_hint': '每个等级有自己的角色 levels:class_<id>，可在角色管理中为它配置权限。把用户设为管理组类型的等级（如“管理员”）只改变头衔与颜色，内置角色（moderator / admin）需要另外授予。',
-  'levels.ui.type': '类型',
-  'levels.ui.type.normal': '普通',
-  'levels.ui.type.vip': 'VIP',
-  'levels.ui.type.honor': '荣誉',
-  'levels.ui.type.staff': '管理组',
-  'levels.ui.role': '角色',
-  'levels.ui.flags': '属性',
+registerMessages("zh-CN", {
+  "levels.ui.class": "等级",
+  "levels.ui.menu": "等级说明",
+  "levels.ui.title": "用户等级",
+  "levels.ui.warning": "保级警告：{date} 前未达标将降级",
+  "levels.ui.my": "我的等级",
+  "levels.ui.next": "下一等级",
+  "levels.ui.top": "已是最高的普通等级",
+  "levels.ui.name": "等级",
+  "levels.ui.desc": "说明",
+  "levels.ui.promote": "升级条件",
+  "levels.ui.keep": "保级条件",
+  "levels.ui.none": "—",
+  "levels.ui.never_demoted": "不降级",
+  "levels.ui.manual": "由管理员授予",
+  "levels.ui.default": "新用户",
+  "levels.ui.no_invite": "不能发邀请",
+  "levels.ui.current": "当前",
+  "levels.ui.note":
+    "普通等级按条件自动评估：流量结算后 15 分钟内升级，每日凌晨全量检查保级条件。不满足保级条件时先发出警告，警告期满仍未达标才降级；升级后有一段保护期。",
+  "levels.metric.account_age_days": "注册天数",
+  "levels.metric.uploaded_gib": "上传量（GiB）",
+  "levels.metric.downloaded_gib": "下载量（GiB）",
+  "levels.metric.ratio": "分享率",
+  "levels.metric.seed_hours": "做种时长（小时）",
+  "levels.metric.avg_seed_hours": "平均做种时长（小时）",
+  "levels.metric.seeding_size_gib": "做种体积（GiB）",
+  "levels.metric.uploads_count": "发布数",
+  "levels.ui.tab": "等级",
+  "levels.ui.source": "来源：{s}",
+  "levels.ui.overrides": "生效中的覆盖",
+  "levels.ui.until": "至 {t}",
+  "levels.ui.forever": "永久",
+  "levels.ui.set_class": "设置等级",
+  "levels.ui.lock_days": "锁定天数（留空为永久）",
+  "levels.ui.reason": "原因",
+  "levels.ui.apply": "设置",
+  "levels.ui.unlock": "解除手动锁定",
+  "levels.ui.protect_days": "保号天数（0 取消）",
+  "levels.ui.protect": "保号",
+  "levels.ui.protected_until": "保号至 {t}",
+  "levels.ui.done": "已保存",
+  "levels.ui.admin": "等级总览",
+  "levels.ui.synced": "设置最近一次生效于 {t}",
+  "levels.ui.sync_error": "最新的等级设置未能生效：{e}",
+  "levels.ui.edit_settings": "编辑等级",
+  "levels.ui.role_hint":
+    "每个等级有自己的角色 levels:class_<id>，可在角色管理中为它配置权限。把用户设为管理组类型的等级（如“管理员”）只改变头衔与颜色，内置角色（moderator / admin）需要另外授予。",
+  "levels.ui.type": "类型",
+  "levels.ui.type.normal": "普通",
+  "levels.ui.type.vip": "VIP",
+  "levels.ui.type.honor": "荣誉",
+  "levels.ui.type.staff": "管理组",
+  "levels.ui.role": "角色",
+  "levels.ui.flags": "属性",
+  "levels.ui.cancel": "取消",
+  "levels.ui.until_col": "截止",
 });
-registerMessages('en', {
-  'levels.ui.class': 'Class',
-  'levels.ui.menu': 'User classes',
-  'levels.ui.title': 'User classes',
-  'levels.ui.warning': 'Warning: demotion on {date} unless requirements are met',
-  'levels.ui.my': 'My class',
-  'levels.ui.next': 'Next class',
-  'levels.ui.top': 'Highest regular class reached',
-  'levels.ui.name': 'Class',
-  'levels.ui.desc': 'Description',
-  'levels.ui.promote': 'Promotion',
-  'levels.ui.keep': 'To keep',
-  'levels.ui.none': '—',
-  'levels.ui.never_demoted': 'Never demoted',
-  'levels.ui.manual': 'Granted by staff',
-  'levels.ui.default': 'New users',
-  'levels.ui.no_invite': 'Cannot invite',
-  'levels.ui.current': 'Current',
-  'levels.ui.note':
-    'Regular classes are evaluated automatically: promotions within 15 minutes of traffic settling, keep requirements checked daily. Failing them starts a warning period before demotion; a promotion comes with a protection period.',
-  'levels.metric.account_age_days': 'Account age (days)',
-  'levels.metric.uploaded_gib': 'Uploaded (GiB)',
-  'levels.metric.downloaded_gib': 'Downloaded (GiB)',
-  'levels.metric.ratio': 'Ratio',
-  'levels.metric.seed_hours': 'Seeding time (hours)',
-  'levels.metric.avg_seed_hours': 'Average seeding time (hours)',
-  'levels.metric.seeding_size_gib': 'Seeding size (GiB)',
-  'levels.metric.uploads_count': 'Uploads',
-  'levels.ui.tab': 'Class',
-  'levels.ui.source': 'Source: {s}',
-  'levels.ui.overrides': 'Active overrides',
-  'levels.ui.until': 'until {t}',
-  'levels.ui.forever': 'permanent',
-  'levels.ui.set_class': 'Set class',
-  'levels.ui.lock_days': 'Lock for days (blank = permanent)',
-  'levels.ui.reason': 'Reason',
-  'levels.ui.apply': 'Set',
-  'levels.ui.unlock': 'Remove manual lock',
-  'levels.ui.protect_days': 'Protect for days (0 removes)',
-  'levels.ui.protect': 'Protect',
-  'levels.ui.protected_until': 'Protected until {t}',
-  'levels.ui.done': 'Saved',
-  'levels.ui.admin': 'Classes',
-  'levels.ui.synced': 'Settings last applied {t}',
-  'levels.ui.sync_error': 'The latest class settings could not be applied: {e}',
-  'levels.ui.edit_settings': 'Edit classes',
-  'levels.ui.role_hint': 'Each class has its own role levels:class_<id>; configure its permissions under roles. Setting a staff-type class (e.g. Administrator) only changes the title and colour — grant the built-in roles (moderator / admin) separately.',
-  'levels.ui.type': 'Type',
-  'levels.ui.type.normal': 'regular',
-  'levels.ui.type.vip': 'VIP',
-  'levels.ui.type.honor': 'honour',
-  'levels.ui.type.staff': 'staff',
-  'levels.ui.role': 'Role',
-  'levels.ui.flags': 'Flags',
+registerMessages("en", {
+  "levels.ui.class": "Class",
+  "levels.ui.menu": "User classes",
+  "levels.ui.title": "User classes",
+  "levels.ui.warning":
+    "Warning: demotion on {date} unless requirements are met",
+  "levels.ui.my": "My class",
+  "levels.ui.next": "Next class",
+  "levels.ui.top": "Highest regular class reached",
+  "levels.ui.name": "Class",
+  "levels.ui.desc": "Description",
+  "levels.ui.promote": "Promotion",
+  "levels.ui.keep": "To keep",
+  "levels.ui.none": "—",
+  "levels.ui.never_demoted": "Never demoted",
+  "levels.ui.manual": "Granted by staff",
+  "levels.ui.default": "New users",
+  "levels.ui.no_invite": "Cannot invite",
+  "levels.ui.current": "Current",
+  "levels.ui.note":
+    "Regular classes are evaluated automatically: promotions within 15 minutes of traffic settling, keep requirements checked daily. Failing them starts a warning period before demotion; a promotion comes with a protection period.",
+  "levels.metric.account_age_days": "Account age (days)",
+  "levels.metric.uploaded_gib": "Uploaded (GiB)",
+  "levels.metric.downloaded_gib": "Downloaded (GiB)",
+  "levels.metric.ratio": "Ratio",
+  "levels.metric.seed_hours": "Seeding time (hours)",
+  "levels.metric.avg_seed_hours": "Average seeding time (hours)",
+  "levels.metric.seeding_size_gib": "Seeding size (GiB)",
+  "levels.metric.uploads_count": "Uploads",
+  "levels.ui.tab": "Class",
+  "levels.ui.source": "Source: {s}",
+  "levels.ui.overrides": "Active overrides",
+  "levels.ui.until": "until {t}",
+  "levels.ui.forever": "permanent",
+  "levels.ui.set_class": "Set class",
+  "levels.ui.lock_days": "Lock for days (blank = permanent)",
+  "levels.ui.reason": "Reason",
+  "levels.ui.apply": "Set",
+  "levels.ui.unlock": "Remove manual lock",
+  "levels.ui.protect_days": "Protect for days (0 removes)",
+  "levels.ui.protect": "Protect",
+  "levels.ui.protected_until": "Protected until {t}",
+  "levels.ui.done": "Saved",
+  "levels.ui.admin": "Classes",
+  "levels.ui.synced": "Settings last applied {t}",
+  "levels.ui.sync_error": "The latest class settings could not be applied: {e}",
+  "levels.ui.edit_settings": "Edit classes",
+  "levels.ui.role_hint":
+    "Each class has its own role levels:class_<id>; configure its permissions under roles. Setting a staff-type class (e.g. Administrator) only changes the title and colour — grant the built-in roles (moderator / admin) separately.",
+  "levels.ui.type": "Type",
+  "levels.ui.type.normal": "regular",
+  "levels.ui.type.vip": "VIP",
+  "levels.ui.type.honor": "honour",
+  "levels.ui.type.staff": "staff",
+  "levels.ui.role": "Role",
+  "levels.ui.flags": "Flags",
+  "levels.ui.cancel": "Cancel",
+  "levels.ui.until_col": "Until",
 });
 
-const OPS: Record<string, string> = { gte: '≥', gt: '>', lte: '≤', lt: '<' };
+const OPS: Record<string, string> = { gte: "≥", gt: ">", lte: "≤", lt: "<" };
 
 /** 等级列表在页面内只取一次（多个个人页插槽共享） */
 let classesPromise: Promise<ClassInfo[]> | null = null;
 function loadClasses(api: PluginApi): Promise<ClassInfo[]> {
   classesPromise ??= api
-    .json<{ items: ClassInfo[] }>('/api/p/levels/v1/classes')
+    .json<{ items: ClassInfo[] }>("/api/p/levels/v1/classes")
     .then((r) => r.items)
     .catch((e: unknown) => {
       classesPromise = null;
@@ -173,7 +209,10 @@ function loadClasses(api: PluginApi): Promise<ClassInfo[]> {
 function useClasses(api: PluginApi): ClassInfo[] | null {
   const [list, setList] = useState<ClassInfo[] | null>(null);
   useEffect(() => {
-    if (api.user()) void loadClasses(api).then(setList).catch(() => undefined);
+    if (api.user())
+      void loadClasses(api)
+        .then(setList)
+        .catch(() => undefined);
   }, [api]);
   return list;
 }
@@ -185,50 +224,66 @@ function className(api: PluginApi, c: Brief): string {
 
 function ClassName({ api, c }: { api: PluginApi; c: Brief }) {
   return (
-    <span className="pt-class-name" style={c.color ? { color: c.color, fontWeight: 600 } : { fontWeight: 600 }}>
+    <span className="cls-name" style={c.color ? { color: c.color } : undefined}>
       {className(api, c)}
     </span>
   );
 }
 
-function condText(api: PluginApi, cs: Cond[]): string {
-  return cs.map((c) => `${api.t(`levels.metric.${c.metric}`)} ${OPS[c.op] ?? c.op} ${c.value}`).join('；');
-}
+const condLine = (api: PluginApi, c: Cond) =>
+  `${api.t(`levels.metric.${c.metric}`)} ${OPS[c.op] ?? c.op} ${c.value}`;
+const condText = (api: PluginApi, cs: Cond[]) =>
+  cs.map((c) => condLine(api, c)).join("；");
 
 function NextHint({ api, me }: { api: PluginApi; me: Me }) {
   if (me.warning)
-    return <span className="pt-field-error">{api.t('levels.ui.warning', { date: new Date(me.warning.deadline).toLocaleDateString() })}</span>;
+    return (
+      <span className="down">
+        {api.t("levels.ui.warning", {
+          date: new Date(me.warning.deadline).toLocaleDateString(),
+        })}
+      </span>
+    );
   if (!me.next) return null;
   const met = me.next.progress.filter((p) => p.met).length;
   return (
-    <span title={me.next.progress.map((p) => `${api.t(`levels.metric.${p.metric}`)}: ${p.current} / ${p.target}`).join('\n')}>
-      → {className(api, me.next)} <Progress value={met} max={me.next.progress.length} />
+    <span
+      title={me.next.progress
+        .map(
+          (p) =>
+            `${api.t(`levels.metric.${p.metric}`)}: ${p.current} / ${p.target}`,
+        )
+        .join("\n")}
+    >
+      → {className(api, me.next)} · {met}/{me.next.progress.length}
     </span>
   );
 }
 
 /** 个人页：任何人的等级；本人另显示进度 */
-function LevelStat({ ctx, api }: SlotProps<{ profile: { id: number; class_id: number } }>) {
+function LevelStat({
+  ctx,
+  api,
+}: SlotProps<{ profile: { id: number; class_id: number } }>) {
   const classes = useClasses(api);
   const [me, setMe] = useState<Me | null>(null);
   const self = api.user()?.id === ctx.profile.id;
   useEffect(() => {
-    if (self) void api.json<Me>('/api/p/levels/v1/me').then(setMe).catch(() => undefined);
+    if (self)
+      void api
+        .json<Me>("/api/p/levels/v1/me")
+        .then(setMe)
+        .catch(() => undefined);
   }, [api, self]);
-  const c: Brief | undefined = me?.class ?? classes?.find((x) => x.id === ctx.profile.class_id);
+  const c: Brief | undefined =
+    me?.class ?? classes?.find((x) => x.id === ctx.profile.class_id);
   if (!c) return null;
   return (
     <Stat
       label={
-        <a
-          href="/p/levels/"
-          onClick={(e) => {
-            e.preventDefault();
-            api.navigate('/p/levels/');
-          }}
-        >
-          {api.t('levels.ui.class')}
-        </a>
+        <PLink to="/p/levels/" navigate={api.navigate}>
+          {api.t("levels.ui.class")}
+        </PLink>
       }
       value={<ClassName api={api} c={c} />}
       hint={me ? <NextHint api={api} me={me} /> : null}
@@ -238,15 +293,45 @@ function LevelStat({ ctx, api }: SlotProps<{ profile: { id: number; class_id: nu
 
 function MenuItem({ api }: SlotProps) {
   return (
-    <a
-      href="/p/levels/"
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate('/p/levels/');
-      }}
-    >
-      {api.t('levels.ui.menu')}
-    </a>
+    <NavItem to="/p/levels/" navigate={api.navigate}>
+      {api.t("levels.ui.menu")}
+    </NavItem>
+  );
+}
+
+/** 单项进度：数值型按 current/target 画进度条（“≤ / <” 类条件只显示达标与否） */
+function ProgressRow({
+  api,
+  p,
+}: {
+  api: PluginApi;
+  p: {
+    metric: string;
+    op: string;
+    target: string;
+    current: string;
+    met: boolean;
+  };
+}) {
+  const up = p.op === "gte" || p.op === "gt";
+  const cur = Number(p.current);
+  const tgt = Number(p.target);
+  return (
+    <div className="stack-s">
+      <div className="row-sb small">
+        <span>{api.t(`levels.metric.${p.metric}`)}</span>
+        <span className={p.met ? "num up" : "num"}>
+          {p.current}{" "}
+          <span className="muted">{`${OPS[p.op] ?? p.op} ${p.target}`}</span>
+        </span>
+      </div>
+      <Progress
+        value={p.met ? 1 : up && tgt > 0 ? cur / tgt : 0}
+        max={1}
+        label={api.t(`levels.metric.${p.metric}`)}
+        tone={p.met ? "ok" : undefined}
+      />
+    </div>
   );
 }
 
@@ -254,221 +339,458 @@ function Page({ api }: { api: PluginApi }) {
   const classes = useClasses(api);
   const [me, setMe] = useState<Me | null>(null);
   useEffect(() => {
-    void api.json<Me>('/api/p/levels/v1/me').then(setMe).catch(() => undefined);
+    void api
+      .json<Me>("/api/p/levels/v1/me")
+      .then(setMe)
+      .catch(() => undefined);
   }, [api]);
-  if (!classes) return null;
+  if (!classes) return <SkeletonRows n={8} />;
   const desc = (c: ClassInfo) => {
     if (c.description) return c.description;
     const d = api.t(`term:${c.desc_key}`);
-    return d === c.desc_key ? '' : d;
+    return d === c.desc_key ? "" : d;
   };
   return (
-    <div className="pt-stack">
-      {me && (
-        <Card title={api.t('levels.ui.my')}>
-          <div className="pt-row">
-            <Stat label={api.t('levels.ui.my')} value={<ClassName api={api} c={me.class} />} />
-            <Stat label={api.t('levels.ui.next')} value={me.next ? <ClassName api={api} c={me.next} /> : api.t('levels.ui.top')} hint={<NextHint api={api} me={me} />} />
-          </div>
-          {me.next && (
-            <Table
-              rows={me.next.progress}
-              rowKey={(p) => p.metric}
-              columns={[
-                { key: 'm', header: api.t('levels.ui.promote'), render: (p) => api.t(`levels.metric.${p.metric}`) },
-                { key: 't', header: '', render: (p) => `${OPS[p.op] ?? p.op} ${p.target}` },
-                { key: 'c', header: api.t('levels.ui.current'), render: (p) => <Badge tone={p.met ? 'success' : 'muted'}>{p.current}</Badge> },
-              ]}
-            />
-          )}
-        </Card>
+    <div className="stack">
+      <PageHead
+        title={api.t("levels.ui.title")}
+        lede={api.t("levels.ui.note")}
+      />
+      {me?.warning && (
+        <Note tone="bad">
+          {api.t("levels.ui.warning", {
+            date: new Date(me.warning.deadline).toLocaleDateString(),
+          })}
+        </Note>
       )}
-      <Card title={api.t('levels.ui.title')}>
-        <p className="pt-muted small">{api.t('levels.ui.note')}</p>
-        <Table
-          rows={classes}
-          rowKey={(c) => c.key}
-          columns={[
-            {
-              key: 'n',
-              header: api.t('levels.ui.name'),
-              render: (c) => (
-                <>
-                  <ClassName api={api} c={c} /> {me?.class.id === c.id && <Badge tone="primary">{api.t('levels.ui.current')}</Badge>}
-                  {c.is_default && <Badge>{api.t('levels.ui.default')}</Badge>}
-                </>
-              ),
-            },
-            { key: 'd', header: api.t('levels.ui.desc'), render: (c) => desc(c) },
-            {
-              key: 'p',
-              header: api.t('levels.ui.promote'),
-              render: (c) => (c.type === 'normal' ? condText(api, c.promote) || api.t('levels.ui.none') : api.t('levels.ui.manual')),
-            },
-            {
-              key: 'k',
-              header: api.t('levels.ui.keep'),
-              render: (c) =>
-                c.type !== 'normal' || c.protected || c.keep.length === 0 ? api.t('levels.ui.never_demoted') : condText(api, c.keep),
-            },
-          ]}
-        />
-      </Card>
+      <SideLayout
+        width={320}
+        sideFirst
+        side={
+          me && (
+            <Panel title={api.t("levels.ui.my")} primary>
+              <div className="stack">
+                <dl className="ledger">
+                  <dt>{api.t("levels.ui.my")}</dt>
+                  <dd>
+                    <ClassName api={api} c={me.class} />
+                  </dd>
+                  <dt>{api.t("levels.ui.next")}</dt>
+                  <dd>
+                    {me.next ? (
+                      <ClassName api={api} c={me.next} />
+                    ) : (
+                      api.t("levels.ui.top")
+                    )}
+                  </dd>
+                </dl>
+                {me.next?.progress.map((p) => (
+                  <ProgressRow key={p.metric} api={api} p={p} />
+                ))}
+              </div>
+            </Panel>
+          )
+        }
+      >
+        <Panel flush>
+          {classes.map((c) => (
+            <div
+              key={c.key}
+              className={me?.class.id === c.id ? "rung cur" : "rung"}
+            >
+              <div className="stack-s">
+                <h3>
+                  <ClassName api={api} c={c} />
+                </h3>
+                <div className="row">
+                  {me?.class.id === c.id && (
+                    <Tag tone="g">{api.t("levels.ui.current")}</Tag>
+                  )}
+                  {c.type !== "normal" && (
+                    <Tag tone="o">{api.t(`levels.ui.type.${c.type}`)}</Tag>
+                  )}
+                  {c.is_default && <Tag>{api.t("levels.ui.default")}</Tag>}
+                  {!c.can_invite && (
+                    <Tag tone="x">{api.t("levels.ui.no_invite")}</Tag>
+                  )}
+                </div>
+                {desc(c) && <p className="muted">{desc(c)}</p>}
+              </div>
+              <div>
+                <span className="eyebrow">{api.t("levels.ui.promote")}</span>
+                {c.type !== "normal" ? (
+                  <p className="muted">{api.t("levels.ui.manual")}</p>
+                ) : c.promote.length === 0 ? (
+                  <p className="muted">{api.t("levels.ui.none")}</p>
+                ) : (
+                  <ul>
+                    {c.promote.map((x) => (
+                      <li key={x.metric}>{condLine(api, x)}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <span className="eyebrow">{api.t("levels.ui.keep")}</span>
+                {c.type !== "normal" || c.protected || c.keep.length === 0 ? (
+                  <p className="muted">{api.t("levels.ui.never_demoted")}</p>
+                ) : (
+                  <ul>
+                    {c.keep.map((x) => (
+                      <li key={x.metric}>{condLine(api, x)}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          ))}
+        </Panel>
+      </SideLayout>
     </div>
   );
 }
 
 interface AdminUser extends Me {
-  overrides: { id: number; kind: string; class_id: number; until: number | null; reason: string; created_by: string }[];
+  overrides: {
+    id: number;
+    kind: string;
+    class_id: number;
+    until: number | null;
+    reason: string;
+    created_by: string;
+  }[];
   protected_until: number | null;
 }
 
 const errText = (api: PluginApi, e: unknown) =>
-  e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e);
+  e instanceof ApiError && api.t(e.code) !== e.code
+    ? api.t(e.code)
+    : e instanceof Error
+      ? e.message
+      : String(e);
 
-/** 后台用户详情页“等级”标签：当前等级与来源、生效中的覆盖、手动设置 / 锁定、解除、保号 */
+/** 后台用户详情页“等级”标签：当前等级与来源、生效中的覆盖；手动设置 / 锁定与保号在抽屉里操作 */
 function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   const uid = ctx.profile.id;
   const classes = useClasses(api);
   const [d, setD] = useState<AdminUser | null>(null);
-  const [f, setF] = useState({ class: '', days: '', reason: '', protect: '30' });
+  const [sheet, setSheet] = useState<"class" | "protect" | null>(null);
+  const [f, setF] = useState({
+    class: "",
+    days: "",
+    reason: "",
+    protect: "30",
+  });
   const base = `/api/p/levels/v1/admin/users/${uid}` as const;
   const load = () => void api.json<AdminUser>(base).then(setD);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [uid]);
-  const act = async (path: `/api/${string}`, init: { method?: string; json?: unknown }) => {
+  const act = async (
+    path: `/api/${string}`,
+    init: { method?: string; json?: unknown },
+  ) => {
     try {
       await api.json(path, init);
-      api.toast(api.t('levels.ui.done'), 'success');
+      api.toast(api.t("levels.ui.done"), "success");
+      setSheet(null);
       load();
     } catch (e) {
-      api.toast(errText(api, e), 'error');
+      api.toast(errText(api, e), "error");
     }
   };
   const setClass = (e: FormEvent) => {
     e.preventDefault();
-    const lock = f.days.trim() ? Date.now() + Number(f.days) * 86_400_000 : null;
-    void act(`${base}/class`, { json: { class: f.class, lock_until_ms: lock, reason: f.reason } });
+    const lock = f.days.trim()
+      ? Date.now() + Number(f.days) * 86_400_000
+      : null;
+    void act(`${base}/class`, {
+      json: { class: f.class, lock_until_ms: lock, reason: f.reason },
+    });
   };
-  if (!d || !classes) return null;
+  const protect = (e: FormEvent) => {
+    e.preventDefault();
+    void act(`${base}/protect`, {
+      json: {
+        until_ms:
+          Number(f.protect) > 0
+            ? Date.now() + Number(f.protect) * 86_400_000
+            : null,
+      },
+    });
+  };
+  if (!d || !classes) return <SkeletonRows n={3} />;
   const byId = (id: number) => classes.find((c) => c.id === id);
+  const cancel = (
+    <Button variant="ghost" onClick={() => setSheet(null)}>
+      {api.t("levels.ui.cancel")}
+    </Button>
+  );
   return (
-    <Card>
-      <p>
-        <ClassName api={api} c={d.class} /> <span className="pt-muted small">{api.t('levels.ui.source', { s: d.class.source })}</span>{' '}
-        {d.protected_until && <Badge tone="success">{api.t('levels.ui.protected_until', { t: new Date(d.protected_until).toLocaleDateString() })}</Badge>}{' '}
-        {d.warning && <Badge tone="danger">{api.t('levels.ui.warning', { date: new Date(d.warning.deadline).toLocaleDateString() })}</Badge>}
-      </p>
-      {d.overrides.length > 0 && (
-        <Table
-          rows={d.overrides}
-          rowKey={(o) => o.id}
-          columns={[
-            { key: 'k', header: api.t('levels.ui.overrides'), render: (o) => <Badge>{o.kind}</Badge> },
-            { key: 'c', header: '', render: (o) => (byId(o.class_id) ? <ClassName api={api} c={byId(o.class_id) as Brief} /> : `#${o.class_id}`) },
-            { key: 'u', header: '', render: (o) => (o.until ? api.t('levels.ui.until', { t: new Date(o.until).toLocaleString() }) : api.t('levels.ui.forever')) },
-            { key: 'r', header: '', render: (o) => <span className="pt-muted small">{o.reason} · {o.created_by}</span> },
-          ]}
-        />
-      )}
-      <form onSubmit={setClass} className="upload-grid">
-        <Field label={api.t('levels.ui.set_class')}>
-          <select className="pt-input" name="level_class" value={f.class} onChange={(e) => setF({ ...f, class: e.target.value })}>
-            <option value="" />
-            {classes.map((c) => (
-              <option key={c.id} value={c.key}>
-                {className(api, c)}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={api.t('levels.ui.lock_days')}>
-          <Input name="level_days" type="number" min={1} value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
-        </Field>
-        <div className="span2">
-          <Field label={api.t('levels.ui.reason')}>
-            <Input name="level_reason" maxLength={200} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
-          </Field>
-          <Button type="submit" variant="primary" disabled={!f.class}>
-            {api.t('levels.ui.apply')}
-          </Button>{' '}
-          <Button type="button" onClick={() => void act(`${base}/class`, { method: 'DELETE' })}>
-            {api.t('levels.ui.unlock')}
+    <div className="stack">
+      <div className="row-sb">
+        <div className="row">
+          <ClassName api={api} c={d.class} />
+          <span className="small muted">
+            {api.t("levels.ui.source", { s: d.class.source })}
+          </span>
+          {d.protected_until && (
+            <Status tone="ok">
+              {api.t("levels.ui.protected_until", {
+                t: new Date(d.protected_until).toLocaleDateString(),
+              })}
+            </Status>
+          )}
+          {d.warning && (
+            <Status tone="bad">
+              {api.t("levels.ui.warning", {
+                date: new Date(d.warning.deadline).toLocaleDateString(),
+              })}
+            </Status>
+          )}
+        </div>
+        <div className="form-acts">
+          <Button size="sm" variant="primary" onClick={() => setSheet("class")}>
+            {api.t("levels.ui.set_class")}
+          </Button>
+          <Button size="sm" onClick={() => setSheet("protect")}>
+            {api.t("levels.ui.protect")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void act(`${base}/class`, { method: "DELETE" })}
+          >
+            {api.t("levels.ui.unlock")}
           </Button>
         </div>
-      </form>
-      <div className="searchbar">
-        <Input name="level_protect" type="number" min={0} aria-label={api.t('levels.ui.protect_days')} title={api.t('levels.ui.protect_days')} value={f.protect} onChange={(e) => setF({ ...f, protect: e.target.value })} />
-        <Button
-          type="button"
-          onClick={() => void act(`${base}/protect`, { json: { until_ms: Number(f.protect) > 0 ? Date.now() + Number(f.protect) * 86_400_000 : null } })}
-        >
-          {api.t('levels.ui.protect')}
-        </Button>
       </div>
-    </Card>
+      {d.overrides.length > 0 && (
+        <Panel title={api.t("levels.ui.overrides")} flush>
+          <Table
+            rows={d.overrides}
+            rowKey={(o) => o.id}
+            columns={[
+              {
+                key: "k",
+                header: api.t("levels.ui.type"),
+                render: (o) => <Tag>{o.kind}</Tag>,
+              },
+              {
+                key: "c",
+                header: api.t("levels.ui.class"),
+                render: (o) =>
+                  byId(o.class_id) ? (
+                    <ClassName api={api} c={byId(o.class_id) as Brief} />
+                  ) : (
+                    `#${o.class_id}`
+                  ),
+              },
+              {
+                key: "u",
+                header: api.t("levels.ui.until_col"),
+                render: (o) => (
+                  <span className="small nowrap">
+                    {o.until
+                      ? new Date(o.until).toLocaleString()
+                      : api.t("levels.ui.forever")}
+                  </span>
+                ),
+              },
+              {
+                key: "r",
+                header: api.t("levels.ui.reason"),
+                render: (o) => (
+                  <span className="small muted">
+                    {o.reason} · {o.created_by}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </Panel>
+      )}
+      <Sheet
+        open={sheet === "class"}
+        onClose={() => setSheet(null)}
+        title={api.t("levels.ui.set_class")}
+        footer={
+          <>
+            {cancel}
+            <Button
+              type="submit"
+              form="level-set"
+              variant="primary"
+              disabled={!f.class}
+            >
+              {api.t("levels.ui.apply")}
+            </Button>
+          </>
+        }
+      >
+        <form id="level-set" className="form" onSubmit={setClass}>
+          <Field label={api.t("levels.ui.class")}>
+            <Select
+              name="level_class"
+              value={f.class}
+              onChange={(e) => setF({ ...f, class: e.target.value })}
+              options={[
+                { value: "", label: "—" },
+                ...classes.map((c) => ({
+                  value: c.key,
+                  label: className(api, c),
+                })),
+              ]}
+            />
+          </Field>
+          <Field label={api.t("levels.ui.lock_days")}>
+            <Input
+              name="level_days"
+              type="number"
+              min={1}
+              value={f.days}
+              onChange={(e) => setF({ ...f, days: e.target.value })}
+            />
+          </Field>
+          <Field label={api.t("levels.ui.reason")}>
+            <Input
+              name="level_reason"
+              maxLength={200}
+              value={f.reason}
+              onChange={(e) => setF({ ...f, reason: e.target.value })}
+            />
+          </Field>
+        </form>
+      </Sheet>
+      <Sheet
+        open={sheet === "protect"}
+        onClose={() => setSheet(null)}
+        title={api.t("levels.ui.protect")}
+        footer={
+          <>
+            {cancel}
+            <Button type="submit" form="level-protect" variant="primary">
+              {api.t("levels.ui.protect")}
+            </Button>
+          </>
+        }
+      >
+        <form id="level-protect" className="form" onSubmit={protect}>
+          <Field label={api.t("levels.ui.protect_days")}>
+            <Input
+              name="level_protect"
+              type="number"
+              min={0}
+              value={f.protect}
+              onChange={(e) => setF({ ...f, protect: e.target.value })}
+            />
+          </Field>
+        </form>
+      </Sheet>
+    </div>
   );
 }
 
 /** 后台等级总览（/admin/p/levels/） */
 function Admin({ api }: { api: PluginApi }) {
-  const [d, setD] = useState<{ items: ClassInfo[]; settings_error: string | null; synced_at: number | null } | null>(null);
+  const [d, setD] = useState<{
+    items: ClassInfo[];
+    settings_error: string | null;
+    synced_at: number | null;
+  } | null>(null);
   useEffect(() => {
-    void api.json<NonNullable<typeof d>>('/api/p/levels/v1/admin/classes').then(setD);
+    void api
+      .json<NonNullable<typeof d>>("/api/p/levels/v1/admin/classes")
+      .then(setD);
   }, [api]);
-  if (!d) return null;
+  if (!d) return <SkeletonRows n={6} />;
   return (
-    <div className="pt-stack">
-      <div className="page-head">
-        <h1 className="page-title">{api.t('levels.ui.admin')}</h1>
-        <a
-          className="pt-btn"
-          href="/admin/p/levels/settings"
-          onClick={(e) => {
-            e.preventDefault();
-            api.navigate('/admin/p/levels/settings');
-          }}
-        >
-          {api.t('levels.ui.edit_settings')}
-        </a>
-      </div>
-      {d.settings_error && <p className="pt-error">{api.t('levels.ui.sync_error', { e: d.settings_error })}</p>}
-      <Card>
-        {d.synced_at && <p className="pt-muted small">{api.t('levels.ui.synced', { t: new Date(d.synced_at).toLocaleString() })}</p>}
-        <p className="pt-muted small">{api.t('levels.ui.role_hint')}</p>
+    <div className="stack">
+      <PageHead
+        title={api.t("levels.ui.admin")}
+        lede={
+          d.synced_at
+            ? api.t("levels.ui.synced", {
+                t: new Date(d.synced_at).toLocaleString(),
+              })
+            : undefined
+        }
+        actions={
+          <PLink
+            to="/admin/p/levels/settings"
+            navigate={api.navigate}
+            className="btn"
+          >
+            {api.t("levels.ui.edit_settings")}
+          </PLink>
+        }
+      />
+      {d.settings_error && (
+        <Note tone="bad">
+          {api.t("levels.ui.sync_error", { e: d.settings_error })}
+        </Note>
+      )}
+      <Note tone="info">{api.t("levels.ui.role_hint")}</Note>
+      <Panel flush primary>
         <Table
           rows={d.items}
           rowKey={(c) => c.key}
           columns={[
-            { key: 'n', header: api.t('levels.ui.name'), render: (c) => <ClassName api={api} c={c} /> },
-            { key: 'k', header: 'key', render: (c) => <code className="small">{c.key}</code> },
-            { key: 't', header: api.t('levels.ui.type'), render: (c) => api.t(`levels.ui.type.${c.type}`) },
             {
-              key: 'f',
-              header: api.t('levels.ui.flags'),
+              key: "n",
+              header: api.t("levels.ui.name"),
+              render: (c) => <ClassName api={api} c={c} />,
+            },
+            {
+              key: "k",
+              header: "key",
+              render: (c) => <span className="pt-mono small">{c.key}</span>,
+            },
+            {
+              key: "t",
+              header: api.t("levels.ui.type"),
+              render: (c) => api.t(`levels.ui.type.${c.type}`),
+            },
+            {
+              key: "f",
+              header: api.t("levels.ui.flags"),
               render: (c) => (
-                <>
-                  {c.is_default && <Badge>{api.t('levels.ui.default')}</Badge>} {!c.can_invite && <Badge>{api.t('levels.ui.no_invite')}</Badge>}{' '}
-                  {c.protected && <Badge>{api.t('levels.ui.never_demoted')}</Badge>}
-                </>
+                <div className="row">
+                  {c.is_default && <Tag>{api.t("levels.ui.default")}</Tag>}
+                  {!c.can_invite && (
+                    <Tag tone="x">{api.t("levels.ui.no_invite")}</Tag>
+                  )}
+                  {c.protected && (
+                    <Tag tone="k">{api.t("levels.ui.never_demoted")}</Tag>
+                  )}
+                </div>
               ),
             },
-            { key: 'r', header: api.t('levels.ui.role'), render: (c) => <code className="small">{`levels:class_${c.id}`}</code> },
+            {
+              key: "r",
+              header: api.t("levels.ui.role"),
+              render: (c) => (
+                <span className="pt-mono small">{`levels:class_${c.id}`}</span>
+              ),
+            },
           ]}
         />
-      </Card>
+      </Panel>
     </div>
   );
 }
 
 export default {
   slots: {
-    'admin.user.tabs': { component: UserTab, order: 5, title_term: 'levels.ui.tab' },
-    'user.profile.stats': { component: LevelStat, order: 10 },
-    'nav.user_menu': { component: MenuItem, order: 30 },
+    "admin.user.tabs": {
+      component: UserTab,
+      order: 5,
+      title_term: "levels.ui.tab",
+    },
+    "user.profile.stats": { component: LevelStat, order: 10 },
+    "nav.user_menu": { component: MenuItem, order: 30 },
   },
   routes: [
-    { path: '/p/levels/*', component: Page },
-    { path: '/admin/p/levels/*', component: Admin },
+    { path: "/p/levels/*", component: Page },
+    { path: "/admin/p/levels/*", component: Admin },
   ],
 } satisfies PluginFrontend;

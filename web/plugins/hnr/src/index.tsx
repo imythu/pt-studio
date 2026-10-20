@@ -1,12 +1,12 @@
-// hnr 前端：个人页考核统计（本人，链接到“我的 H&R”）；种子页提示是否需要考核；我的 H&R（/p/hnr/，按状态筛选的考核记录）；
-// 个人页与后台用户详情页“H&R”标签（他人记录需要 hnr.read，可免除单条记录）。
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+// hnr 前端：个人页考核统计（本人）；种子页考核要求标记；我的 H&R（/p/hnr/，数字带 + 按状态筛选的考核记录）；
+// 个人页与后台用户详情页「H&R」页签（他人记录需要 hnr.read，可在抽屉里填写原因免除单条记录）。
+import { useCallback, useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import { formatDuration, registerMessages } from '@pt-studio/terms';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
-import { Badge, Button, Card, Progress, Stat, Table, Tabs } from '@pt-studio/ui-kit';
+import { Button, Field, Input, Kpis, LoadMore, NavItem, Note, PageHead, Panel, PLink, Progress, Sheet, SkeletonRows, Stat, Status, Table, Tabs, Tag, type Tone } from '@pt-studio/ui-kit';
 
-interface Status {
+interface Status_ {
   active: number;
   failed: number;
   max: number;
@@ -30,37 +30,23 @@ interface Rec {
 const errText = (api: PluginApi, e: unknown) =>
   e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e);
 
-function A({ api, to, children }: { api: PluginApi; to: string; children: ReactNode }) {
-  return (
-    <a
-      href={to}
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate(to);
-      }}
-    >
-      {children}
-    </a>
-  );
-}
-
 function HnrStat({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
-  const [s, setS] = useState<Status | null>(null);
+  const [s, setS] = useState<Status_ | null>(null);
   const self = api.user()?.id === ctx.profile.id;
   useEffect(() => {
-    if (self) void api.json<Status>('/api/p/hnr/v1/me').then(setS).catch(() => undefined);
+    if (self) void api.json<Status_>('/api/p/hnr/v1/me').then(setS).catch(() => undefined);
   }, [api, self]);
   if (!s) return null;
   return (
     <Stat
       label={
-        <A api={api} to="/p/hnr/">
-          H&R
-        </A>
+        <PLink to="/p/hnr/" navigate={api.navigate}>
+          H&amp;R
+        </PLink>
       }
       value={
         <>
-          {s.active} / <span className={s.failed > 0 ? 'pt-field-error' : undefined}>{s.failed}</span>
+          {s.active} / <span className={s.failed > 0 ? 'down' : undefined}>{s.failed}</span>
         </>
       }
       hint={api.t('hnr.ui.summary', { max: s.max })}
@@ -82,23 +68,25 @@ function HnrNotice({ ctx, api }: SlotProps<{ torrent: { id: number } }>) {
   }, [api, ctx.torrent.id]);
   if (!r) return null;
   return r.required ? (
-    <Badge tone="danger" title={api.t('hnr.ui.required_hint', { hours: r.min_seed_hours, days: r.window_days })}>
+    <Status tone="warn" title={api.t('hnr.ui.required_hint', { hours: r.min_seed_hours, days: r.window_days })}>
       {api.t('hnr.ui.required', { hours: r.min_seed_hours })}
-    </Badge>
+    </Status>
   ) : (
-    <Badge tone="success">{api.t('hnr.ui.exempt')}</Badge>
+    <Tag tone="k">{api.t('hnr.ui.exempt')}</Tag>
   );
 }
 
 const STATES = ['', 'active', 'failed', 'satisfied', 'forgiven', 'exempted'];
-const TONE: Record<string, 'primary' | 'danger' | 'success' | 'muted'> = { active: 'primary', failed: 'danger', satisfied: 'success' };
+const TONE: Record<string, Tone> = { active: 'warn', failed: 'bad', satisfied: 'ok', forgiven: 'info', exempted: 'info' };
 
 /** 考核记录表：`uid` 为空时读本人（/me/records）；他人记录可免除 */
-function Records({ api, uid }: { api: PluginApi; uid: number | null }) {
+function Records({ api, uid, flushTabs }: { api: PluginApi; uid: number | null; flushTabs?: boolean }) {
   const [state, setState] = useState('');
-  const [rows, setRows] = useState<Rec[]>([]);
+  const [rows, setRows] = useState<Rec[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
+  const [forgiving, setForgiving] = useState<Rec | null>(null);
+  const [reason, setReason] = useState('');
   const base = uid === null ? '/api/p/hnr/v1/me/records' : `/api/p/hnr/v1/users/${uid}/records`;
   const load = useCallback(
     async (cursor: string | null) => {
@@ -107,7 +95,7 @@ function Records({ api, uid }: { api: PluginApi; uid: number | null }) {
       if (cursor) q.set('cursor', cursor);
       try {
         const r = await api.json<{ items: Rec[]; next_cursor: string | null }>(`${base}?${q.toString()}` as `/api/${string}`);
-        setRows((old) => (cursor ? [...old, ...r.items] : r.items));
+        setRows((old) => (cursor ? [...(old ?? []), ...r.items] : r.items));
         setNext(r.next_cursor);
       } catch (e) {
         if (e instanceof ApiError && e.status === 403) setDenied(true);
@@ -119,119 +107,127 @@ function Records({ api, uid }: { api: PluginApi; uid: number | null }) {
   useEffect(() => {
     void load(null);
   }, [load]);
-  const forgive = async (r: Rec) => {
-    const reason = window.prompt(api.t('hnr.ui.forgive_prompt'));
-    if (!reason?.trim()) return;
+  const forgive = async () => {
+    if (!forgiving || !reason.trim()) return;
     try {
-      await api.json(`/api/p/hnr/v1/records/${r.id}/forgive`, { json: { reason: reason.trim() } });
+      await api.json(`/api/p/hnr/v1/records/${forgiving.id}/forgive`, { json: { reason: reason.trim() } });
       api.toast(api.t('hnr.ui.forgiven'), 'success');
+      setForgiving(null);
+      setReason('');
       await load(null);
     } catch (e) {
       api.toast(errText(api, e), 'error');
     }
   };
-  if (denied) return <p className="pt-muted">{api.t('hnr.ui.denied')}</p>;
+  if (denied) return <Note>{api.t('hnr.ui.denied')}</Note>;
   return (
     <>
-      <Tabs value={state} onChange={setState} tabs={STATES.map((s) => ({ id: s, label: api.t(`hnr.ui.state.${s || 'all'}`) }))} />
-      <Table
-        rows={rows}
-        rowKey={(r) => r.id}
-        empty={api.t('hnr.ui.empty')}
-        columns={[
-          {
-            key: 't',
-            header: api.t('hnr.ui.torrent'),
-            render: (r) => (
-              <A api={api} to={`/torrents/${r.torrent_id}`}>
-                {r.title ?? `#${r.torrent_id}`}
-              </A>
-            ),
-          },
-          { key: 's', header: api.t('hnr.ui.state'), render: (r) => <Badge tone={TONE[r.state] ?? 'muted'}>{api.t(`hnr.ui.state.${r.state}`)}</Badge> },
-          {
-            key: 'p',
-            header: api.t('hnr.ui.seed'),
-            render: (r) => (
-              <>
-                <Progress value={Math.min(r.seed_secs, r.required_seed_secs)} max={Math.max(r.required_seed_secs, 1)} label={api.t('hnr.ui.seed')} />
-                <span className="pt-muted small">
-                  {formatDuration(r.seed_secs)} / {formatDuration(r.required_seed_secs)}
-                </span>
-              </>
-            ),
-          },
-          {
-            key: 'r',
-            header: api.t('hnr.ui.ratio'),
-            render: (r) => (r.ratio === null ? '—' : `${r.ratio.toFixed(2)}${r.required_ratio ? ` / ${r.required_ratio}` : ''}`),
-          },
-          {
-            key: 'd',
-            header: api.t('hnr.ui.deadline'),
-            render: (r) => <span className="pt-muted small">{r.state === 'active' ? new Date(r.deadline).toLocaleString() : (r.exempt_rule ?? '')}</span>,
-          },
-          {
-            key: 'x',
-            header: '',
-            render: (r) =>
-              uid !== null && (r.state === 'active' || r.state === 'failed') ? (
-                <Button variant="ghost" onClick={() => void forgive(r)}>
-                  {api.t('hnr.ui.forgive')}
-                </Button>
-              ) : null,
-          },
-        ]}
-      />
-      {next && <Button onClick={() => void load(next)}>{api.t('hnr.ui.more')}</Button>}
+      <Tabs variant={flushTabs ? 'flush' : undefined} value={state} onChange={setState} tabs={STATES.map((s) => ({ id: s, label: api.t(`hnr.ui.state.${s || 'all'}`) }))} />
+      {rows === null ? (
+        <SkeletonRows n={4} />
+      ) : (
+        <Table
+          rows={rows}
+          rowKey={(r) => r.id}
+          empty={api.t('hnr.ui.empty')}
+          minWidth={820}
+          columns={[
+            { key: 't', header: api.t('hnr.ui.torrent'), render: (r) => <PLink to={`/torrents/${r.torrent_id}`} navigate={api.navigate} className="tt-name">{r.title ?? `#${r.torrent_id}`}</PLink> },
+            { key: 's', header: api.t('hnr.ui.state'), render: (r) => <Status tone={TONE[r.state] ?? 'mute'}>{api.t(`hnr.ui.state.${r.state}`)}</Status> },
+            {
+              key: 'p',
+              header: api.t('hnr.ui.seed'),
+              render: (r) => (
+                <div className="hnr-prog">
+                  <span className="tiny num">
+                    {formatDuration(r.seed_secs)} / {formatDuration(r.required_seed_secs)}
+                  </span>
+                  <Progress value={Math.min(r.seed_secs, r.required_seed_secs)} max={Math.max(r.required_seed_secs, 1)} label={api.t('hnr.ui.seed')} tone={r.seed_secs >= r.required_seed_secs ? 'ok' : undefined} />
+                </div>
+              ),
+            },
+            { key: 'r', header: api.t('hnr.ui.ratio'), right: true, render: (r) => <span className="num">{r.ratio === null ? '—' : `${r.ratio.toFixed(2)}${r.required_ratio ? ` / ${r.required_ratio}` : ''}`}</span> },
+            { key: 'd', header: api.t('hnr.ui.deadline'), render: (r) => <span className="small muted nowrap">{r.state === 'active' ? new Date(r.deadline).toLocaleString() : (r.exempt_rule ?? '')}</span> },
+            {
+              key: 'x',
+              header: '',
+              render: (r) =>
+                uid !== null && (r.state === 'active' || r.state === 'failed') ? (
+                  <div className="acts">
+                    <Button size="xs" variant="ghost" onClick={() => setForgiving(r)}>
+                      {api.t('hnr.ui.forgive')}
+                    </Button>
+                  </div>
+                ) : null,
+            },
+          ]}
+        />
+      )}
+      {next && <LoadMore onClick={() => void load(next)} label={api.t('hnr.ui.more')} />}
+      <Sheet
+        open={!!forgiving}
+        onClose={() => setForgiving(null)}
+        title={api.t('hnr.ui.forgive')}
+        footer={
+          <Button variant="primary" disabled={!reason.trim()} onClick={() => void forgive()}>
+            {api.t('hnr.ui.forgive')}
+          </Button>
+        }
+      >
+        {forgiving && <p className="small">{forgiving.title ?? `#${forgiving.torrent_id}`}</p>}
+        <Field label={api.t('hnr.ui.forgive_prompt')}>
+          <Input value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </Sheet>
     </>
   );
 }
 
+type Me = Status_ & { rules: { window_days: number; min_seed_hours: number; min_torrent_ratio: number } };
+
 /** 我的 H&R（/p/hnr/） */
 function MyPage({ api }: { api: PluginApi }) {
-  const [s, setS] = useState<(Status & { rules: { window_days: number; min_seed_hours: number; min_torrent_ratio: number } }) | null>(null);
+  const [s, setS] = useState<Me | null>(null);
   useEffect(() => {
-    void api.json<typeof s>('/api/p/hnr/v1/me').then(setS);
+    void api.json<Me>('/api/p/hnr/v1/me').then(setS);
   }, [api]);
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('hnr.ui.title')}</h1>
+    <div className="stack">
+      <PageHead
+        title={api.t('hnr.ui.title')}
+        lede={s ? `${api.t('hnr.ui.rules', { days: s.rules.window_days, hours: s.rules.min_seed_hours })}${s.rules.min_torrent_ratio > 0 ? api.t('hnr.ui.rules_ratio', { ratio: s.rules.min_torrent_ratio }) : ''}。` : undefined}
+      />
       {s && (
-        <Card>
-          <div className="pt-row stats-row">
-            <Stat label={api.t('hnr.ui.state.active')} value={s.active} />
-            <Stat label={api.t('hnr.ui.state.failed')} value={<span className={s.failed > 0 ? 'pt-field-error' : undefined}>{`${s.failed} / ${s.max}`}</span>} />
-            <Stat label={api.t('hnr.ui.download')} value={s.can_download ? api.t('hnr.ui.allowed') : api.t('hnr.ui.blocked')} />
-          </div>
-          <p className="pt-muted small">
-            {api.t('hnr.ui.rules', { days: s.rules.window_days, hours: s.rules.min_seed_hours })}
-            {s.rules.min_torrent_ratio > 0 && api.t('hnr.ui.rules_ratio', { ratio: s.rules.min_torrent_ratio })}
-          </p>
-        </Card>
+        <Kpis
+          items={[
+            { label: api.t('hnr.ui.state.active'), value: s.active, tone: s.active > 0 ? 'gold' : undefined },
+            { label: api.t('hnr.ui.state.failed'), value: `${s.failed} / ${s.max}`, tone: s.failed > 0 ? 'down' : undefined, hint: api.t('hnr.ui.limit_hint') },
+            { label: api.t('hnr.ui.download'), value: s.can_download ? api.t('hnr.ui.allowed') : api.t('hnr.ui.blocked'), tone: s.can_download ? 'up' : 'down' },
+          ]}
+        />
       )}
-      <Card>
-        <Records api={api} uid={null} />
-      </Card>
+      <Panel flush primary>
+        <Records api={api} uid={null} flushTabs />
+      </Panel>
     </div>
   );
 }
 
-/** 个人页 / 后台用户详情页“H&R”标签 */
+/** 个人页 / 后台用户详情页「H&R」页签 */
 function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   const self = api.user()?.id === ctx.profile.id;
   return <Records key={ctx.profile.id} api={api} uid={self ? null : ctx.profile.id} />;
 }
 
 function MenuItem({ api }: SlotProps) {
-  const [s, setS] = useState<Status | null>(null);
+  const [s, setS] = useState<Status_ | null>(null);
   useEffect(() => {
-    void api.json<Status>('/api/p/hnr/v1/me').then(setS).catch(() => undefined);
+    void api.json<Status_>('/api/p/hnr/v1/me').then(setS).catch(() => undefined);
   }, [api]);
   return (
-    <A api={api} to="/p/hnr/">
-      {api.t('hnr.ui.menu', { a: s?.active ?? '…', f: s?.failed ?? '…' })}
-    </A>
+    <NavItem to="/p/hnr/" navigate={api.navigate} count={s ? `${s.active} / ${s.failed}` : null}>
+      {api.t('hnr.ui.menu')}
+    </NavItem>
   );
 }
 
@@ -241,7 +237,7 @@ registerMessages('zh-CN', {
   'hnr.ui.required_hint': '下载完成后 {days} 天内做种满 {hours} 小时',
   'hnr.ui.exempt': '免 H&R',
   'hnr.ui.title': '我的 H&R',
-  'hnr.ui.menu': 'H&R（{a} / {f}）',
+  'hnr.ui.menu': 'H&R',
   'hnr.ui.tab': 'H&R',
   'hnr.ui.torrent': '种子',
   'hnr.ui.state': '状态',
@@ -257,13 +253,14 @@ registerMessages('zh-CN', {
   'hnr.ui.download': '下载权限',
   'hnr.ui.allowed': '正常',
   'hnr.ui.blocked': '已禁止',
+  'hnr.ui.limit_hint': '达到上限后禁止下载',
   'hnr.ui.rules': '规则：下载完成后 {days} 天内做种满 {hours} 小时',
   'hnr.ui.rules_ratio': '，或单种分享率达到 {ratio}',
   'hnr.ui.empty': '没有记录',
   'hnr.ui.more': '加载更多',
   'hnr.ui.denied': '只有本人和管理员可以查看 H&R 记录',
   'hnr.ui.forgive': '免除',
-  'hnr.ui.forgive_prompt': '免除这条 H&R 记录，请填写原因：',
+  'hnr.ui.forgive_prompt': '免除原因',
   'hnr.ui.forgiven': '已免除',
   'hnr.record_not_found': '记录不存在',
 });
@@ -273,7 +270,7 @@ registerMessages('en', {
   'hnr.ui.required_hint': 'Seed {hours} hours within {days} days after completing',
   'hnr.ui.exempt': 'No H&R',
   'hnr.ui.title': 'My H&R',
-  'hnr.ui.menu': 'H&R ({a} / {f})',
+  'hnr.ui.menu': 'H&R',
   'hnr.ui.tab': 'H&R',
   'hnr.ui.torrent': 'Torrent',
   'hnr.ui.state': 'State',
@@ -289,13 +286,14 @@ registerMessages('en', {
   'hnr.ui.download': 'Downloading',
   'hnr.ui.allowed': 'allowed',
   'hnr.ui.blocked': 'blocked',
+  'hnr.ui.limit_hint': 'Downloads stop at the limit',
   'hnr.ui.rules': 'Rule: seed {hours} hours within {days} days after completing',
   'hnr.ui.rules_ratio': ', or reach a ratio of {ratio} on the torrent',
   'hnr.ui.empty': 'No records',
   'hnr.ui.more': 'Load more',
   'hnr.ui.denied': 'Only the user and staff can see H&R records',
   'hnr.ui.forgive': 'Forgive',
-  'hnr.ui.forgive_prompt': 'Forgive this H&R record. Reason:',
+  'hnr.ui.forgive_prompt': 'Reason',
   'hnr.ui.forgiven': 'Forgiven',
   'hnr.record_not_found': 'Record not found',
 });

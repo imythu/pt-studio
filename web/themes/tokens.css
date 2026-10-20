@@ -1,109 +1,71 @@
-/* 主题令牌（web LLD §6）：主题包只替换这些变量。
-   默认主题「旅途」：晴空与苍月草的蓝、翡翠绿（主色）、斗篷金（点缀）、深夜蓝（文字），衬线标题，细金线装饰。 */
+/* 主题令牌（UI-WEB §1.1）：主题包只替换这些变量；组件里不出现字面颜色。
+   昼「银白晨雾」：偏冷的银白底、墨色文字；强调色取自芙莉莲——法衣金边、翡翠色的眼睛、苍月草的蓝、耳坠的红。
+   夜「苍月之夜」：深蓝夜空底，强调色提亮。 */
 :root {
-  --pt-color-bg: #f5f7fb;
-  --pt-color-surface: #ffffff;
-  --pt-color-surface-2: #eef2f8;
-  --pt-color-border: #dfe5ef;
-  --pt-color-border-strong: #c3ccdc;
-  --pt-color-fg: #1f2a44;
-  --pt-color-muted: #66728a;
-  --pt-color-primary: #2a7a6b;
-  --pt-color-primary-hover: #21665a;
-  --pt-color-primary-solid: #2a7a6b;
-  --pt-color-primary-solid-hover: #236a5d;
-  --pt-color-primary-soft: #e1f1ec;
-  --pt-color-primary-fg: #ffffff;
-  --pt-color-accent: #c9a45c;
-  --pt-color-gold: #b88f3e;
-  --pt-color-gold-soft: #f6eedd;
-  --pt-color-sky: #6f9fd8;
-  --pt-color-lavender: #8e9ad8;
-  --pt-color-danger: #c8475a;
-  --pt-color-danger-soft: #fbe9ec;
-  --pt-color-success: #2a7a6b;
-  --pt-color-success-soft: #e1f1ec;
-  --pt-color-warn: #c98a1b;
-  --pt-promo-free: #2a7a6b;
-  --pt-promo-double: #6d6fd0;
-  --pt-gradient: linear-gradient(135deg, #8fc4e8 0%, #6f9fd8 50%, #2a7a6b 100%);
-  --pt-shadow-sm: 0 1px 2px rgb(31 42 68 / .05), 0 2px 8px rgb(31 42 68 / .04);
-  --pt-shadow: 0 8px 22px rgb(31 42 68 / .09);
-  --pt-shadow-lg: 0 18px 44px rgb(31 42 68 / .16);
-  --pt-ring: 0 0 0 3px rgb(201 164 92 / .38);
-  --pt-radius: 10px;
-  --pt-radius-lg: 16px;
-  --pt-space-1: 4px;
-  --pt-space-2: 8px;
-  --pt-space-3: 12px;
-  --pt-space-4: 16px;
-  --pt-space-6: 24px;
-  --pt-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-  --pt-font-display: "Songti SC", "STSong", "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", Georgia, "Times New Roman", serif;
-  --pt-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
-  --pt-nav-bg: rgb(255 255 255 / .9);
-  --pt-sky-top: #dfeaf7;
+  --bg: #eceff0;
+  --surface: #fafbfb;
+  --sunk: #e2e7e8;
+  --ink: #17212a;
+  --ink-2: #44525c;
+  --muted: #6b7880;
+  --line: #d3dadd;
+  --line-2: #bcc6ca;
+  --gold: #9a7428;
+  --gold-soft: #f1e6cc;
+  --emerald: #19735a;
+  --emerald-soft: #d8ece4;
+  --moon: #3f6fb2;
+  --moon-soft: #dde7f5;
+  --ember: #b2402f;
+  --ember-soft: #f5dcd6;
+  --on-gold: #ffffff;
+  --veil: rgb(250 251 251 / .84);
+  --scrim: rgb(10 14 24 / .42);
+  --shadow: 0 1px 2px rgb(23 33 42 / .06), 0 8px 28px -12px rgb(23 33 42 / .22);
+  --hero-img: url(/frieren/frieren-wide-scenery.jpg);
+  --hero-tint: linear-gradient(90deg, rgb(250 251 251 / .94) 0%, rgb(250 251 251 / .78) 38%, rgb(250 251 251 / .05) 72%);
+
+  --f-display: "ZCOOL XiaoWei", "Noto Serif SC", "Songti SC", "STSong", serif;
+  --f-num: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --f-body: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --rail: 264px;
+  --r: 6px;
   color-scheme: light;
 }
-:root[data-theme="dark"] {
-  --pt-color-bg: #0f1424;
-  --pt-color-surface: #161d31;
-  --pt-color-surface-2: #1e2740;
-  --pt-color-border: #2a3452;
-  --pt-color-border-strong: #3d4970;
-  --pt-color-fg: #e8ecf6;
-  --pt-color-muted: #9aa5c0;
-  --pt-color-primary: #74c9b5;
-  --pt-color-primary-hover: #95dccb;
-  --pt-color-primary-solid: #2a7a6b;
-  --pt-color-primary-solid-hover: #33907e;
-  --pt-color-primary-soft: #16352f;
-  --pt-color-primary-fg: #0f1424;
-  --pt-color-gold: #dcbd78;
-  --pt-color-gold-soft: #33291a;
-  --pt-color-danger: #ff8a99;
-  --pt-color-danger-soft: #3a1c26;
-  --pt-color-success: #74c9b5;
-  --pt-color-success-soft: #16352f;
-  --pt-promo-free: #74c9b5;
-  --pt-promo-double: #a9abff;
-  --pt-shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
-  --pt-shadow: 0 8px 24px rgb(0 0 0 / .38);
-  --pt-shadow-lg: 0 22px 60px rgb(0 0 0 / .55);
-  --pt-ring: 0 0 0 3px rgb(220 189 120 / .4);
-  --pt-nav-bg: rgb(22 29 49 / .92);
-  --pt-sky-top: #1a2442;
-  color-scheme: dark;
-}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --pt-color-bg: #0f1424;
-    --pt-color-surface: #161d31;
-    --pt-color-surface-2: #1e2740;
-    --pt-color-border: #2a3452;
-    --pt-color-border-strong: #3d4970;
-    --pt-color-fg: #e8ecf6;
-    --pt-color-muted: #9aa5c0;
-    --pt-color-primary: #74c9b5;
-    --pt-color-primary-hover: #95dccb;
-    --pt-color-primary-solid: #2a7a6b;
-    --pt-color-primary-solid-hover: #33907e;
-    --pt-color-primary-soft: #16352f;
-    --pt-color-primary-fg: #0f1424;
-    --pt-color-gold: #dcbd78;
-    --pt-color-gold-soft: #33291a;
-    --pt-color-danger: #ff8a99;
-    --pt-color-danger-soft: #3a1c26;
-    --pt-color-success: #74c9b5;
-    --pt-color-success-soft: #16352f;
-    --pt-promo-free: #74c9b5;
-    --pt-promo-double: #a9abff;
-    --pt-shadow-sm: 0 1px 2px rgb(0 0 0 / .4);
-    --pt-shadow: 0 8px 24px rgb(0 0 0 / .38);
-    --pt-shadow-lg: 0 22px 60px rgb(0 0 0 / .55);
-    --pt-ring: 0 0 0 3px rgb(220 189 120 / .4);
-    --pt-nav-bg: rgb(22 29 49 / .92);
-    --pt-sky-top: #1a2442;
+    --bg: #0d1120; --surface: #151a2b; --sunk: #10152a;
+    --ink: #e8e9ef; --ink-2: #b8bdcc; --muted: #8a90a6;
+    --line: #262d45; --line-2: #343c58;
+    --gold: #d9b56a; --gold-soft: #3a3020;
+    --emerald: #52c79e; --emerald-soft: #173a31;
+    --moon: #93b6ec; --moon-soft: #1d2a47;
+    --ember: #ec806f; --ember-soft: #432124;
+    --on-gold: #17120a;
+    --veil: rgb(21 26 43 / .86);
+    --scrim: rgb(0 0 0 / .55);
+    --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 12px 32px -12px rgb(0 0 0 / .6);
+    --hero-img: url(/frieren/frieren-hero-field.jpg);
+    --hero-tint: linear-gradient(90deg, rgb(13 17 32 / .95) 0%, rgb(13 17 32 / .75) 40%, rgb(13 17 32 / .08) 75%);
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1120; --surface: #151a2b; --sunk: #10152a;
+  --ink: #e8e9ef; --ink-2: #b8bdcc; --muted: #8a90a6;
+  --line: #262d45; --line-2: #343c58;
+  --gold: #d9b56a; --gold-soft: #3a3020;
+  --emerald: #52c79e; --emerald-soft: #173a31;
+  --moon: #93b6ec; --moon-soft: #1d2a47;
+  --ember: #ec806f; --ember-soft: #432124;
+  --on-gold: #17120a;
+  --veil: rgb(21 26 43 / .86);
+  --scrim: rgb(0 0 0 / .55);
+  --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 12px 32px -12px rgb(0 0 0 / .6);
+  --hero-img: url(/frieren/frieren-hero-field.jpg);
+  --hero-tint: linear-gradient(90deg, rgb(13 17 32 / .95) 0%, rgb(13 17 32 / .75) 40%, rgb(13 17 32 / .08) 75%);
+  color-scheme: dark;
 }

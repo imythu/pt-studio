@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Stat, Table } from '@pt-studio/ui-kit';
+import { Button, Kpis, Note, PageHead, SkeletonRows, Status, Table, type Tone } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'ai-upload-review.ui.title': 'AI 发布预审',
@@ -68,6 +68,7 @@ registerMessages('en', {
 });
 
 const KEYS = ['reports', 'pass', 'warn', 'fail', 'model_skipped', 'useful', 'false_positive'] as const;
+const KPI_TONE: Partial<Record<(typeof KEYS)[number], 'up' | 'down' | 'gold' | 'moon'>> = { pass: 'up', fail: 'down', warn: 'gold' };
 
 function Page({ api }: { api: PluginApi }) {
   const [s, setS] = useState<Record<string, number> | null>(null);
@@ -75,13 +76,9 @@ function Page({ api }: { api: PluginApi }) {
     void api.json<Record<string, number>>('/api/p/ai-upload-review/v1/admin/stats').then(setS);
   }, [api]);
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('ai-upload-review.ui.title')}</h1>
-      <Card title={api.t('ai-upload-review.ui.period')}>
-        <div className="pt-row stats-row">
-          {s && KEYS.map((k) => <Stat key={k} label={api.t(`ai-upload-review.ui.${k}`)} value={s[k] ?? 0} />)}
-        </div>
-      </Card>
+    <div className="stack">
+      <PageHead title={api.t('ai-upload-review.ui.title')} lede={api.t('ai-upload-review.ui.period')} />
+      {s ? <Kpis items={KEYS.map((k) => ({ label: api.t(`ai-upload-review.ui.${k}`), value: s[k] ?? 0, tone: KPI_TONE[k] }))} /> : <SkeletonRows n={2} />}
     </div>
   );
 }
@@ -100,8 +97,8 @@ interface Report {
 
 const errText = (api: PluginApi, e: unknown) =>
   e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e);
-const VERDICT_TONE: Record<string, 'success' | 'primary' | 'danger'> = { pass: 'success', warn: 'primary', fail: 'danger' };
-const SEV_TONE: Record<string, 'muted' | 'primary' | 'danger'> = { low: 'muted', medium: 'primary', high: 'danger' };
+const VERDICT_TONE: Record<string, Tone> = { pass: 'ok', warn: 'warn', fail: 'bad' };
+const SEV_TONE: Record<string, Tone> = { low: 'mute', medium: 'warn', high: 'bad' };
 
 /** 种子页员工区“AI 预审”标签 */
 function TorrentTab({ ctx, api }: SlotProps<{ torrent: { id: number } }>) {
@@ -136,52 +133,55 @@ function TorrentTab({ ctx, api }: SlotProps<{ torrent: { id: number } }>) {
   };
   if (r === undefined) return null;
   const rerunBtn = (
-    <Button disabled={busy} onClick={() => void rerun()}>
+    <Button size="sm" disabled={busy} onClick={() => void rerun()}>
       {api.t(busy ? 'ai-upload-review.ui.running' : 'ai-upload-review.ui.rerun')}
     </Button>
   );
   if (r === null)
     return (
-      <Card>
-        <p className="pt-muted">{api.t('ai-upload-review.ui.none')}</p>
-        {rerunBtn}
-      </Card>
+      <div className="stack-s">
+        <p className="small muted">{api.t('ai-upload-review.ui.none')}</p>
+        <div>{rerunBtn}</div>
+      </div>
     );
   return (
-    <Card>
-      <p className="pt-row">
-        <Badge tone={VERDICT_TONE[r.verdict] ?? 'muted'}>{api.t('ai-upload-review.ui.verdict', { v: api.t(`ai-upload-review.ui.${r.verdict}`) })}</Badge>
-        {r.confidence !== null && <span className="pt-muted small">{api.t('ai-upload-review.ui.confidence', { n: Math.round(r.confidence * 100) })}</span>}
-        <span className="pt-muted small">{api.t('ai-upload-review.ui.revision', { n: r.revision, at: new Date(r.created_at).toLocaleString() })}</span>
-        {r.model && <span className="pt-muted small">{api.t('ai-upload-review.ui.model', { m: r.model })}</span>}
-      </p>
-      {r.model_skipped && <p className="pt-muted small">{api.t('ai-upload-review.ui.skipped', { r: r.model_skipped })}</p>}
-      <Table
-        rows={r.findings}
-        rowKey={(f) => `${f.source}:${f.code}:${f.message}`}
-        empty="—"
-        columns={[
-          { key: 's', header: '', render: (f) => <Badge tone={SEV_TONE[f.severity] ?? 'muted'}>{api.t(`ai-upload-review.ui.severity.${f.severity}`)}</Badge> },
-          { key: 'm', header: '', render: (f) => f.message },
-          { key: 'o', header: '', render: (f) => <span className="pt-muted small">{`${api.t(`ai-upload-review.ui.source.${f.source}`)} · ${f.code}`}</span> },
-        ]}
-      />
-      <span className="pt-row">
+    <div className="stack">
+      <div className="row">
+        <Status tone={VERDICT_TONE[r.verdict] ?? 'mute'}>{api.t('ai-upload-review.ui.verdict', { v: api.t(`ai-upload-review.ui.${r.verdict}`) })}</Status>
+        {r.confidence !== null && <span className="small muted">{api.t('ai-upload-review.ui.confidence', { n: Math.round(r.confidence * 100) })}</span>}
+        <span className="small muted">{api.t('ai-upload-review.ui.revision', { n: r.revision, at: new Date(r.created_at).toLocaleString() })}</span>
+        {r.model && <span className="small muted">{api.t('ai-upload-review.ui.model', { m: r.model })}</span>}
+      </div>
+      {r.model_skipped && <Note>{api.t('ai-upload-review.ui.skipped', { r: r.model_skipped })}</Note>}
+      {r.findings.length > 0 && (
+        <div className="panel">
+          <Table
+            rows={r.findings}
+            rowKey={(f) => `${f.source}:${f.code}:${f.message}`}
+            columns={[
+              { key: 's', header: '', render: (f) => <Status tone={SEV_TONE[f.severity] ?? 'mute'}>{api.t(`ai-upload-review.ui.severity.${f.severity}`)}</Status> },
+              { key: 'm', header: '', render: (f) => f.message },
+              { key: 'o', header: '', right: true, render: (f) => <span className="tiny muted nowrap">{`${api.t(`ai-upload-review.ui.source.${f.source}`)} · ${f.code}`}</span> },
+            ]}
+          />
+        </div>
+      )}
+      <div className="form-acts">
         {rerunBtn}
         {r.feedback ? (
-          <span className="pt-muted small">{api.t('ai-upload-review.ui.feedback', { f: api.t(r.feedback === 'useful' ? 'ai-upload-review.ui.mark_useful' : 'ai-upload-review.ui.mark_false') })}</span>
+          <span className="small muted">{api.t('ai-upload-review.ui.feedback', { f: api.t(r.feedback === 'useful' ? 'ai-upload-review.ui.mark_useful' : 'ai-upload-review.ui.mark_false') })}</span>
         ) : (
           <>
-            <Button variant="ghost" onClick={() => void feedback(true)}>
+            <Button size="sm" variant="ghost" onClick={() => void feedback(true)}>
               {api.t('ai-upload-review.ui.mark_useful')}
             </Button>
-            <Button variant="ghost" onClick={() => void feedback(false)}>
+            <Button size="sm" variant="ghost" onClick={() => void feedback(false)}>
               {api.t('ai-upload-review.ui.mark_false')}
             </Button>
           </>
         )}
-      </span>
-    </Card>
+      </div>
+    </div>
   );
 }
 

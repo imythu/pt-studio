@@ -1,9 +1,9 @@
-// mediainfo 前端：发布页粘贴 MediaInfo / BDInfo（实时预览规格与字段差异，发布成功后保存），种子页规格卡片（发种者 / 管理员可编辑）。
+// mediainfo 前端：发布页粘贴 MediaInfo / BDInfo（实时预览规格与字段差异，发布成功后保存）；种子页「简介」里的规格区（发种者 / 管理员可编辑）。
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field } from '@pt-studio/ui-kit';
+import { Button, Field, Note, Tag, Textarea } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'mediainfo.ui.title': 'MediaInfo',
@@ -75,34 +75,45 @@ interface Parsed {
 
 const dur = (s?: number | null) => (s ? `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : null);
 
+/** 规格摘要：标签（容器、分辨率、编码、HDR、位深、帧率）+ 时长、音轨、字幕；与填写的规格不一致时提示 */
 function SummaryView({ api, p }: { api: PluginApi; p: Parsed }) {
   const s = p.summary;
   const chips = [s.container, s.resolution, s.video_codec, ...(s.hdr ?? []), s.bit_depth ? `${s.bit_depth}bit` : null, s.frame_rate ? `${s.frame_rate}fps` : null].filter(Boolean) as string[];
+  const audio = (s.audio ?? []).map((a) => [a.language, a.format, a.channels].filter(Boolean).join(' '));
   return (
-    <div className="mediainfo-summary">
-      <p>
+    <div className="stack-s">
+      <div className="mediainfo-summary">
         {chips.map((c) => (
-          <Badge key={c} tone="primary">
+          <Tag key={c} tone="o">
             {c.toUpperCase()}
-          </Badge>
-        ))}{' '}
-        {dur(s.duration_secs) && <span className="pt-muted small">{`${api.t('mediainfo.ui.duration')} ${dur(s.duration_secs)}`}</span>}
-      </p>
-      {(s.audio ?? []).length > 0 && (
-        <p className="small">
-          {api.t('mediainfo.ui.audio')}：{(s.audio ?? []).map((a) => [a.language, a.format, a.channels].filter(Boolean).join(' ')).join(' / ')}
-        </p>
-      )}
-      {(s.subtitle_languages ?? []).length > 0 && (
-        <p className="small">
-          {api.t('mediainfo.ui.subs')}：{(s.subtitle_languages ?? []).join(' / ')}
-        </p>
-      )}
+          </Tag>
+        ))}
+      </div>
+      <dl className="kv">
+        {dur(s.duration_secs) && (
+          <>
+            <dt>{api.t('mediainfo.ui.duration')}</dt>
+            <dd className="num">{dur(s.duration_secs)}</dd>
+          </>
+        )}
+        {audio.length > 0 && (
+          <>
+            <dt>{api.t('mediainfo.ui.audio')}</dt>
+            <dd>{audio.join(' / ')}</dd>
+          </>
+        )}
+        {(s.subtitle_languages ?? []).length > 0 && (
+          <>
+            <dt>{api.t('mediainfo.ui.subs')}</dt>
+            <dd>{(s.subtitle_languages ?? []).join(' / ')}</dd>
+          </>
+        )}
+      </dl>
       {p.diffs.length > 0 && (
-        <div className="pt-field-error small" role="alert">
-          {api.t('mediainfo.ui.diffs')}：
-          {p.diffs.map((d) => `${d.field}（${api.t('mediainfo.ui.declared')} ${d.declared}，${api.t('mediainfo.ui.detected')} ${d.detected}）`).join('；')}
-        </div>
+        <Note tone="warn">
+          <b>{api.t('mediainfo.ui.diffs')}</b>
+          <span>{p.diffs.map((d) => `${d.field}：${api.t('mediainfo.ui.declared')} ${d.declared}，${api.t('mediainfo.ui.detected')} ${d.detected}`).join('；')}</span>
+        </Note>
       )}
     </div>
   );
@@ -155,16 +166,17 @@ function UploadBox({ api, ctx }: SlotProps<UploadCtx>) {
   }, [text, fields, api]);
   if (!register) return null;
   return (
-    <Field label={api.t('mediainfo.ui.paste')}>
-      <textarea className="pt-input pt-mono" name="mediainfo" rows={6} value={text} onChange={(e) => setText(e.target.value)} />
-      {err && <div className="pt-field-error">{err}</div>}
+    <div className="stack-s">
+      <Field label={api.t('mediainfo.ui.paste')} error={err}>
+        <Textarea className="code" name="mediainfo" rows={7} value={text} onChange={(e) => setText(e.target.value)} />
+      </Field>
       {p && (
-        <div>
-          <span className="pt-muted small">{`${api.t('mediainfo.ui.preview')}（${p.format}）`}</span>
+        <div className="mi-detected">
+          <span className="eyebrow">{`${api.t('mediainfo.ui.preview')}（${p.format}）`}</span>
           <SummaryView api={api} p={p} />
         </div>
       )}
-    </Field>
+    </div>
   );
 }
 
@@ -205,50 +217,54 @@ function DetailCard({ api, ctx }: SlotProps<{ torrent: { id: number } }>) {
       api.toast(errText(api, e), 'error');
     }
   };
-  const actions = d.editable && !editing && (
-    <span>
-      <Button
-        variant="ghost"
-        onClick={() => {
-          setText(d.result?.text ?? '');
-          setEditing(true);
-        }}
-      >
-        {api.t(d.result ? 'mediainfo.ui.edit' : 'mediainfo.ui.add')}
-      </Button>
-      {d.result && (
-        <Button variant="ghost" onClick={() => void remove()}>
-          {api.t('mediainfo.ui.remove')}
-        </Button>
-      )}
-    </span>
-  );
   return (
-    <Card title={api.t('mediainfo.ui.title')} actions={actions || null}>
+    <section className="stack-s">
+      <div className="row-sb">
+        <h3>{api.t('mediainfo.ui.title')}</h3>
+        {d.editable && !editing && (
+          <span className="row" style={{ gap: 4 }}>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                setText(d.result?.text ?? '');
+                setEditing(true);
+              }}
+            >
+              {api.t(d.result ? 'mediainfo.ui.edit' : 'mediainfo.ui.add')}
+            </Button>
+            {d.result && (
+              <Button size="xs" variant="ghost" onClick={() => void remove()}>
+                {api.t('mediainfo.ui.remove')}
+              </Button>
+            )}
+          </span>
+        )}
+      </div>
       {editing ? (
-        <div>
-          <textarea className="pt-input pt-mono" name="mediainfo_edit" rows={12} value={text} onChange={(e) => setText(e.target.value)} />
-          <p>
-            <Button variant="primary" disabled={busy || !text.trim()} onClick={() => void save()}>
+        <div className="stack-s">
+          <Textarea className="code" name="mediainfo_edit" rows={14} value={text} onChange={(e) => setText(e.target.value)} />
+          <div className="row">
+            <Button size="sm" variant="primary" disabled={busy || !text.trim()} onClick={() => void save()}>
               {api.t('mediainfo.ui.save')}
-            </Button>{' '}
-            <Button variant="ghost" onClick={() => setEditing(false)}>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
               {api.t('mediainfo.ui.cancel')}
             </Button>
-          </p>
+          </div>
         </div>
       ) : (
         d.result && (
           <>
             <SummaryView api={api} p={d.result} />
-            <details>
+            <details className="mi-full">
               <summary>{api.t('mediainfo.ui.show_text')}</summary>
-              <pre className="pt-mono small mediainfo-text">{d.result.text}</pre>
+              <pre className="mediainfo-text">{d.result.text}</pre>
             </details>
           </>
         )
       )}
-    </Card>
+    </section>
   );
 }
 

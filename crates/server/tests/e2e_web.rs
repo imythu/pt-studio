@@ -31,9 +31,9 @@ fn config(plugins: &std::path::Path, tmdb: &str, port: u16) -> SiteConfig {
     t.push_str(&format!(
         "\n[plugin.metadata-tmdb]\napi_key = \"testkey\"\napi_base_url = \"{tmdb}\"\nimage_base_url = \"{tmdb}\"\n"
     ));
-    // [http] 段放在 config_text 之后追加
+    // [http] 段放在 config_text 之后追加；两个浏览器账号都来自 127.0.0.1，共用按 IP 的全站限流，测试里放宽
     t.push_str(&format!(
-        "\n[http]\nweb_dir = \"{}\"\n",
+        "\n[http]\nweb_dir = \"{}\"\n\n[http.rate_limit]\ndefault = \"ip:6000/m\"\n",
         web_root().join("dist").display()
     ));
     SiteConfig::parse(&t).unwrap()

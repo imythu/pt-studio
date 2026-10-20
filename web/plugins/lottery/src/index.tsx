@@ -1,12 +1,18 @@
-// lottery 前端：幸运转盘（转盘、概率公示、最近中奖、我的记录）、首页小组件、后台（开关与参数、奖品与概率、统计）。
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+// lottery 前端：幸运转盘（canvas 转盘、概率公示、最近中奖、我的记录）、首页小组件、后台（开关与参数、奖品与概率、统计）。
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Empty, Field, Input, Stat, Table } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, Kpis, NavItem as Nav, Note, PageHead, Panel, PLink, Select, SideLayout, SkeletonRows, Status, Switch, Table } from '@pt-studio/ui-kit';
+
 
 registerMessages('zh-CN', {
   'lottery.ui.nav': '抽奖',
+  'lottery.ui.time': '时间',
+  'lottery.ui.result': '结果',
+  'lottery.ui.spent': '消耗',
+  'lottery.ui.again': '再抽一次',
+  'lottery.ui.won_by': '{user} 抽中 {prize}',
   'lottery.ui.title': '幸运转盘',
   'lottery.ui.subtitle': '转动转盘，赢取魔力值、上传量与 VIP',
   'lottery.ui.disabled': '幸运转盘暂未开放',
@@ -72,6 +78,11 @@ registerMessages('zh-CN', {
 });
 registerMessages('en', {
   'lottery.ui.nav': 'Lottery',
+  'lottery.ui.time': 'Time',
+  'lottery.ui.result': 'Result',
+  'lottery.ui.spent': 'Cost',
+  'lottery.ui.again': 'Spin again',
+  'lottery.ui.won_by': '{user} won {prize}',
   'lottery.ui.title': 'Prize wheel',
   'lottery.ui.subtitle': 'Spin to win bonus, upload credit and VIP',
   'lottery.ui.disabled': 'The prize wheel is not open',
@@ -136,6 +147,7 @@ registerMessages('en', {
   'lottery.unavailable': 'Prize unavailable',
 });
 
+
 type Kind = 'bonus' | 'upload' | 'vip_days' | 'vip_permanent';
 interface Prize {
   id: number;
@@ -173,7 +185,7 @@ interface Wheel {
 
 const errText = (api: PluginApi, e: unknown) => (e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e));
 const pct = (ppm: number) => `${Number((ppm / 10_000).toFixed(4))}%`;
-const when = (ms: number) => new Date(ms).toLocaleString();
+const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 /** 上传量：整 GiB / TiB 去掉小数（10 GiB 而不是 10.00 GiB） */
 function shortBytes(b: number): string {
@@ -183,14 +195,6 @@ function shortBytes(b: number): string {
   return formatBytes(b);
 }
 
-/** 扇区文字最多两行：优先在空格处断开 */
-function lines(text: string): string[] {
-  if (text.length <= 7) return [text];
-  const sp = text.lastIndexOf(' ', Math.ceil(text.length / 2) + 2);
-  if (sp > 0) return [text.slice(0, sp), text.slice(sp + 1)].map((x) => x.slice(0, 9));
-  return [text.slice(0, 6), text.slice(6, 12)];
-}
-
 function prizeName(api: PluginApi, kind: Kind | null, amount: number, label?: string): string {
   if (label) return label;
   if (!kind) return api.t('lottery.ui.none');
@@ -198,108 +202,119 @@ function prizeName(api: PluginApi, kind: Kind | null, amount: number, label?: st
   return api.t(`lottery.ui.k.${kind}`, { n });
 }
 
-function A({ api, to, children }: { api: PluginApi; to: string; children: ReactNode }) {
-  return (
-    <a
-      href={to}
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate(to);
-      }}
-    >
-      {children}
-    </a>
-  );
-}
-
-/** 转盘扇区配色：交替使用主题色，扇区数为奇数时最后一块换色避免与第一块相邻同色 */
-const COLORS = ['#f4b860', '#6c8ef5', '#ef7c8e', '#5cc0a5', '#b38cf0', '#4fb3e8', '#f39a6b', '#8fc65a'];
+/** 扇区底色：深而沉的矿物色，白字可读；“谢谢参与”固定灰 */
+const COLORS = ['#9a7428', '#3f6fb2', '#19735a', '#b2402f', '#5a6a3a', '#6a3a6a', '#20604c', '#7a4f2a'];
+const NONE = '#7a8590';
 
 interface Slice {
   key: string;
   prizeId: number | null;
   text: string;
+  color: string;
 }
 
-function WheelSvg({ slices, rotation }: { slices: Slice[]; rotation: number }) {
+const SIZE = 840;
+const R = 400;
+
+/** canvas 转盘：rot 为弧度，第 i 个扇区中心位于 i/N 圈（指针在正上方） */
+function drawWheel(cv: HTMLCanvasElement, slices: Slice[], rot: number, hub: string) {
+  const cx = cv.getContext('2d');
+  if (!cx) return;
   const n = Math.max(slices.length, 1);
-  const seg = 360 / n;
-  const r = 100;
-  const pt = (deg: number, rad: number) => {
-    const a = ((deg - 90) * Math.PI) / 180;
-    return [r + rad * Math.cos(a), r + rad * Math.sin(a)];
-  };
-  return (
-    <svg className="lw-wheel" viewBox="-6 -6 212 212" style={{ transform: `rotate(${rotation}deg)` }} aria-hidden="true">
-      <circle cx={r} cy={r} r={r + 4} fill="#3b2f63" />
-      {slices.map((s, i) => {
-        const [x1, y1] = pt(i * seg, r);
-        const [x2, y2] = pt((i + 1) * seg, r);
-        const color = COLORS[(n % 2 === 1 && i === n - 1 && n > 1 ? i + 1 : i) % COLORS.length];
-        const mid = i * seg + seg / 2;
-        const [tx, ty] = pt(mid, r * 0.64);
-        const path = n === 1 ? `M ${r} 0 A ${r} ${r} 0 1 1 ${r - 0.01} 0 Z` : `M ${r} ${r} L ${x1} ${y1} A ${r} ${r} 0 ${seg > 180 ? 1 : 0} 1 ${x2} ${y2} Z`;
-        const words = lines(s.text);
-        return (
-          <g key={s.key}>
-            <path d={path} fill={s.prizeId === null ? '#e6e9f2' : color} stroke="#fff" strokeWidth={1.2} />
-            <text
-              x={tx}
-              y={ty}
-              transform={`rotate(${mid} ${tx} ${ty})`}
-              textAnchor="middle"
-              fontSize={n > 10 ? 6.5 : 8}
-              fontWeight={700}
-              fill={s.prizeId === null ? '#5b6478' : '#fff'}
-              style={{ paintOrder: 'stroke' }}
-              stroke={s.prizeId === null ? 'none' : 'rgb(0 0 0 / .18)'}
-              strokeWidth={1.2}
-            >
-              {words.map((w, j) => (
-                <tspan key={j} x={tx} dy={j === 0 ? (words.length > 1 ? -3.5 : 2.5) : 9}>
-                  {w}
-                </tspan>
-              ))}
-            </text>
-          </g>
-        );
-      })}
-      {Array.from({ length: n * 2 }, (_, i) => {
-        const [x, y] = pt((i * seg) / 2, r + 1.5);
-        return <circle key={i} cx={x} cy={y} r={1.6} fill={i % 2 ? '#ffe9a8' : '#fff'} />;
-      })}
-    </svg>
-  );
+  const font = getComputedStyle(cv).fontFamily || 'sans-serif';
+  cx.clearRect(0, 0, SIZE, SIZE);
+  cx.save();
+  cx.translate(SIZE / 2, SIZE / 2);
+  cx.rotate(rot);
+  slices.forEach((s, i) => {
+    const a0 = (i / n) * Math.PI * 2 - Math.PI / 2 - Math.PI / n;
+    const a1 = a0 + (Math.PI * 2) / n;
+    cx.beginPath();
+    cx.moveTo(0, 0);
+    cx.arc(0, 0, R, a0, a1);
+    cx.closePath();
+    cx.fillStyle = s.color;
+    cx.globalAlpha = i % 2 ? 0.86 : 1;
+    cx.fill();
+    cx.globalAlpha = 1;
+    cx.strokeStyle = 'rgba(255,240,210,.7)';
+    cx.lineWidth = 3;
+    cx.stroke();
+    cx.save();
+    cx.rotate((a0 + a1) / 2);
+    cx.fillStyle = '#fff8e8';
+    cx.font = `600 ${n > 10 ? 24 : 30}px ${font}`;
+    cx.textAlign = 'right';
+    cx.fillText(s.text.length > 10 ? `${s.text.slice(0, 9)}…` : s.text, R - 34, 10);
+    cx.restore();
+  });
+  cx.beginPath();
+  cx.arc(0, 0, R, 0, Math.PI * 2);
+  cx.strokeStyle = '#d9b56a';
+  cx.lineWidth = 10;
+  cx.stroke();
+  for (let k = 0; k < 48; k++) {
+    cx.save();
+    cx.rotate((k / 48) * Math.PI * 2);
+    cx.beginPath();
+    cx.arc(0, -R + 2, 5, 0, Math.PI * 2);
+    cx.fillStyle = k % 2 ? '#fff4d6' : '#d9b56a';
+    cx.fill();
+    cx.restore();
+  }
+  cx.restore();
+  // 轮毂不随转盘旋转
+  cx.save();
+  cx.translate(SIZE / 2, SIZE / 2);
+  cx.beginPath();
+  cx.arc(0, 0, 78, 0, Math.PI * 2);
+  cx.fillStyle = '#17212a';
+  cx.fill();
+  cx.strokeStyle = '#d9b56a';
+  cx.lineWidth = 6;
+  cx.stroke();
+  cx.fillStyle = '#d9b56a';
+  cx.font = `italic 700 40px "Cormorant Garamond", serif`;
+  cx.textAlign = 'center';
+  cx.fillText(hub, 0, 14);
+  cx.restore();
 }
 
 function WheelPage({ api }: { api: PluginApi }) {
   const [w, setW] = useState<Wheel | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<{ win: boolean; text: string } | null>(null);
-  const timer = useRef<number | undefined>(undefined);
-  const load = () =>
-    api
-      .json<Wheel>('/api/p/lottery/v1/wheel')
-      .then((r) => {
-        setW(r);
-        setErr(null);
-      })
-      .catch((e: unknown) => setErr(errText(api, e)));
+  const cv = useRef<HTMLCanvasElement | null>(null);
+  const rot = useRef(0);
+  const raf = useRef(0);
+  const load = useCallback(
+    () =>
+      api
+        .json<Wheel>('/api/p/lottery/v1/wheel')
+        .then((r) => {
+          setW(r);
+          setErr(null);
+        })
+        .catch((e: unknown) => setErr(errText(api, e))),
+    [api],
+  );
   useEffect(() => {
     void load();
-    return () => window.clearTimeout(timer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  if (err && !w) return <p className="pt-error">{err}</p>;
-  if (!w) return null;
-  const slices: Slice[] = w.prizes.map((p) => ({ key: `p${p.id}`, prizeId: p.id, text: prizeName(api, p.kind, p.amount, p.label) }));
-  if (w.none_chance_ppm > 0 || slices.length === 0) {
+    return () => cancelAnimationFrame(raf.current);
+  }, [load]);
+  const slices: Slice[] = (w?.prizes ?? []).map((p, i) => ({ key: `p${p.id}`, prizeId: p.id, text: prizeName(api, p.kind, p.amount, p.label), color: COLORS[i % COLORS.length] ?? NONE }));
+  if (w && (w.none_chance_ppm > 0 || slices.length === 0)) {
     // “谢谢参与”插在中间，与中奖扇区交错，转盘更均衡
-    const at = Math.ceil(slices.length / 2);
-    slices.splice(at, 0, { key: 'none', prizeId: null, text: api.t('lottery.ui.none') });
+    slices.splice(Math.ceil(slices.length / 2), 0, { key: 'none', prizeId: null, text: api.t('lottery.ui.none'), color: NONE });
   }
+  const sig = slices.map((s) => s.key + s.text).join('|');
+  useEffect(() => {
+    if (cv.current && !spinning) drawWheel(cv.current, slices, rot.current, 'Spin');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig, spinning]);
+  if (err && !w) return <Note tone="bad">{err}</Note>;
+  if (!w) return <SkeletonRows n={6} />;
   const limited = w.daily_limit > 0 && w.spins_today >= w.daily_limit;
   const canSpin = w.enabled && w.eligible && !limited && !spinning;
   const spin = async () => {
@@ -308,114 +323,119 @@ function WheelPage({ api }: { api: PluginApi }) {
     setResult(null);
     try {
       const r = await api.json<{ prize_id: number | null; kind: Kind | null; amount: number }>('/api/p/lottery/v1/wheel/spin', { json: {} });
+      const n = slices.length;
       const idx = Math.max(
         slices.findIndex((s) => s.prizeId === r.prize_id),
         0,
       );
-      const seg = 360 / slices.length;
+      const seg = (Math.PI * 2) / n;
       const jitter = (Math.random() - 0.5) * seg * 0.6;
-      const target = 360 - (idx * seg + seg / 2) + jitter;
-      setRotation((cur) => cur - (cur % 360) + 360 * 6 + target);
+      const start = rot.current % (Math.PI * 2);
+      const target = Math.PI * 2 * 6 - idx * seg + jitter;
+      const t0 = performance.now();
+      const dur = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 4200;
       const label = slices[idx]?.text ?? '';
-      timer.current = window.setTimeout(() => {
-        setSpinning(false);
-        setResult(r.prize_id === null ? { win: false, text: api.t('lottery.ui.lost') } : { win: true, text: api.t('lottery.ui.won', { prize: label }) });
-        void load();
-      }, 4700);
+      const step = (t: number) => {
+        const k = Math.min(1, (t - t0) / dur);
+        rot.current = start + (target - start) * (1 - Math.pow(1 - k, 4));
+        if (cv.current) drawWheel(cv.current, slices, rot.current, 'Spin');
+        if (k < 1) raf.current = requestAnimationFrame(step);
+        else {
+          setSpinning(false);
+          setResult(r.prize_id === null ? { win: false, text: api.t('lottery.ui.lost') } : { win: true, text: api.t('lottery.ui.won', { prize: label }) });
+          void load();
+        }
+      };
+      raf.current = requestAnimationFrame(step);
     } catch (e) {
       setSpinning(false);
       api.toast(errText(api, e), 'error');
       void load();
     }
   };
+  const costText = w.spin_cost > 0 ? api.t('lottery.ui.cost', { n: w.spin_cost }) : api.t('lottery.ui.free');
+  const todayText = w.daily_limit > 0 ? api.t('lottery.ui.today_limit', { n: w.spins_today, limit: w.daily_limit }) : api.t('lottery.ui.today', { n: w.spins_today });
   return (
-    <div>
-      <h1 className="page-title">{api.t('lottery.ui.title')}</h1>
-      <p className="pt-muted" style={{ marginTop: -8 }}>
-        {api.t('lottery.ui.subtitle')}
-      </p>
-      <div className="lw">
-        <Card>
-          <div className="lw-stage">
-            <div className="lw-box">
-              <span className="lw-pointer" />
-              <WheelSvg slices={slices} rotation={rotation} />
-              <button type="button" className="lw-hub" disabled={!canSpin} onClick={() => void spin()}>
-                {spinning ? '…' : api.t('lottery.ui.spin')}
-              </button>
-            </div>
-            <div className={`lw-result${result?.win ? ' win' : ''}`} role="status" aria-live="polite">
-              {result?.text ?? (spinning ? api.t('lottery.ui.spinning') : '')}
-            </div>
-            <div className="lw-meta">
-              {!w.enabled ? (
-                <Badge tone="danger">{api.t('lottery.ui.disabled')}</Badge>
-              ) : !w.eligible ? (
-                <Badge tone="danger">{api.t('lottery.ui.not_eligible', { n: w.min_account_days })}</Badge>
-              ) : null}
-              <span>{w.spin_cost > 0 ? api.t('lottery.ui.cost', { n: w.spin_cost }) : api.t('lottery.ui.free')}</span>
-              <span>{w.daily_limit > 0 ? api.t('lottery.ui.today_limit', { n: w.spins_today, limit: w.daily_limit }) : api.t('lottery.ui.today', { n: w.spins_today })}</span>
-            </div>
-          </div>
-        </Card>
-        <div className="lw-side">
-          <Card title={api.t('lottery.ui.chances')}>
-            <ul className="lw-list">
-              {w.prizes.map((p) => (
-                <li key={p.id}>
-                  <span>{prizeName(api, p.kind, p.amount, p.label)}</span>
-                  <b>{pct(p.chance_ppm)}</b>
-                </li>
-              ))}
-              {w.none_chance_ppm > 0 && (
-                <li>
-                  <span className="pt-muted">{api.t('lottery.ui.none')}</span>
-                  <span className="pt-muted">{pct(w.none_chance_ppm)}</span>
-                </li>
+    <div className="stack">
+      <PageHead title={api.t('lottery.ui.title')} lede={`${api.t('lottery.ui.subtitle')} · ${costText} · ${todayText}`} />
+      {!w.enabled ? <Note tone="warn">{api.t('lottery.ui.disabled')}</Note> : !w.eligible ? <Note tone="warn">{api.t('lottery.ui.not_eligible', { n: w.min_account_days })}</Note> : null}
+      <SideLayout
+        width={360}
+        side={
+          <>
+            <Panel title={api.t('lottery.ui.chances')} flush>
+              <Table
+                rows={[...w.prizes.map((p, i) => ({ k: `p${p.id}`, name: prizeName(api, p.kind, p.amount, p.label), ppm: p.chance_ppm, color: COLORS[i % COLORS.length] })), ...(w.none_chance_ppm > 0 ? [{ k: 'none', name: api.t('lottery.ui.none'), ppm: w.none_chance_ppm, color: NONE }] : [])]}
+                rowKey={(r) => r.k}
+                columns={[
+                  {
+                    key: 'n',
+                    header: api.t('lottery.ui.prize'),
+                    render: (r) => (
+                      <span className="row lw-name">
+                        <i style={{ background: r.color }} />
+                        {r.name}
+                      </span>
+                    ),
+                  },
+                  { key: 'p', header: api.t('lottery.ui.chance'), right: true, render: (r) => <span className="num">{pct(r.ppm)}</span> },
+                ]}
+              />
+            </Panel>
+            <Panel title={api.t('lottery.ui.recent')} flush>
+              {w.recent_wins.length === 0 ? (
+                <p className="pad small muted">{api.t('lottery.ui.no_records')}</p>
+              ) : (
+                <div className="side-list">
+                  {w.recent_wins.map((x, i) => (
+                    <div key={i}>
+                      <span className="rk">·</span>
+                      <span className="nm">
+                        {x.username ?? '—'} · <b>{prizeName(api, x.kind, x.amount)}</b>
+                      </span>
+                      <span className="v">{when(x.at)}</span>
+                    </div>
+                  ))}
+                </div>
               )}
-            </ul>
-          </Card>
-          <Card title={api.t('lottery.ui.recent')}>
-            {w.recent_wins.length === 0 ? (
-              <p className="pt-muted small">{api.t('lottery.ui.no_records')}</p>
-            ) : (
-              <ul className="lw-list">
-                {w.recent_wins.map((x, i) => (
-                  <li key={i}>
-                    <span>
-                      <b>{x.username ?? '—'}</b> · {prizeName(api, x.kind, x.amount)}
-                    </span>
-                    <span className="muted">{new Date(x.at).toLocaleDateString()}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-          <Card title={api.t('lottery.ui.mine')}>
-            {w.mine.length === 0 ? (
-              <p className="pt-muted small">{api.t('lottery.ui.no_records')}</p>
-            ) : (
-              <ul className="lw-list">
-                {w.mine.map((x) => (
-                  <li key={x.id}>
-                    <span className={x.prize_id === null ? 'pt-muted' : undefined}>{prizeName(api, x.kind, x.amount)}</span>
-                    <span className="muted">{when(x.at)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
-      </div>
+            </Panel>
+            <Panel title={api.t('lottery.ui.mine')} flush>
+              <Table
+                rows={w.mine}
+                rowKey={(x) => x.id}
+                empty={api.t('lottery.ui.no_records')}
+                columns={[
+                  { key: 't', header: api.t('lottery.ui.time'), render: (x) => <span className="small muted num nowrap">{when(x.at)}</span> },
+                  { key: 'r', header: api.t('lottery.ui.result'), render: (x) => (x.prize_id === null ? <span className="muted">{api.t('lottery.ui.none')}</span> : <b className="gold">{prizeName(api, x.kind, x.amount)}</b>) },
+                  { key: 'c', header: api.t('lottery.ui.spent'), right: true, render: (x) => <span className="num">{x.cost}</span> },
+                ]}
+              />
+            </Panel>
+          </>
+        }
+      >
+        <section className="panel wheel-box" data-primary>
+          <span className="wheel-pin" />
+          <canvas ref={cv} width={SIZE} height={SIZE} aria-label={api.t('lottery.ui.title')} />
+          <div className="row">
+            <Button variant="gold" size="lg" disabled={!canSpin} onClick={() => void spin()}>
+              {spinning ? api.t('lottery.ui.spinning') : `${result ? api.t('lottery.ui.again') : api.t('lottery.ui.spin')}${w.spin_cost > 0 ? ` · ${w.spin_cost}` : ''}`}
+            </Button>
+          </div>
+          <span className={result?.win ? 'small gold' : 'small'} role="status" aria-live="polite">
+            {result?.text ?? ''}
+          </span>
+        </section>
+      </SideLayout>
     </div>
   );
 }
 
-function NavItem({ api }: SlotProps) {
+function NavLink({ api }: SlotProps) {
   return (
-    <A api={api} to="/p/lottery/">
+    <Nav to="/p/lottery/" navigate={api.navigate}>
       {api.t('lottery.ui.nav')}
-    </A>
+    </Nav>
   );
 }
 
@@ -429,12 +449,19 @@ function Widget({ api }: SlotProps) {
   }, [api]);
   if (!w?.enabled) return null;
   return (
-    <Card title={api.t('lottery.ui.widget')} actions={<A api={api} to="/p/lottery/">{api.t('lottery.ui.widget_go')}</A>}>
-      <p className="pt-muted small" style={{ margin: 0 }}>
+    <Panel
+      title={api.t('lottery.ui.widget')}
+      more={
+        <PLink to="/p/lottery/" navigate={api.navigate}>
+          {api.t('lottery.ui.widget_go')}
+        </PLink>
+      }
+    >
+      <p className="small muted">
         {w.spin_cost > 0 ? api.t('lottery.ui.cost', { n: w.spin_cost }) : api.t('lottery.ui.free')} ·{' '}
         {w.daily_limit > 0 ? api.t('lottery.ui.today_limit', { n: w.spins_today, limit: w.daily_limit }) : api.t('lottery.ui.today', { n: w.spins_today })}
       </p>
-    </Card>
+    </Panel>
   );
 }
 
@@ -472,6 +499,7 @@ interface Row {
 
 const GIB = 1024 ** 3;
 const SETTINGS = '/api/kernel/v1/admin/plugins/lottery/settings';
+const KINDS = ['bonus', 'upload', 'vip_days', 'vip_permanent'] as const;
 
 const toRow = (p: AdminPrize, key: number): Row => ({
   key,
@@ -511,8 +539,8 @@ function Admin({ api }: { api: PluginApi }) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  if (err && !d) return <p className="pt-error">{err}</p>;
-  if (!d || !s) return null;
+  if (err && !d) return <Note tone="bad">{err}</Note>;
+  if (!d || !s) return <SkeletonRows n={6} />;
   const cfg = {
     enabled: s.settings.enabled ?? false,
     spin_cost: s.settings.spin_cost ?? 50,
@@ -554,21 +582,96 @@ function Admin({ api }: { api: PluginApi }) {
       setBusy(false);
     }
   };
+  const over = total > 1_000_000;
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('lottery.ui.admin')}</h1>
-      <Card title={api.t('lottery.ui.settings')}>
+    <div className="stack">
+      <PageHead title={api.t('lottery.ui.admin')} />
+      <Kpis
+        items={[
+          { label: api.t('lottery.ui.s_spins'), value: d.today.spins ?? 0, hint: api.t('lottery.ui.stats') },
+          { label: api.t('lottery.ui.s_users'), value: d.today.users ?? 0 },
+          { label: api.t('lottery.ui.s_cost'), value: d.today.cost ?? 0, tone: 'gold' },
+          { label: api.t('lottery.ui.s_wins'), value: d.today.wins ?? 0 },
+        ]}
+      />
+      <Panel
+        title={api.t('lottery.ui.prizes')}
+        sub={api.t('lottery.ui.prizes_hint')}
+        flush
+        primary
+        actions={
+          <>
+            <Button size="sm" onClick={() => setRows([...rows, { key: nextKey.current++, kind: 'bonus', amount: '100', label: '', chance: '1', stock: '', active: true }])}>
+              {api.t('lottery.ui.add')}
+            </Button>
+            <Button size="sm" variant="primary" disabled={busy || over} onClick={() => void savePrizes()}>
+              {api.t('lottery.ui.save')}
+            </Button>
+          </>
+        }
+      >
+        <Table
+          rows={rows}
+          rowKey={(r) => r.key}
+          minWidth={820}
+          columns={[
+            {
+              key: 'k',
+              header: api.t('lottery.ui.kind'),
+              render: (r) => <Select aria-label={api.t('lottery.ui.kind')} value={r.kind} onChange={(e) => upd(r.key, { kind: e.target.value as Kind })} options={KINDS.map((k) => ({ value: k, label: api.t(`lottery.ui.kind.${k}`) }))} />,
+            },
+            {
+              key: 'a',
+              header: api.t('lottery.ui.amount'),
+              render: (r) => (
+                <Input type="number" min={0} step={r.kind === 'upload' ? 'any' : 1} aria-label={api.t('lottery.ui.amount')} disabled={r.kind === 'vip_permanent'} value={r.amount} onChange={(e) => upd(r.key, { amount: e.target.value })} />
+              ),
+            },
+            { key: 'l', header: api.t('lottery.ui.label'), render: (r) => <Input maxLength={40} aria-label={api.t('lottery.ui.label')} value={r.label} onChange={(e) => upd(r.key, { label: e.target.value })} /> },
+            { key: 'c', header: api.t('lottery.ui.chance_pct'), render: (r) => <Input type="number" min={0} max={100} step="any" aria-label={api.t('lottery.ui.chance_pct')} value={r.chance} onChange={(e) => upd(r.key, { chance: e.target.value })} /> },
+            { key: 's', header: api.t('lottery.ui.stock'), render: (r) => <Input type="number" min={0} aria-label={api.t('lottery.ui.stock')} placeholder={api.t('lottery.ui.unlimited')} value={r.stock} onChange={(e) => upd(r.key, { stock: e.target.value })} /> },
+            { key: 'on', header: api.t('lottery.ui.active'), render: (r) => <Checkbox label="" checked={r.active} onChange={(v) => upd(r.key, { active: v })} /> },
+            {
+              key: 'x',
+              header: '',
+              right: true,
+              render: (r) => (
+                <Button size="sm" variant="ghost" onClick={() => setRows(rows.filter((x) => x.key !== r.key))}>
+                  {api.t('lottery.ui.remove')}
+                </Button>
+              ),
+            },
+          ]}
+        />
+        <div className="toolbar">
+          {over ? (
+            <Status tone="bad">{api.t('lottery.ui.over')}</Status>
+          ) : (
+            <span className="small muted">{api.t('lottery.ui.total', { pct: Number((total / 10_000).toFixed(4)), rest: Number(((1_000_000 - total) / 10_000).toFixed(4)) })}</span>
+          )}
+        </div>
+      </Panel>
+      <Panel
+        title={api.t('lottery.ui.settings')}
+        actions={
+          <Button size="sm" variant="primary" type="submit" form="lottery-settings" disabled={busy}>
+            {api.t('lottery.ui.save')}
+          </Button>
+        }
+      >
         <form
+          id="lottery-settings"
+          className="form"
           onSubmit={(e) => {
             e.preventDefault();
             void saveSettings();
           }}
         >
-          <label className="pt-row" style={{ gap: 8, marginBottom: 12 }}>
-            <input type="checkbox" name="lottery_enabled" checked={cfg.enabled} onChange={(e) => setCfg({ enabled: e.target.checked })} />
+          <div className="row">
+            <Switch label={api.t('lottery.ui.enabled')} checked={cfg.enabled} onChange={(v) => setCfg({ enabled: v })} />
             <b>{api.t('lottery.ui.enabled')}</b>
-          </label>
-          <div className="lw-settings">
+          </div>
+          <div className="g3">
             <Field label={api.t('lottery.ui.spin_cost')}>
               <Input type="number" min={0} max={1_000_000} value={cfg.spin_cost} onChange={(e) => setCfg({ spin_cost: Number(e.target.value) })} />
             </Field>
@@ -579,100 +682,27 @@ function Admin({ api }: { api: PluginApi }) {
               <Input type="number" min={0} max={365} value={cfg.min_account_days} onChange={(e) => setCfg({ min_account_days: Number(e.target.value) })} />
             </Field>
           </div>
-          <Button type="submit" variant="primary" disabled={busy}>
-            {api.t('lottery.ui.save')}
-          </Button>
         </form>
-      </Card>
-      <Card title={api.t('lottery.ui.prizes')}>
-        <p className="pt-muted small" style={{ marginTop: 0 }}>
-          {api.t('lottery.ui.prizes_hint')}
-        </p>
-        <div className="lw-admin-rows">
-          <div className="lw-admin-row head">
-            <span>{api.t('lottery.ui.kind')}</span>
-            <span>{api.t('lottery.ui.amount')}</span>
-            <span>{api.t('lottery.ui.label')}</span>
-            <span>{api.t('lottery.ui.chance_pct')}</span>
-            <span>{api.t('lottery.ui.stock')}</span>
-            <span>{api.t('lottery.ui.active')}</span>
-            <span />
-          </div>
-          {rows.map((r) => (
-            <div className="lw-admin-row" key={r.key}>
-              <select className="pt-input" aria-label={api.t('lottery.ui.kind')} value={r.kind} onChange={(e) => upd(r.key, { kind: e.target.value as Kind })}>
-                {(['bonus', 'upload', 'vip_days', 'vip_permanent'] as const).map((k) => (
-                  <option key={k} value={k}>
-                    {api.t(`lottery.ui.kind.${k}`)}
-                  </option>
-                ))}
-              </select>
-              <Input
-                type="number"
-                min={0}
-                step={r.kind === 'upload' ? 'any' : 1}
-                aria-label={api.t('lottery.ui.amount')}
-                placeholder={api.t('lottery.ui.amount')}
-                disabled={r.kind === 'vip_permanent'}
-                value={r.amount}
-                onChange={(e) => upd(r.key, { amount: e.target.value })}
-              />
-              <Input maxLength={40} aria-label={api.t('lottery.ui.label')} placeholder={api.t('lottery.ui.label')} value={r.label} onChange={(e) => upd(r.key, { label: e.target.value })} />
-              <Input type="number" min={0} max={100} step="any" aria-label={api.t('lottery.ui.chance_pct')} value={r.chance} onChange={(e) => upd(r.key, { chance: e.target.value })} />
-              <Input type="number" min={0} aria-label={api.t('lottery.ui.stock')} placeholder={api.t('lottery.ui.unlimited')} value={r.stock} onChange={(e) => upd(r.key, { stock: e.target.value })} />
-              <input type="checkbox" aria-label={api.t('lottery.ui.active')} checked={r.active} onChange={(e) => upd(r.key, { active: e.target.checked })} />
-              <Button variant="ghost" onClick={() => setRows(rows.filter((x) => x.key !== r.key))}>
-                {api.t('lottery.ui.remove')}
-              </Button>
-            </div>
-          ))}
-        </div>
-        <p className={total > 1_000_000 ? 'pt-error' : 'pt-muted small'}>
-          {total > 1_000_000 ? api.t('lottery.ui.over') : api.t('lottery.ui.total', { pct: Number((total / 10_000).toFixed(4)), rest: Number(((1_000_000 - total) / 10_000).toFixed(4)) })}
-        </p>
-        <div className="pt-row">
-          <Button
-            onClick={() =>
-              setRows([...rows, { key: nextKey.current++, kind: 'bonus', amount: '100', label: '', chance: '1', stock: '', active: true }])
-            }
-          >
-            {api.t('lottery.ui.add')}
-          </Button>
-          <Button variant="primary" disabled={busy || total > 1_000_000} onClick={() => void savePrizes()}>
-            {api.t('lottery.ui.save')}
-          </Button>
-        </div>
-      </Card>
-      <Card title={api.t('lottery.ui.stats')}>
-        <div className="pt-row" style={{ gap: 24, flexWrap: 'wrap' }}>
-          <Stat label={api.t('lottery.ui.s_spins')} value={d.today.spins ?? 0} />
-          <Stat label={api.t('lottery.ui.s_users')} value={d.today.users ?? 0} />
-          <Stat label={api.t('lottery.ui.s_cost')} value={d.today.cost ?? 0} />
-          <Stat label={api.t('lottery.ui.s_wins')} value={d.today.wins ?? 0} />
-        </div>
-      </Card>
-      <Card title={api.t('lottery.ui.last30')}>
-        {d.last_30_days.length === 0 ? (
-          <Empty>{api.t('lottery.ui.no_records')}</Empty>
-        ) : (
-          <Table
-            rows={d.last_30_days}
-            rowKey={(x) => x.kind}
-            columns={[
-              { key: 'k', header: api.t('lottery.ui.kind'), render: (x) => api.t(`lottery.ui.kind.${x.kind}`) },
-              { key: 'c', header: api.t('lottery.ui.s_wins'), render: (x) => x.count },
-              { key: 'a', header: api.t('lottery.ui.amount'), render: (x) => (x.kind === 'upload' ? shortBytes(x.amount) : x.kind === 'vip_permanent' ? '—' : x.amount) },
-            ]}
-          />
-        )}
-      </Card>
+      </Panel>
+      <Panel title={api.t('lottery.ui.last30')} flush>
+        <Table
+          rows={d.last_30_days}
+          rowKey={(x) => x.kind}
+          empty={api.t('lottery.ui.no_records')}
+          columns={[
+            { key: 'k', header: api.t('lottery.ui.kind'), render: (x) => api.t(`lottery.ui.kind.${x.kind}`) },
+            { key: 'c', header: api.t('lottery.ui.s_wins'), right: true, render: (x) => <span className="num">{x.count}</span> },
+            { key: 'a', header: api.t('lottery.ui.amount'), right: true, render: (x) => <span className="num">{x.kind === 'upload' ? shortBytes(x.amount) : x.kind === 'vip_permanent' ? '—' : x.amount}</span> },
+          ]}
+        />
+      </Panel>
     </div>
   );
 }
 
 export default {
   slots: {
-    'nav.main': { component: NavItem, order: 60 },
+    'nav.main': { component: NavLink, order: 60 },
     'home.widgets': { component: Widget, order: 30 },
   },
   routes: [

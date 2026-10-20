@@ -239,19 +239,19 @@ function FieldWrap({ label, error, hint, children, meta }: { label: string; erro
   const def = meta?.schema.default;
   const canReset = !!ctx && !!meta && def !== undefined && !same(meta.value, def);
   return (
-    <div className={`pt-field${error ? ' pt-field-invalid' : ''}${modified ? ' pt-field-modified' : ''}`}>
-      <span className="pt-field-label">
+    <div className={`fl${error ? ' invalid' : ''}${modified ? ' modified' : ''}`}>
+      <span className="fl-label">
         {label}
-        {modified && meta && <span className="pt-field-dot" title={tr(meta.t, 'ui.form.modified', 'Modified')} />}
+        {modified && meta && <span className="fl-dot" title={tr(meta.t, 'ui.form.modified', 'Modified')} />}
         {canReset && meta && (
-          <button type="button" className="pt-field-reset" title={`${tr(meta.t, 'ui.form.default', 'Default')}: ${JSON.stringify(def)}`} onClick={() => meta.onChange(def)}>
+          <button type="button" className="fl-reset" title={`${tr(meta.t, 'ui.form.default', 'Default')}: ${JSON.stringify(def)}`} onClick={() => meta.onChange(def)}>
             {tr(meta.t, 'ui.form.reset_default', 'Reset to default')}
           </button>
         )}
       </span>
       {children}
-      {hint && !error && <span className="pt-field-hint">{hint}</span>}
-      {error && <span className="pt-field-error">{error}</span>}
+      {hint && !error && <span className="hint">{hint}</span>}
+      {error && <span className="err">{error}</span>}
     </div>
   );
 }
@@ -276,7 +276,7 @@ function NumberInput({ id, integer, schema, value, onChange }: { id: string; int
   return (
     <input
       id={id}
-      className="pt-input pt-input-num"
+      className="in"
       inputMode={integer ? 'numeric' : 'decimal'}
       value={text}
       onChange={(e) => {
@@ -310,16 +310,16 @@ function TagInput({ id, value, onChange, t }: { id: string; value: string[]; onC
     } else if (e.key === 'Backspace' && text === '' && value.length) onChange(value.slice(0, -1));
   };
   return (
-    <div className="pt-tags">
+    <div className="sf-tags">
       {value.map((v, i) => (
-        <span key={`${v}-${i}`} className="pt-tag">
+        <span key={`${v}-${i}`} className="tag">
           {v}
           <button type="button" aria-label="remove" onClick={() => onChange(value.filter((_, j) => j !== i))}>
             ×
           </button>
         </span>
       ))}
-      <input id={id} className="pt-tags-input" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={key} onBlur={commit} placeholder={tr(t, 'ui.form.tag_hint', 'Type and press Enter')} />
+      <input id={id} className="sf-tags-input" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={key} onBlur={commit} placeholder={tr(t, 'ui.form.tag_hint', 'Type and press Enter')} />
     </div>
   );
 }
@@ -335,7 +335,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
     const sel = schema.properties?.[d] ?? { type: 'string', enum: schema.oneOf.map((b) => b.properties?.[d]?.const) };
     const obj = (value as Record<string, unknown>) ?? {};
     return (
-      <div className="pt-oneof">
+      <div className="sf-oneof">
         <SchemaField
           schema={sel}
           path={`${path}/${d}`}
@@ -366,11 +366,11 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   if (ty === 'object' && schema.properties && Array.isArray(schema.type) && schema.type.includes('null') && path) {
     const on = value !== null && value !== undefined;
     return (
-      <div className="pt-nullable">
+      <div className="sf-nullable">
         <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
-          <label className="pt-switch">
+          <label className="sf-switch">
             <input id={id} type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked ? (withDefaults({ ...schema, type: 'object' }, {}) ?? {}) : null)} />
-            <span className="pt-switch-track" aria-hidden />
+            <span className="sf-switch-track" aria-hidden />
           </label>
         </FieldWrap>
         {on && <SchemaField schema={{ ...schema, type: 'object' }} value={value} onChange={onChange} path={path} errors={errors} label="" t={t} />}
@@ -379,7 +379,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   }
   if (ty === 'object' && schema.properties) {
     return (
-      <fieldset className="pt-fieldset">
+      <fieldset className="sf-fieldset">
         {path && label && <legend>{label}</legend>}
         {ordered(schema).filter(([, s]) => !s.readOnly).map(([k, s]) => (
           <SchemaField
@@ -399,9 +399,9 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   if (ty === 'boolean') {
     return (
       <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
-        <label className="pt-switch">
+        <label className="sf-switch">
           <input id={id} type="checkbox" checked={value === true} onChange={(e) => onChange(e.target.checked)} />
-          <span className="pt-switch-track" aria-hidden />
+          <span className="sf-switch-track" aria-hidden />
         </label>
       </FieldWrap>
     );
@@ -409,7 +409,7 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
   if (schema.enum) {
     return (
       <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
-        <select id={id} className="pt-input" value={value === undefined ? '' : JSON.stringify(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : JSON.parse(e.target.value))}>
+        <select id={id} className="sel" value={value === undefined ? '' : JSON.stringify(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : JSON.parse(e.target.value))}>
           <option value="">—</option>
           {schema.enum.map((o, i) => (
             <option key={JSON.stringify(o)} value={JSON.stringify(o)}>
@@ -461,9 +461,9 @@ function SchemaField({ schema, value, onChange, path, errors, label, t }: FieldP
     return (
       <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={m}>
         {multiline ? (
-          <textarea id={id} className={`pt-input${schema['x-pt-widget'] === 'mediainfo' ? ' pt-mono' : ''}`} rows={6} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />
+          <textarea id={id} className={`ta${schema['x-pt-widget'] === 'mediainfo' ? ' code' : ''}`} rows={6} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />
         ) : (
-          <input id={id} className="pt-input" type={type} maxLength={schema.maxLength} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} />
+          <input id={id} className="in" type={type} maxLength={schema.maxLength} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} />
         )}
       </FieldWrap>
     );
@@ -485,15 +485,15 @@ function ListEditor({ schema, item, value, onChange, path, errors, label, t }: O
   const err = errors[path];
   return (
     <FieldWrap label={label} error={err} hint={hintOf(schema, t)} meta={{ path, schema, value, onChange, t }}>
-      <div className="pt-list">
+      <div className="sf-list">
         {cur.map((x, i) => (
-          <div key={i} className="pt-list-item">
-            <div className="pt-list-head">
+          <div key={i} className="sf-list-item">
+            <div className="sf-list-head">
               <span className="pt-muted">#{i + 1}</span>
-              <span className="pt-list-actions">
-                <button type="button" className="pt-btn pt-btn-ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label="up">↑</button>
-                <button type="button" className="pt-btn pt-btn-ghost" disabled={i === cur.length - 1} onClick={() => move(i, 1)} aria-label="down">↓</button>
-                <button type="button" className="pt-btn pt-btn-ghost pt-btn-danger" onClick={() => onChange(cur.filter((_, j) => j !== i))}>
+              <span className="sf-list-actions">
+                <button type="button" className="btn btn-xs btn-ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label="up">↑</button>
+                <button type="button" className="btn btn-xs btn-ghost" disabled={i === cur.length - 1} onClick={() => move(i, 1)} aria-label="down">↓</button>
+                <button type="button" className="btn btn-xs btn-ghost btn-danger" onClick={() => onChange(cur.filter((_, j) => j !== i))}>
                   {tr(t, 'ui.form.remove', 'Remove')}
                 </button>
               </span>
@@ -501,9 +501,9 @@ function ListEditor({ schema, item, value, onChange, path, errors, label, t }: O
             <SchemaField schema={item} value={x} onChange={(v) => set(i, v)} path={`${path}/${i}`} errors={errors} label="" t={t} />
           </div>
         ))}
-        {cur.length === 0 && <div className="pt-muted pt-list-empty">{tr(t, 'ui.form.empty_list', 'Nothing here yet')}</div>}
+        {cur.length === 0 && <div className="muted sf-list-empty">{tr(t, 'ui.form.empty_list', 'Nothing here yet')}</div>}
         <div>
-          <button type="button" className="pt-btn" onClick={() => onChange([...cur, withDefaults(item, undefined) ?? (primary(item) === 'object' ? {} : undefined)])}>
+          <button type="button" className="btn btn-sm" onClick={() => onChange([...cur, withDefaults(item, undefined) ?? (primary(item) === 'object' ? {} : undefined)])}>
             + {tr(t, 'ui.form.add', 'Add')}
           </button>
         </div>
@@ -530,24 +530,24 @@ function MapEditor({ schema, item, value, onChange, path, errors, label, t }: Om
   };
   return (
     <FieldWrap label={label} error={errors[path]} hint={hintOf(schema, t)} meta={{ path, schema, value, onChange, t }}>
-      <div className="pt-list">
+      <div className="sf-list">
         {Object.keys(fixed).length > 0 && (
           <SchemaField schema={{ ...schema, additionalProperties: undefined }} value={obj} onChange={onChange} path={path} errors={errors} label="" t={t} />
         )}
         {keys.map((k) => (
-          <div key={k} className="pt-list-item">
-            <div className="pt-list-head">
-              <input className="pt-input pt-map-key pt-mono" defaultValue={k} onBlur={(e) => rename(k, e.target.value.trim())} aria-label="key" />
-              <button type="button" className="pt-btn pt-btn-ghost pt-btn-danger" onClick={() => onChange(Object.fromEntries(Object.entries(obj).filter(([x]) => x !== k)))}>
+          <div key={k} className="sf-list-item">
+            <div className="sf-list-head">
+              <input className="in code sf-map-key" defaultValue={k} onBlur={(e) => rename(k, e.target.value.trim())} aria-label="key" />
+              <button type="button" className="btn btn-xs btn-ghost btn-danger" onClick={() => onChange(Object.fromEntries(Object.entries(obj).filter(([x]) => x !== k)))}>
                 {tr(t, 'ui.form.remove', 'Remove')}
               </button>
             </div>
             <SchemaField schema={item} value={obj[k]} onChange={(v) => onChange({ ...obj, [k]: v })} path={`${path}/${k}`} errors={errors} label="" t={t} />
           </div>
         ))}
-        <div className="pt-map-add">
-          <input className="pt-input pt-mono" value={nk} placeholder={tr(t, 'ui.form.new_key', 'New key')} onChange={(e) => setNk(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())} />
-          <button type="button" className="pt-btn" onClick={add} disabled={!nk.trim() || nk.trim() in obj}>
+        <div className="sf-map-add">
+          <input className="in code" value={nk} placeholder={tr(t, 'ui.form.new_key', 'New key')} onChange={(e) => setNk(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())} />
+          <button type="button" className="btn btn-sm" onClick={add} disabled={!nk.trim() || nk.trim() in obj}>
             + {tr(t, 'ui.form.add', 'Add')}
           </button>
         </div>
@@ -580,9 +580,9 @@ function LogFiles({ label, error, hint, value, onChange }: { label: string; erro
         }}
       />
       {value.length > 0 && (
-        <span className="pt-field-hint">
+        <span className="hint">
           {value.map((l, i) => `#${i + 1} ${(l.length / 1024).toFixed(1)} KiB`).join(' · ')}{' '}
-          <button type="button" className="pt-btn pt-btn-ghost" onClick={() => onChange(undefined)}>
+          <button type="button" className="btn btn-xs btn-ghost" onClick={() => onChange(undefined)}>
             ✕
           </button>
         </span>
@@ -610,7 +610,7 @@ export function JsonField({ label, value, onChange, error }: { label: string; va
   return (
     <FieldWrap label={label} error={bad ?? error}>
       <textarea
-        className="pt-input pt-mono"
+        className="in code"
         rows={Math.min(24, Math.max(4, text.split('\n').length))}
         value={text}
         onChange={(e) => {

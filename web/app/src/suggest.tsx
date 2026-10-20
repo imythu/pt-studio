@@ -1,6 +1,6 @@
 // 搜索联想（search-meilisearch `/suggest`）：输入两个字符以上时按标题前缀给出种子候选，选中直接打开种子页。
 // 插件未安装或请求失败时不显示。
-import { useEffect, useId, useState, type InputHTMLAttributes, type KeyboardEvent } from 'react';
+import { useEffect, useId, useState, type InputHTMLAttributes, type KeyboardEvent, type Ref } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@pt-studio/sdk';
@@ -22,7 +22,14 @@ function useDebounced(v: string, ms: number): string {
 }
 
 /** 带联想下拉的搜索输入框；`value` / `onValue` 受控，回车（未选中候选时）交给外层表单提交 */
-export function SuggestInput({ value, onValue, className, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: string; onValue(v: string): void }) {
+export function SuggestInput({
+  value,
+  onValue,
+  onPick,
+  ref,
+  className,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: string; onValue(v: string): void; onPick?(): void; ref?: Ref<HTMLInputElement> }) {
   const nav = useNavigate();
   const listId = useId();
   const installed = useInstalled('search-meilisearch');
@@ -41,10 +48,16 @@ export function SuggestInput({ value, onValue, className, ...rest }: Omit<InputH
   useEffect(() => setActive(-1), [q]);
   const pick = (h: Hit) => {
     setOpen(false);
-    onValue(h.text);
+    onValue('');
     nav(`/torrents/${h.id}`);
+    onPick?.();
   };
   const key = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setOpen(false);
+      (e.target as HTMLInputElement).blur();
+      return;
+    }
     if (hits.length === 0) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -53,14 +66,13 @@ export function SuggestInput({ value, onValue, className, ...rest }: Omit<InputH
     } else if (e.key === 'Enter' && active >= 0) {
       e.preventDefault();
       pick(hits[active] as Hit);
-    } else if (e.key === 'Escape') {
-      setOpen(false);
     }
   };
   return (
     <span className="suggest">
       <input
         {...rest}
+        ref={ref}
         className={className}
         value={value}
         role="combobox"

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input } from '@pt-studio/ui-kit';
+import { Button, Field, Input, Note, PageHead, Panel, SkeletonRows, Status } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'metadata-douban.ui.link': '豆瓣链接或 ID',
@@ -64,7 +64,7 @@ function Generate({ api, ctx }: SlotProps<{ draft: Draft; update?: (p: Partial<D
   if (!ctx.update) return null;
   return (
     <Field label={api.t('metadata-douban.ui.link')}>
-      <span className="searchbar">
+      <span className="form-acts">
         <Input name="douban_link" placeholder="https://movie.douban.com/subject/1292052/" value={link} onChange={(e) => setLink(e.target.value)} />
         <Button type="button" disabled={busy || !link.trim()} onClick={() => void run()}>
           {api.t('metadata-douban.ui.generate')}
@@ -81,7 +81,7 @@ function Admin({ api }: { api: PluginApi }) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  if (!s) return null;
+  if (!s) return <SkeletonRows n={3} />;
   const act = async (path: string, body: unknown) => {
     try {
       await api.json(`/api/p/metadata-douban/v1/admin/${path}`, { json: body });
@@ -91,22 +91,33 @@ function Admin({ api }: { api: PluginApi }) {
     }
   };
   return (
-    <Card title={api.t('metadata-douban.ui.admin')}>
-      <p>
-        <Badge tone={s.enabled ? 'success' : 'muted'}>{api.t(s.enabled ? 'metadata-douban.ui.on' : 'metadata-douban.ui.off')}</Badge> {s.mode}
-      </p>
-      {!s.configured && <p className="pt-field-error">{api.t('metadata-douban.ui.unconfigured')}</p>}
-      <p className="pt-muted">{s.statement}</p>
-      {s.enabled ? (
-        <Button variant="danger" onClick={() => void act('disable', {})}>
-          {api.t('metadata-douban.ui.disable')}
-        </Button>
-      ) : (
-        <Button variant="primary" onClick={() => void act('enable', { ack: true, statement_version: s.statement_version })}>
-          {api.t('metadata-douban.ui.enable')}
-        </Button>
-      )}
-    </Card>
+    <div className="stack">
+      <PageHead
+        title={api.t('metadata-douban.ui.admin')}
+        actions={
+          s.enabled ? (
+            <Button variant="danger" onClick={() => void act('disable', {})}>
+              {api.t('metadata-douban.ui.disable')}
+            </Button>
+          ) : (
+            <Button variant="primary" onClick={() => void act('enable', { ack: true, statement_version: s.statement_version })}>
+              {api.t('metadata-douban.ui.enable')}
+            </Button>
+          )
+        }
+      />
+      {!s.configured && <Note tone="bad">{api.t('metadata-douban.ui.unconfigured')}</Note>}
+      <Panel
+        primary
+        title={
+          <>
+            <Status tone={s.enabled ? 'ok' : 'mute'}>{api.t(s.enabled ? 'metadata-douban.ui.on' : 'metadata-douban.ui.off')}</Status> <span className="pt-mono small">{s.mode}</span>
+          </>
+        }
+      >
+        <p className="pt-prewrap">{s.statement}</p>
+      </Panel>
+    </div>
   );
 }
 

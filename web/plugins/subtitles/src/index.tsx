@@ -1,9 +1,9 @@
-// subtitles 前端：种子页“字幕”标签页（列表、下载、上传、删除）、后台最近上传。
+// subtitles 前端：种子页「字幕」页签（列表、下载；上传与删除在抽屉里）、后台最近上传。
 import { useEffect, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Table } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, PageHead, Panel, PLink, Select, Sheet, SkeletonRows, Table, Tag } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'subtitles.ui.tab': '字幕',
@@ -22,6 +22,11 @@ registerMessages('zh-CN', {
   'subtitles.ui.anon': '匿名',
   'subtitles.ui.admin': '最近上传的字幕',
   'subtitles.ui.files': '{n} 个文件',
+  'subtitles.ui.uploader': '上传者',
+  'subtitles.ui.size': '体积',
+  'subtitles.ui.count': '{n} 份字幕',
+  'subtitles.ui.torrent': '种子',
+  'subtitles.ui.delete_hint': '删除他人上传的字幕需要填写原因。',
   'subtitles.lang.zh-hans': '简体中文',
   'subtitles.lang.zh-hant': '繁体中文',
   'subtitles.lang.zh-hans-en': '简英双语',
@@ -52,6 +57,11 @@ registerMessages('en', {
   'subtitles.ui.anon': 'Anonymous',
   'subtitles.ui.admin': 'Recent subtitles',
   'subtitles.ui.files': '{n} files',
+  'subtitles.ui.uploader': 'Uploader',
+  'subtitles.ui.size': 'Size',
+  'subtitles.ui.count': '{n} subtitles',
+  'subtitles.ui.torrent': 'Torrent',
+  'subtitles.ui.delete_hint': 'Deleting someone else’s subtitle needs a reason.',
   'subtitles.lang.zh-hans': 'Simplified Chinese',
   'subtitles.lang.zh-hant': 'Traditional Chinese',
   'subtitles.lang.zh-hans-en': 'Simplified Chinese + English',
@@ -90,7 +100,7 @@ interface Sub {
   can_delete: boolean;
 }
 
-function UploadForm({ api, tid, langs, done }: { api: PluginApi; tid: number; langs: string[]; done(): void }) {
+function UploadSheet({ api, tid, langs, open, onClose, done }: { api: PluginApi; tid: number; langs: string[]; open: boolean; onClose(): void; done(): void }) {
   const [file, setFile] = useState<File | null>(null);
   const [lang, setLang] = useState('zh-hans');
   const [title, setTitle] = useState('');
@@ -101,14 +111,11 @@ function UploadForm({ api, tid, langs, done }: { api: PluginApi; tid: number; la
     setBusy(true);
     try {
       const q = new URLSearchParams({ filename: file.name, lang, title, ...(anon ? { anonymous: '1' } : {}) });
-      await api.json(`/api/p/subtitles/v1/torrents/${tid}/subtitles?${q.toString()}`, {
-        method: 'POST',
-        body: file,
-        headers: { 'content-type': 'application/octet-stream' },
-      });
+      await api.json(`/api/p/subtitles/v1/torrents/${tid}/subtitles?${q.toString()}`, { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' } });
       api.toast(api.t('subtitles.ui.uploaded'), 'success');
       setFile(null);
       setTitle('');
+      onClose();
       done();
     } catch (e) {
       api.toast(errText(api, e), 'error');
@@ -117,42 +124,36 @@ function UploadForm({ api, tid, langs, done }: { api: PluginApi; tid: number; la
     }
   };
   return (
-    <form
-      className="subtitles-upload"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={api.t('subtitles.ui.upload')}
+      footer={
+        <Button variant="primary" disabled={!file || busy} onClick={() => void submit()}>
+          {api.t('subtitles.ui.submit')}
+        </Button>
+      }
     >
-      <h4>{api.t('subtitles.ui.upload')}</h4>
       <Field label={api.t('subtitles.ui.file')}>
-        <input type="file" name="subtitle_file" accept=".srt,.ass,.ssa,.vtt,.sup,.zip" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <input className="in" type="file" name="subtitle_file" accept=".srt,.ass,.ssa,.vtt,.sup,.zip" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </Field>
       <Field label={api.t('subtitles.ui.lang')}>
-        <select className="pt-input" name="subtitle_lang" value={lang} onChange={(e) => setLang(e.target.value)}>
-          {langs.map((l) => (
-            <option key={l} value={l}>
-              {api.t(`subtitles.lang.${l}`)}
-            </option>
-          ))}
-        </select>
+        <Select name="subtitle_lang" value={lang} onChange={(e) => setLang(e.target.value)} options={langs.map((l) => ({ value: l, label: api.t(`subtitles.lang.${l}`) }))} />
       </Field>
       <Field label={api.t('subtitles.ui.title')}>
         <Input name="subtitle_title" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
       </Field>
-      <label className="pt-check">
-        <input type="checkbox" checked={anon} onChange={(e) => setAnon(e.target.checked)} /> {api.t('subtitles.ui.anonymous')}
-      </label>
-      <Button type="submit" variant="primary" disabled={!file || busy}>
-        {api.t('subtitles.ui.submit')}
-      </Button>
-    </form>
+      <Checkbox label={api.t('subtitles.ui.anonymous')} checked={anon} onChange={setAnon} />
+    </Sheet>
   );
 }
 
 function TorrentTab({ api, ctx }: SlotProps<{ torrent: { id: number } }>) {
   const tid = ctx.torrent.id;
   const [d, setD] = useState<{ items: Sub[]; langs: string[] } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState<Sub | null>(null);
+  const [reason, setReason] = useState('');
   const load = () =>
     api
       .json<{ items: Sub[]; langs: string[] }>(`/api/p/subtitles/v1/torrents/${tid}/subtitles`)
@@ -162,103 +163,118 @@ function TorrentTab({ api, ctx }: SlotProps<{ torrent: { id: number } }>) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tid]);
-  if (!d) return null;
-  const del = async (s: Sub) => {
-    // 上传者删除自己的可留空；管理员删除他人的需填写原因（服务端校验）
-    const reason = window.prompt(api.t('subtitles.ui.delete_reason'));
-    if (reason === null) return;
+  if (!d) return <SkeletonRows n={2} />;
+  // 上传者删除自己的可留空；管理员删除他人的需填写原因（服务端校验）
+  const del = async () => {
+    if (!deleting) return;
     try {
-      await api.fetch(`/api/p/subtitles/v1/subtitles/${s.id}?reason=${encodeURIComponent(reason)}`, { method: 'DELETE' });
+      await api.fetch(`/api/p/subtitles/v1/subtitles/${deleting.id}?reason=${encodeURIComponent(reason)}`, { method: 'DELETE' });
+      setDeleting(null);
+      setReason('');
       await load();
     } catch (e) {
       api.toast(errText(api, e), 'error');
     }
   };
   return (
-    <div className="pt-stack">
+    <div className="stack-s">
+      <div className="row-sb">
+        <span className="small muted">{api.t('subtitles.ui.count', { n: d.items.length })}</span>
+        <Button size="sm" onClick={() => setUploading(true)}>
+          {api.t('subtitles.ui.upload')}
+        </Button>
+      </div>
       <Table
         rows={d.items}
         rowKey={(r) => r.id}
         empty={api.t('subtitles.ui.empty')}
+        minWidth={640}
         columns={[
-          { key: 'l', header: api.t('subtitles.ui.lang'), render: (r) => <Badge tone="primary">{api.t(`subtitles.lang.${r.lang}`)}</Badge> },
+          { key: 'l', header: api.t('subtitles.ui.lang'), render: (r) => <Tag tone="o">{api.t(`subtitles.lang.${r.lang}`)}</Tag> },
           {
             key: 'f',
-            header: '',
+            header: api.t('subtitles.ui.title'),
             render: (r) => (
-              <>
-                <span className="pt-mono">{r.filename}</span> <span className="pt-muted small">{r.format.toUpperCase()}</span>
-                {r.entries.length > 0 && <span className="pt-muted small"> · {api.t('subtitles.ui.files', { n: r.entries.length })}</span>}
-                {r.title && <div className="small">{r.title}</div>}
-              </>
+              <div className="tt">
+                <span className="mono">{r.filename}</span>
+                <span className="tiny muted">
+                  {r.format.toUpperCase()}
+                  {r.entries.length > 0 && ` · ${api.t('subtitles.ui.files', { n: r.entries.length })}`}
+                  {r.title && ` · ${r.title}`}
+                </span>
+              </div>
             ),
           },
-          { key: 's', header: '', render: (r) => formatBytes(r.size) },
-          {
-            key: 'u',
-            header: '',
-            render: (r) => (
-              <span className="pt-muted small">
-                {r.uploader ?? api.t('subtitles.ui.anon')} · {new Date(r.created_at).toLocaleDateString()} · {api.t('subtitles.ui.downloads', { n: r.downloads })}
-              </span>
-            ),
-          },
+          { key: 's', header: api.t('subtitles.ui.size'), right: true, render: (r) => <span className="num">{formatBytes(r.size)}</span> },
+          { key: 'u', header: api.t('subtitles.ui.uploader'), render: (r) => <span className="small nowrap">{r.uploader ?? api.t('subtitles.ui.anon')} · {api.t('subtitles.ui.downloads', { n: r.downloads })}</span> },
           {
             key: 'a',
             header: '',
             render: (r) => (
-              <span>
-                <a className="pt-btn" href={`/api/p/subtitles/v1/subtitles/${r.id}/download`} download onClick={() => setTimeout(() => void load(), 1000)}>
+              <div className="acts">
+                <a className="btn btn-xs" href={`/api/p/subtitles/v1/subtitles/${r.id}/download`} download onClick={() => setTimeout(() => void load(), 1000)}>
                   {api.t('subtitles.ui.download')}
                 </a>
                 {r.can_delete && (
-                  <Button variant="ghost" onClick={() => void del(r)}>
+                  <Button size="xs" variant="ghost" onClick={() => setDeleting(r)}>
                     {api.t('subtitles.ui.delete')}
                   </Button>
                 )}
-              </span>
+              </div>
             ),
           },
         ]}
       />
-      <UploadForm api={api} tid={tid} langs={d.langs} done={() => void load()} />
+      <UploadSheet api={api} tid={tid} langs={d.langs} open={uploading} onClose={() => setUploading(false)} done={() => void load()} />
+      <Sheet
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={api.t('subtitles.ui.delete')}
+        footer={
+          <Button variant="danger" onClick={() => void del()}>
+            {api.t('subtitles.ui.delete')}
+          </Button>
+        }
+      >
+        {deleting && <p className="mono small">{deleting.filename}</p>}
+        <p className="small muted">{api.t('subtitles.ui.delete_hint')}</p>
+        <Field label={api.t('subtitles.ui.delete_reason')}>
+          <Input value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      </Sheet>
     </div>
   );
 }
 
 function Admin({ api }: { api: PluginApi }) {
-  const [items, setItems] = useState<{ id: number; torrent_id: number; torrent_title: string | null; lang: string; filename: string; size: number; downloads: number; uploader: string | null }[]>([]);
+  type Row = { id: number; torrent_id: number; torrent_title: string | null; lang: string; filename: string; size: number; downloads: number; uploader: string | null };
+  const [items, setItems] = useState<Row[] | null>(null);
   useEffect(() => {
-    void api.json<{ items: typeof items }>('/api/p/subtitles/v1/admin/subtitles').then((r) => setItems(r.items));
+    void api.json<{ items: Row[] }>('/api/p/subtitles/v1/admin/subtitles').then((r) => setItems(r.items));
   }, [api]);
   return (
-    <Card title={api.t('subtitles.ui.admin')}>
-      <Table
-        rows={items}
-        rowKey={(r) => r.id}
-        empty={api.t('subtitles.ui.empty')}
-        columns={[
-          {
-            key: 't',
-            header: '',
-            render: (r) => (
-              <a
-                href={`/torrents/${r.torrent_id}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  api.navigate(`/torrents/${r.torrent_id}`);
-                }}
-              >
-                {r.torrent_title ?? `#${r.torrent_id}`}
-              </a>
-            ),
-          },
-          { key: 'f', header: '', render: (r) => `${api.t(`subtitles.lang.${r.lang}`)} · ${r.filename}` },
-          { key: 's', header: '', render: (r) => formatBytes(r.size) },
-          { key: 'u', header: '', render: (r) => `${r.uploader ?? '?'} · ${api.t('subtitles.ui.downloads', { n: r.downloads })}` },
-        ]}
-      />
-    </Card>
+    <div className="stack">
+      <PageHead title={api.t('subtitles.ui.admin')} />
+      <Panel flush primary>
+        {items === null ? (
+          <SkeletonRows n={5} />
+        ) : (
+          <Table
+            rows={items}
+            rowKey={(r) => r.id}
+            empty={api.t('subtitles.ui.empty')}
+            minWidth={820}
+            columns={[
+              { key: 't', header: api.t('subtitles.ui.torrent'), render: (r) => <PLink to={`/torrents/${r.torrent_id}`} navigate={api.navigate} className="tt-name">{r.torrent_title ?? `#${r.torrent_id}`}</PLink> },
+              { key: 'l', header: api.t('subtitles.ui.lang'), render: (r) => <Tag tone="o">{api.t(`subtitles.lang.${r.lang}`)}</Tag> },
+              { key: 'f', header: '', render: (r) => <span className="mono">{r.filename}</span> },
+              { key: 's', header: api.t('subtitles.ui.size'), right: true, render: (r) => <span className="num">{formatBytes(r.size)}</span> },
+              { key: 'u', header: api.t('subtitles.ui.uploader'), render: (r) => <span className="small nowrap">{r.uploader ?? '?'} · {api.t('subtitles.ui.downloads', { n: r.downloads })}</span> },
+            ]}
+          />
+        )}
+      </Panel>
+    </div>
   );
 }
 

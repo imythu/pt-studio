@@ -1,14 +1,13 @@
-// 登录 / 注册（identity）。插件经 `auth.*` 插槽向请求写入字段（FormBinding）。
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+// 登录 / 注册 / 找回密码 / 验证邮箱（identity）：左侧插画与引言，右侧表单。插件经 `auth.*` 插槽向请求写入字段（FormBinding）。
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { api, ApiError } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
-import { Button, Field, Input } from '@pt-studio/ui-kit';
-import { HeroArt, Logo } from '../art';
-import { useManifest } from '../manifest';
+import { Button, Checkbox, Field, Input, Note } from '@pt-studio/ui-kit';
 import { ErrorText } from '../errors';
 import { useSession } from '../session';
+import { Wordmark, ThemeButton } from '../shell/Layout';
 import { getAssertion, webauthnSupported } from '../webauthn';
 
 /** 插件写入注册 / 登录请求的绑定：顶层字段（如 `invite_code`）或 `form.<key>` */
@@ -19,10 +18,7 @@ export interface FormBinding {
 
 function useBinding(): [FormBinding, Record<string, unknown>] {
   const [extra, setExtra] = useState<Record<string, unknown>>({});
-  const binding = useMemo<FormBinding>(
-    () => ({ get: (k) => extra[k], set: (k, v) => setExtra((x) => ({ ...x, [k]: v })) }),
-    [extra],
-  );
+  const binding = useMemo<FormBinding>(() => ({ get: (k) => extra[k], set: (k, v) => setExtra((x) => ({ ...x, [k]: v })) }), [extra]);
   return [binding, extra];
 }
 
@@ -39,25 +35,34 @@ function splitExtra(extra: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-function AuthShell({ title, sub, children, foot }: { title: string; sub: string; children: React.ReactNode; foot: React.ReactNode }) {
+const ART: Record<string, { img: string; quote: string; who: string }> = {
+  login: { img: '/frieren/frieren-sky-landscape.jpg', quote: 'ui.auth.quote_1', who: 'Frieren' },
+  register: { img: '/frieren/frieren-hero-banner-generated.jpg', quote: 'ui.auth.quote_2', who: 'Himmel' },
+  reset: { img: '/frieren/frieren-wide-scenery.jpg', quote: 'ui.auth.quote_3', who: 'Heiter' },
+};
+
+export function AuthShell({ title, sub, children, foot, art = 'login' }: { title: string; sub?: ReactNode; children: ReactNode; foot?: ReactNode; art?: keyof typeof ART }) {
   const t = useT();
-  const m = useManifest();
+  const a = ART[art] ?? ART.login;
   return (
-    <div className="auth">
-      <aside className="auth-side">
-        <HeroArt />
-        <h2>{t('ui.home.tagline', { site: m.site.name })}</h2>
-        <p>{t('ui.home.guest_body')}</p>
-      </aside>
-      <div className="auth-form">
-        <div className="brand-sm">
-          <Logo size={34} />
-          <strong>{m.site.name}</strong>
+    <div className="gate" data-primary>
+      <div className="gate-art" style={{ backgroundImage: `url(${a?.img})` }}>
+        <blockquote>
+          {t(a?.quote ?? '')}
+          <cite>— {a?.who}</cite>
+        </blockquote>
+      </div>
+      <div className="gate-form">
+        <div className="row-sb">
+          <Wordmark />
+          <ThemeButton />
         </div>
-        <h1>{title}</h1>
-        <p className="sub">{sub}</p>
+        <div>
+          <h1>{title}</h1>
+          {sub && <p className="muted gate-sub">{sub}</p>}
+        </div>
         {children}
-        <p className="switch">{foot}</p>
+        {foot && <div className="gate-alt">{foot}</div>}
       </div>
     </div>
   );
@@ -67,6 +72,7 @@ export function Login() {
   const t = useT();
   const s = useSession();
   const nav = useNavigate();
+  const loc = useLocation();
   const [binding, extra] = useBinding();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -80,8 +86,11 @@ export function Login() {
   // 每次提交失败加 1：验证码等插槽据此重置（令牌只能用一次）
   const [attempt, setAttempt] = useState(0);
   const [code, setCode] = useState('');
-  const st = useLocation().state as { registered?: boolean; reset?: boolean } | null;
-  const registered = st?.registered;
+  const st = loc.state as { registered?: boolean; reset?: boolean; from?: string } | null;
+  const done = async () => {
+    await s.refresh();
+    nav(st?.from && st.from.startsWith('/') ? st.from : '/');
+  };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -99,8 +108,7 @@ export function Login() {
           return;
         }
       }
-      await s.refresh();
-      nav('/');
+      await done();
     } catch (err) {
       if (err instanceof ApiError && err.code === 'identity.ticket_invalid') {
         setTicket(null);
@@ -124,73 +132,76 @@ export function Login() {
         const o = await api<{ ceremony_id: string; public_key: Record<string, unknown> }>('/api/p/identity/v1/webauthn/assertion-options', { json: {} });
         await api('/api/p/identity/v1/sessions/webauthn', { json: { ceremony_id: o.ceremony_id, assertion: await getAssertion(o.public_key) } });
       }
-      await s.refresh();
-      nav('/');
+      await done();
     } catch (err) {
       setError(err);
     } finally {
       setBusy(false);
     }
   };
+  if (ticket) {
+    return (
+      <AuthShell title={t('ui.two_factor.title')} sub={t('ui.two_factor.code_hint')}>
+        <form className="form" onSubmit={submit}>
+          <Field label={t('ui.two_factor.code')}>
+            <Input name="code" className="code-in" autoComplete="one-time-code" inputMode="text" autoFocus value={code} onChange={(e) => setCode(e.target.value)} required maxLength={16} />
+          </Field>
+          <ErrorText error={error} />
+          <Button type="submit" variant="primary" size="lg" disabled={busy}>
+            {t('ui.two_factor.verify')}
+          </Button>
+          {methods.includes('webauthn') && webauthnSupported() && (
+            <Button size="lg" onClick={withKey} disabled={busy}>
+              {t('ui.webauthn.use_key')}
+            </Button>
+          )}
+          <button type="button" className="txt-btn" onClick={() => setTicket(null)}>
+            ‹ {t('ui.login.back')}
+          </button>
+        </form>
+      </AuthShell>
+    );
+  }
   return (
     <AuthShell
       title={t('ui.login.title')}
       sub={t('ui.login.sub')}
       foot={
         <>
-          {t('ui.login.no_account')} <Link to="/register">{t('ui.nav.register')}</Link>
+          <span className="muted">{t('ui.login.no_account')}</span>
+          <Link to="/register">{t('ui.nav.register')}</Link>
         </>
       }
     >
-      {registered && <p className="notice">{t('ui.register.done')}</p>}
-      {st?.reset && <p className="notice">{t('ui.reset.done')}</p>}
-      {ticket ? (
-        <form onSubmit={submit}>
-          <Field label={t('ui.two_factor.code')} hint={t('ui.two_factor.code_hint')}>
-            <Input name="code" autoComplete="one-time-code" inputMode="text" autoFocus value={code} onChange={(e) => setCode(e.target.value)} required maxLength={16} />
-          </Field>
-          <ErrorText error={error} />
-          <Button type="submit" variant="primary" disabled={busy}>
-            {t('ui.two_factor.verify')}
-          </Button>
-          {methods.includes('webauthn') && webauthnSupported() && (
-            <>
-              {' '}
-              <Button type="button" onClick={withKey} disabled={busy}>
-                {t('ui.webauthn.use_key')}
-              </Button>
-            </>
-          )}
-        </form>
-      ) : (
-        <form onSubmit={submit}>
-          <Field label={t('ui.login.username')}>
-            <Input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-          </Field>
-          <Field label={t('ui.login.password')}>
-            <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          </Field>
-          <Slot name="auth.login.extra" ctx={{ form: binding, attempt }} />
-          <label className="pt-check">
-            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> {t('ui.login.remember')}
-          </label>
-          <ErrorText error={error} />
-          <Button type="submit" variant="primary" disabled={busy}>
-            {t('ui.login.submit')}
-          </Button>
-          {webauthnSupported() && (
-            <>
-              {' '}
-              <Button type="button" onClick={withKey} disabled={busy}>
-                {t('ui.webauthn.passwordless')}
-              </Button>
-            </>
-          )}
-          <p className="small">
-            <Link to="/reset-password">{t('ui.reset.forgot')}</Link>
-          </p>
-        </form>
-      )}
+      {st?.registered && <Note tone="ok">{t('ui.register.done')}</Note>}
+      {st?.reset && <Note tone="ok">{t('ui.reset.done')}</Note>}
+      <form className="form" onSubmit={submit}>
+        <Field label={t('ui.login.username')}>
+          <Input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        </Field>
+        <Field label={t('ui.login.password')}>
+          <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </Field>
+        <Slot name="auth.login.extra" ctx={{ form: binding, attempt }} />
+        <div className="row-sb">
+          <Checkbox label={t('ui.login.remember')} checked={remember} onChange={setRemember} />
+          <Link className="link small" to="/reset-password">
+            {t('ui.reset.forgot')}
+          </Link>
+        </div>
+        <ErrorText error={error} />
+        <Button type="submit" variant="primary" size="lg" disabled={busy}>
+          {t('ui.login.submit')}
+        </Button>
+        {webauthnSupported() && (
+          <>
+            <div className="or">{t('ui.login.or')}</div>
+            <Button size="lg" onClick={withKey} disabled={busy}>
+              {t('ui.webauthn.passwordless')}
+            </Button>
+          </>
+        )}
+      </form>
     </AuthShell>
   );
 }
@@ -217,30 +228,33 @@ export function Register() {
       setBusy(false);
     }
   };
-  const field = (k: keyof typeof f, label: string, type = 'text', ac?: string) => (
-    <Field label={label}>
-      <Input name={k} type={type} autoComplete={ac} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} required />
+  const field = (k: keyof typeof f, label: string, type = 'text', ac?: string, hint?: string) => (
+    <Field label={label} hint={hint}>
+      <Input name={k} type={type} autoComplete={ac} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} required minLength={k === 'password' ? 8 : undefined} />
     </Field>
   );
   return (
     <AuthShell
+      art="register"
       title={t('ui.register.title')}
       sub={t('ui.register.sub')}
       foot={
         <>
-          {t('ui.register.have_account')} <Link to="/login">{t('ui.nav.login')}</Link>
+          <span className="muted">{t('ui.register.have_account')}</span>
+          <Link to="/login">{t('ui.nav.login')}</Link>
         </>
       }
     >
-      <form onSubmit={submit}>
+      <form className="form" onSubmit={submit}>
+        <Slot name="auth.register.form_extra" ctx={{ form: binding, attempt }} className="stack-s" />
         {field('username', t('ui.login.username'), 'text', 'username')}
         {field('email', t('ui.register.email'), 'email', 'email')}
-        {field('password', t('ui.login.password'), 'password', 'new-password')}
-        <Slot name="auth.register.form_extra" ctx={{ form: binding, attempt }} />
+        {field('password', t('ui.login.password'), 'password', 'new-password', t('ui.register.password_hint'))}
         <ErrorText error={error} />
-        <Button type="submit" variant="primary" disabled={busy}>
+        <Button type="submit" variant="primary" size="lg" disabled={busy}>
           {t('ui.register.submit')}
         </Button>
+        <span className="tiny muted">{t('ui.register.after_hint')}</span>
       </form>
     </AuthShell>
   );
@@ -286,13 +300,10 @@ export function ResetPassword() {
     }
   };
   return (
-    <AuthShell
-      title={t('ui.reset.title')}
-      sub={challenge ? t('ui.reset.sub_new') : t('ui.reset.sub_request')}
-      foot={<Link to="/login">{t('ui.nav.login')}</Link>}
-    >
+    <AuthShell art="reset" title={t('ui.reset.title')} sub={challenge ? t('ui.reset.sub_new') : t('ui.reset.sub_request')} foot={<Link to="/login">‹ {t('ui.login.back_login')}</Link>}>
       {challenge ? (
         <form
+          className="form"
           onSubmit={(e) =>
             run(e, async () => {
               await api('/api/p/identity/v1/password-resets/confirm', { json: { challenge_id: challenge.c, token: challenge.t, new_password: pw } });
@@ -304,14 +315,15 @@ export function ResetPassword() {
             <Input name="new_password" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={8} />
           </Field>
           <ErrorText error={error} />
-          <Button type="submit" variant="primary" disabled={busy}>
+          <Button type="submit" variant="primary" size="lg" disabled={busy}>
             {t('ui.reset.set')}
           </Button>
         </form>
       ) : sent ? (
-        <p className="notice">{t('ui.reset.sent')}</p>
+        <Note tone="ok">{t('ui.reset.sent')}</Note>
       ) : (
         <form
+          className="form"
           onSubmit={(e) =>
             run(e, async () => {
               await api('/api/p/identity/v1/password-resets', { json: { login, ...splitExtra(extra) } });
@@ -324,7 +336,7 @@ export function ResetPassword() {
           </Field>
           <Slot name="auth.reset.extra" ctx={{ form: binding, attempt }} />
           <ErrorText error={error} />
-          <Button type="submit" variant="primary" disabled={busy}>
+          <Button type="submit" variant="primary" size="lg" disabled={busy}>
             {t('ui.reset.send')}
           </Button>
         </form>
@@ -350,9 +362,21 @@ export function VerifyEmail() {
       .catch((e: unknown) => setState(e));
   }, [challenge, s]);
   return (
-    <AuthShell title={t('ui.verify.title')} sub="" foot={<Link to="/">{t('ui.nav.home')}</Link>}>
-      {state === 'busy' && <p>…</p>}
-      {state === 'ok' && <p className="notice">{t('ui.verify.done')}</p>}
+    <AuthShell art="register" title={t('ui.verify.title')} foot={<Link to="/">{t('ui.nav.home')}</Link>}>
+      {state === 'busy' && <p className="muted">…</p>}
+      {state === 'ok' && (
+        <>
+          <Note tone="ok">{t('ui.verify.done')}</Note>
+          <div className="row">
+            <Link className="btn btn-primary" to="/help">
+              {t('ui.help.title')}
+            </Link>
+            <Link className="btn" to="/">
+              {t('ui.nav.home')}
+            </Link>
+          </div>
+        </>
+      )}
       {state !== 'busy' && state !== 'ok' && <ErrorText error={state ?? new Error(t('identity.challenge_invalid'))} />}
     </AuthShell>
   );

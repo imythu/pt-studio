@@ -1,9 +1,9 @@
 // shop 前端：魔力值商城（商品、购买、我的订单）、后台商品管理与订单。
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Badge, Button, Card, Field, Input, Table } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Empty, Field, Input, NavItem, Note, PageHead, Panel, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, type Column } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'shop.ui.nav': '商城',
@@ -44,6 +44,24 @@ registerMessages('zh-CN', {
   'shop.kind.medal': '勋章 / 头衔',
   'shop.kind.vip': 'VIP',
   'shop.ui.days': '{n} 天',
+  'shop.ui.total': '合计',
+  'shop.ui.my_balance': '我的魔力值',
+  'shop.ui.user': '用户',
+  'shop.ui.item': '商品',
+  'shop.ui.paid': '花费',
+  'shop.ui.state': '状态',
+  'shop.ui.time': '时间',
+  'shop.ui.saved': '已保存',
+  'shop.ui.cancel': '取消',
+  'shop.ui.price_label': '价格（魔力值）',
+  'shop.ui.stock_col': '库存',
+  'shop.ui.on_sale': '上架中',
+  'shop.ui.off_sale': '已下架',
+  'shop.ui.edit': '编辑',
+  'shop.ui.period_opt.none': '不按周期（总计）',
+  'shop.ui.period_opt.day': '每天',
+  'shop.ui.period_opt.week': '每周',
+  'shop.ui.period_opt.month': '每月',
   'shop.unavailable': '商品不可购买',
   'shop.sold_out': '已售罄',
   'shop.limit_reached': '已达到限购数量',
@@ -90,6 +108,24 @@ registerMessages('en', {
   'shop.kind.medal': 'Medal / title',
   'shop.kind.vip': 'VIP',
   'shop.ui.days': '{n} days',
+  'shop.ui.total': 'Total',
+  'shop.ui.my_balance': 'My bonus',
+  'shop.ui.user': 'User',
+  'shop.ui.item': 'Item',
+  'shop.ui.paid': 'Paid',
+  'shop.ui.state': 'State',
+  'shop.ui.time': 'Time',
+  'shop.ui.saved': 'Saved',
+  'shop.ui.cancel': 'Cancel',
+  'shop.ui.price_label': 'Price (bonus)',
+  'shop.ui.stock_col': 'Stock',
+  'shop.ui.on_sale': 'on sale',
+  'shop.ui.off_sale': 'off sale',
+  'shop.ui.edit': 'Edit',
+  'shop.ui.period_opt.none': 'Lifetime',
+  'shop.ui.period_opt.day': 'Per day',
+  'shop.ui.period_opt.week': 'Per week',
+  'shop.ui.period_opt.month': 'Per month',
   'shop.unavailable': 'This item is not available',
   'shop.sold_out': 'Sold out',
   'shop.limit_reached': 'You have reached the purchase limit',
@@ -135,51 +171,90 @@ function summary(api: PluginApi, it: Item): string {
   }
 }
 
-function BuyBox({ api, it, done }: { api: PluginApi; it: Item; done(): void }) {
+/** 购买抽屉：数量（或要消除的 H&R 记录）与合计，确认后下单 */
+function BuySheet({ api, it, balance, onClose, done }: { api: PluginApi; it: Item | null; balance: number | null; onClose(): void; done(): void }) {
   const [qty, setQty] = useState(1);
-  const [records, setRecords] = useState<{ id: number; torrent_id: number; state: string }[] | null>(null);
+  const [records, setRecords] = useState<{ id: number; torrent_id: number; title?: string | null; state: string }[] | null>(null);
   const [record, setRecord] = useState('');
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (it.kind !== 'hnr_removal') return;
+    setQty(1);
+    setRecord('');
+    if (it?.kind !== 'hnr_removal') return;
     void api
-      .json<{ items: { id: number; torrent_id: number; state: string }[] }>('/api/p/hnr/v1/me/records')
+      .json<{ items: { id: number; torrent_id: number; title?: string | null; state: string }[] }>('/api/p/hnr/v1/me/records')
       .then((r) => setRecords(r.items.filter((x) => x.state === 'active' || x.state === 'failed')))
       .catch(() => setRecords([]));
-  }, [api, it.kind]);
-  const soldOut = it.stock !== null && it.stock <= 0;
-  const limited = it.per_user_limit > 0 && (it.bought ?? 0) >= it.per_user_limit;
+  }, [api, it]);
+  if (!it) return null;
+  const single = it.kind === 'hnr_removal' || it.kind === 'medal';
+  const total = it.price * (single ? 1 : qty);
+  const short = balance !== null && balance < total;
   const buy = async () => {
+    setBusy(true);
     try {
-      await api.json(`/api/p/shop/v1/items/${it.id}/purchase`, { json: { quantity: qty, ...(record ? { record_id: Number(record) } : {}) } });
+      await api.json(`/api/p/shop/v1/items/${it.id}/purchase`, { json: { quantity: single ? 1 : qty, ...(record ? { record_id: Number(record) } : {}) } });
       api.toast(api.t('shop.ui.bought'), 'success');
+      onClose();
       done();
     } catch (e) {
       api.toast(errText(api, e), 'error');
+    } finally {
+      setBusy(false);
     }
   };
-  const single = it.kind === 'hnr_removal';
   return (
-    <div className="shop-buy">
-      {single ? (
-        records && records.length === 0 ? (
-          <span className="pt-muted small">{api.t('shop.ui.no_records')}</span>
+    <Sheet
+      open
+      onClose={onClose}
+      title={it.title}
+      footer={
+        <>
+          <span className="price">{total.toLocaleString()}</span>
+          <Button variant="primary" className="push-right" disabled={busy || short || (it.kind === 'hnr_removal' && !record)} onClick={() => void buy()}>
+            {api.t('shop.ui.buy')}
+          </Button>
+        </>
+      }
+    >
+      <div className="form">
+        <p className="small">
+          <Tag tone="o">{api.t(`shop.kind.${it.kind}`)}</Tag> {summary(api, it)}
+        </p>
+        {it.description && <p className="small muted">{it.description}</p>}
+        {it.kind === 'hnr_removal' ? (
+          records && records.length === 0 ? (
+            <Note>{api.t('shop.ui.no_records')}</Note>
+          ) : (
+            <Field label={api.t('shop.ui.record')}>
+              <Select
+                name="shop_record"
+                value={record}
+                onChange={(e) => setRecord(e.target.value)}
+                options={[{ value: '', label: '—' }, ...(records ?? []).map((r) => ({ value: String(r.id), label: `${r.title ?? `#${r.torrent_id}`} · ${r.state}` }))]}
+              />
+            </Field>
+          )
         ) : (
-          <select className="pt-input" aria-label={api.t('shop.ui.record')} value={record} onChange={(e) => setRecord(e.target.value)}>
-            <option value="">{api.t('shop.ui.record')}</option>
-            {(records ?? []).map((r) => (
-              <option key={r.id} value={r.id}>
-                #{r.torrent_id} · {r.state}
-              </option>
-            ))}
-          </select>
-        )
-      ) : it.kind === 'medal' ? null : (
-        <Input type="number" aria-label={api.t('shop.ui.quantity')} min={1} max={10} value={qty} onChange={(e) => setQty(Math.max(1, Math.min(10, Number(e.target.value) || 1)))} />
-      )}
-      <Button variant="primary" disabled={soldOut || limited || (single && !record)} onClick={() => void buy()}>
-        {api.t('shop.ui.buy')}
-      </Button>
-    </div>
+          !single && (
+            <Field label={api.t('shop.ui.quantity')}>
+              <Input name="shop_qty" type="number" min={1} max={10} value={qty} onChange={(e) => setQty(Math.max(1, Math.min(10, Number(e.target.value) || 1)))} />
+            </Field>
+          )
+        )}
+        <dl className="ledger">
+          <dt>{api.t('shop.ui.total')}</dt>
+          <dd className="num">{total.toLocaleString()}</dd>
+          {balance !== null && (
+            <>
+              <dt>{api.t('shop.ui.my_balance')}</dt>
+              <dd className={short ? 'num down' : 'num'}>{balance.toLocaleString()}</dd>
+            </>
+          )}
+        </dl>
+        {short && <Note tone="bad">{api.t('shop.insufficient_funds')}</Note>}
+      </div>
+    </Sheet>
   );
 }
 
@@ -193,10 +268,20 @@ interface Order {
   username?: string | null;
 }
 
+const orderCols = (api: PluginApi, withUser?: boolean): Column<Order>[] => [
+  ...(withUser ? [{ key: 'u', header: api.t('shop.ui.user'), render: (r: Order) => r.username ?? '?' }] : []),
+  { key: 'i', header: api.t('shop.ui.item'), render: (r) => `${r.item_title} × ${r.quantity}` },
+  { key: 'p', header: api.t('shop.ui.paid'), right: true, render: (r) => <span className="num gold">{r.total.toLocaleString()}</span> },
+  { key: 's', header: api.t('shop.ui.state'), render: (r) => <Status tone={r.state === 'fulfilled' || r.state === 'done' ? 'ok' : r.state === 'refunded' || r.state === 'failed' ? 'bad' : 'mute'}>{r.state}</Status> },
+  { key: 'd', header: api.t('shop.ui.time'), right: true, render: (r) => <span className="small muted num nowrap">{new Date(r.created_at).toLocaleString()}</span> },
+];
+
 function Shop({ api }: { api: PluginApi }) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [balance, setBalance] = useState<number | null>(null);
+  const [buying, setBuying] = useState<Item | null>(null);
+  const [tab, setTab] = useState('goods');
   const load = () => {
     void api.json<{ items: Item[] }>('/api/p/shop/v1/items').then((r) => setItems(r.items));
     void api.json<{ items: Order[] }>('/api/p/shop/v1/orders').then((r) => setOrders(r.items));
@@ -206,42 +291,58 @@ function Shop({ api }: { api: PluginApi }) {
       .catch(() => undefined);
   };
   useEffect(load, [api]);
-  if (!items) return null;
+  if (!items) return <SkeletonRows n={6} />;
   return (
-    <div className="pt-stack">
-      <h1 className="page-title">{api.t('shop.ui.title')}</h1>
-      {balance !== null && <p className="pt-muted">{api.t('shop.ui.balance', { n: balance })}</p>}
-      {items.length === 0 && <p className="pt-muted">{api.t('shop.ui.empty')}</p>}
-      <div className="shop-grid">
-        {items.map((it) => (
-          <Card key={it.id} title={it.title}>
-            <p>
-              <Badge tone="primary">{api.t(`shop.kind.${it.kind}`)}</Badge> {summary(api, it)}
-            </p>
-            {it.description && <p className="small">{it.description}</p>}
-            <p>
-              <strong>{api.t('shop.ui.price', { n: it.price })}</strong>{' '}
-              {it.stock !== null && <span className="pt-muted small">{it.stock > 0 ? api.t('shop.ui.stock', { n: it.stock }) : api.t('shop.ui.sold_out')}</span>}
-            </p>
-            {it.per_user_limit > 0 && (
-              <p className="pt-muted small">{api.t('shop.ui.limit', { n: it.per_user_limit, period: api.t(`shop.ui.period.${it.limit_period}`), used: it.bought ?? 0 })}</p>
-            )}
-            <BuyBox api={api} it={it} done={load} />
-          </Card>
-        ))}
-      </div>
-      <Card title={api.t('shop.ui.orders')}>
-        <Table
-          rows={orders}
-          rowKey={(r) => r.id}
-          empty="—"
-          columns={[
-            { key: 'i', header: '', render: (r) => `${r.item_title} × ${r.quantity}` },
-            { key: 'p', header: '', render: (r) => api.t('shop.ui.price', { n: r.total }) },
-            { key: 'd', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-          ]}
-        />
-      </Card>
+    <div className="stack">
+      <PageHead title={api.t('shop.ui.title')} lede={balance !== null ? api.t('shop.ui.balance', { n: balance.toLocaleString() }) : undefined} />
+      <Tabs
+        variant="sub"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'goods', label: api.t('shop.ui.items'), count: items.length },
+          { id: 'orders', label: api.t('shop.ui.orders'), count: orders.length },
+        ]}
+      />
+      {tab === 'goods' ? (
+        items.length === 0 ? (
+          <Panel>
+            <Empty compact>{api.t('shop.ui.empty')}</Empty>
+          </Panel>
+        ) : (
+          <div className="goods" data-primary>
+            {items.map((it) => {
+              const soldOut = it.stock !== null && it.stock <= 0;
+              const limited = it.per_user_limit > 0 && (it.bought ?? 0) >= it.per_user_limit;
+              return (
+                <article key={it.id} className={soldOut || limited ? 'good out' : 'good'}>
+                  <div className="good-top">
+                    <span className="good-k">{api.t(`shop.kind.${it.kind}`)}</span>
+                    <h3>{it.title}</h3>
+                    <span className="small muted">{summary(api, it)}</span>
+                  </div>
+                  <p className="good-d">{it.description}</p>
+                  {it.per_user_limit > 0 && <p className="good-lim">{api.t('shop.ui.limit', { n: it.per_user_limit, period: api.t(`shop.ui.period.${it.limit_period}`), used: it.bought ?? 0 })}</p>}
+                  <div className="good-f">
+                    <span>
+                      <span className="price">{it.price.toLocaleString()}</span>
+                      {it.stock !== null && <span className="tiny muted">{` · ${it.stock > 0 ? api.t('shop.ui.stock', { n: it.stock }) : api.t('shop.ui.sold_out')}`}</span>}
+                    </span>
+                    <Button size="sm" variant="primary" disabled={soldOut || limited} onClick={() => setBuying(it)}>
+                      {soldOut ? api.t('shop.ui.sold_out') : api.t('shop.ui.buy')}
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        <Panel flush primary>
+          <Table rows={orders} rowKey={(r) => r.id} empty="—" columns={orderCols(api)} />
+        </Panel>
+      )}
+      <BuySheet api={api} it={buying} balance={balance} onClose={() => setBuying(null)} done={load} />
     </div>
   );
 }
@@ -258,10 +359,24 @@ const PARAM_HINT: Record<string, string> = {
 
 type Draft = { kind: string; title: string; description: string; price: string; params: string; stock: string; per_user_limit: string; limit_period: string; active: boolean };
 const blank: Draft = { kind: 'upload_credit', title: '', description: '', price: '100', params: PARAM_HINT.upload_credit ?? '{}', stock: '', per_user_limit: '0', limit_period: 'none', active: true };
+const toDraft = (it: Item): Draft => ({
+  kind: it.kind,
+  title: it.title,
+  description: it.description,
+  price: String(it.price),
+  params: JSON.stringify(it.params),
+  stock: it.stock === null ? '' : String(it.stock),
+  per_user_limit: String(it.per_user_limit),
+  limit_period: it.limit_period,
+  active: it.active,
+});
 
-function ItemForm({ api, init, id, done }: { api: PluginApi; init: Draft; id?: number; done(): void }) {
-  const [f, setF] = useState<Draft>(init);
-  const save = async () => {
+/** 商品新建 / 编辑抽屉 */
+function ItemSheet({ api, item, open, onClose, done }: { api: PluginApi; item?: Item; open: boolean; onClose(): void; done(): void }) {
+  const [f, setF] = useState<Draft>(item ? toDraft(item) : blank);
+  const formId = item ? 'shop-item-edit' : 'shop-item-new';
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
     try {
       const body = {
         kind: f.kind,
@@ -274,168 +389,158 @@ function ItemForm({ api, init, id, done }: { api: PluginApi; init: Draft; id?: n
         limit_period: f.limit_period,
         active: f.active,
       };
-      if (id) await api.json(`/api/p/shop/v1/admin/items/${id}`, { method: 'PATCH', json: body });
+      if (item) await api.json(`/api/p/shop/v1/admin/items/${item.id}`, { method: 'PATCH', json: body });
       else await api.json('/api/p/shop/v1/admin/items', { json: body });
-      api.toast(api.t('shop.ui.save'), 'success');
+      api.toast(api.t('shop.ui.saved'), 'success');
+      if (!item) setF(blank);
+      onClose();
       done();
-    } catch (e) {
-      api.toast(errText(api, e), 'error');
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
     }
   };
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save();
-      }}
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={item ? item.title : api.t('shop.ui.new_item')}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            {api.t('shop.ui.cancel')}
+          </Button>
+          <Button type="submit" form={formId} variant="primary">
+            {api.t('shop.ui.save')}
+          </Button>
+        </>
+      }
     >
-      <Field label={api.t('shop.ui.kind')}>
-        <select className="pt-input" name="item_kind" value={f.kind} disabled={!!id} onChange={(e) => setF({ ...f, kind: e.target.value, params: PARAM_HINT[e.target.value] ?? '{}' })}>
-          {KINDS.map((k) => (
-            <option key={k} value={k}>
-              {api.t(`shop.kind.${k}`)}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label={api.t('shop.ui.name')}>
-        <Input name="item_title" value={f.title} maxLength={100} required onChange={(e) => setF({ ...f, title: e.target.value })} />
-      </Field>
-      <Field label={api.t('shop.ui.description')}>
-        <Input value={f.description} maxLength={500} onChange={(e) => setF({ ...f, description: e.target.value })} />
-      </Field>
-      <Field label={api.t('shop.ui.price', { n: '' }).trim()}>
-        <Input name="item_price" type="number" min={1} value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
-      </Field>
-      <Field label={api.t('shop.ui.params')}>
-        <Input name="item_params" className="pt-mono" value={f.params} onChange={(e) => setF({ ...f, params: e.target.value })} />
-      </Field>
-      <Field label={api.t('shop.ui.stock_input')}>
-        <Input type="number" min={0} value={f.stock} onChange={(e) => setF({ ...f, stock: e.target.value })} />
-      </Field>
-      <Field label={api.t('shop.ui.per_user')}>
-        <Input type="number" min={0} value={f.per_user_limit} onChange={(e) => setF({ ...f, per_user_limit: e.target.value })} />
-      </Field>
-      <Field label={api.t('shop.ui.period')}>
-        <select className="pt-input" value={f.limit_period} onChange={(e) => setF({ ...f, limit_period: e.target.value })}>
-          {['none', 'day', 'week', 'month'].map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <label className="pt-check">
-        <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> {api.t('shop.ui.active')}
-      </label>
-      <Button type="submit" variant="primary">
-        {api.t('shop.ui.save')}
-      </Button>
-    </form>
+      <form id={formId} className="form" onSubmit={(e) => void save(e)}>
+        <Field label={api.t('shop.ui.kind')}>
+          <Select
+            name="item_kind"
+            value={f.kind}
+            disabled={!!item}
+            onChange={(e) => setF({ ...f, kind: e.target.value, params: PARAM_HINT[e.target.value] ?? '{}' })}
+            options={KINDS.map((k) => ({ value: k, label: api.t(`shop.kind.${k}`) }))}
+          />
+        </Field>
+        <Field label={api.t('shop.ui.name')}>
+          <Input name="item_title" value={f.title} maxLength={100} required onChange={(e) => setF({ ...f, title: e.target.value })} />
+        </Field>
+        <Field label={api.t('shop.ui.description')}>
+          <Input name="item_description" value={f.description} maxLength={500} onChange={(e) => setF({ ...f, description: e.target.value })} />
+        </Field>
+        <div className="form-2">
+          <Field label={api.t('shop.ui.price_label')}>
+            <Input name="item_price" type="number" min={1} value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
+          </Field>
+          <Field label={api.t('shop.ui.stock_input')}>
+            <Input name="item_stock" type="number" min={0} value={f.stock} onChange={(e) => setF({ ...f, stock: e.target.value })} />
+          </Field>
+          <Field label={api.t('shop.ui.per_user')}>
+            <Input name="item_limit" type="number" min={0} value={f.per_user_limit} onChange={(e) => setF({ ...f, per_user_limit: e.target.value })} />
+          </Field>
+          <Field label={api.t('shop.ui.period')}>
+            <Select name="item_period" value={f.limit_period} onChange={(e) => setF({ ...f, limit_period: e.target.value })} options={['none', 'day', 'week', 'month'].map((p) => ({ value: p, label: api.t(`shop.ui.period_opt.${p}`) }))} />
+          </Field>
+        </div>
+        <Field label={api.t('shop.ui.params')}>
+          <Input name="item_params" className="in pt-mono" value={f.params} onChange={(e) => setF({ ...f, params: e.target.value })} />
+        </Field>
+        <Checkbox checked={f.active} onChange={(v) => setF({ ...f, active: v })} label={api.t('shop.ui.active')} />
+      </form>
+    </Sheet>
   );
 }
 
 function Admin({ api }: { api: PluginApi }) {
-  const [items, setItems] = useState<Item[]>([]);
+  const [items, setItems] = useState<Item[] | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [editing, setEditing] = useState<number | null>(null);
+  const [editing, setEditing] = useState<Item | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState('items');
   const load = () => {
     void api.json<{ items: Item[] }>('/api/p/shop/v1/admin/items').then((r) => setItems(r.items));
     void api.json<{ items: Order[] }>('/api/p/shop/v1/admin/orders').then((r) => setOrders(r.items));
   };
   useEffect(load, [api]);
-  const toDraft = (it: Item): Draft => ({
-    kind: it.kind,
-    title: it.title,
-    description: it.description,
-    price: String(it.price),
-    params: JSON.stringify(it.params),
-    stock: it.stock === null ? '' : String(it.stock),
-    per_user_limit: String(it.per_user_limit),
-    limit_period: it.limit_period,
-    active: it.active,
-  });
   return (
-    <div className="pt-stack">
-      <Card title={api.t('shop.ui.items')}>
-        <Table
-          rows={items}
-          rowKey={(r) => r.id}
-          empty={api.t('shop.ui.empty')}
-          columns={[
-            {
-              key: 't',
-              header: '',
-              render: (r) =>
-                editing === r.id ? (
-                  <ItemForm
-                    api={api}
-                    init={toDraft(r)}
-                    id={r.id}
-                    done={() => {
-                      setEditing(null);
-                      load();
-                    }}
-                  />
-                ) : (
+    <div className="stack">
+      <PageHead
+        title={api.t('shop.ui.admin')}
+        actions={
+          <Button variant="primary" onClick={() => setCreating(true)}>
+            {api.t('shop.ui.new_item')}
+          </Button>
+        }
+      />
+      <Panel flush primary>
+        <Tabs
+          variant="flush"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { id: 'items', label: api.t('shop.ui.items'), count: items?.length },
+            { id: 'orders', label: api.t('shop.ui.all_orders') },
+          ]}
+        />
+        {tab === 'orders' ? (
+          <Table rows={orders} rowKey={(r) => r.id} empty="—" columns={orderCols(api, true)} />
+        ) : items === null ? (
+          <SkeletonRows n={5} />
+        ) : (
+          <Table
+            rows={items}
+            rowKey={(r) => r.id}
+            empty={api.t('shop.ui.empty')}
+            onRowClick={(r) => setEditing(r)}
+            minWidth={640}
+            columns={[
+              {
+                key: 't',
+                header: api.t('shop.ui.name'),
+                render: (r) => (
                   <>
-                    {r.title} <Badge tone={r.active ? 'success' : 'muted'}>{api.t(`shop.kind.${r.kind}`)}</Badge>
-                    <div className="pt-muted small">
-                      {api.t('shop.ui.price', { n: r.price })} · {summary(api, r)}
-                      {r.stock !== null ? ` · ${api.t('shop.ui.stock', { n: r.stock })}` : ''}
-                    </div>
+                    <b>{r.title}</b>
+                    <div className="tiny muted">{summary(api, r)}</div>
                   </>
                 ),
-            },
-            {
-              key: 'e',
-              header: '',
-              render: (r) =>
-                editing === r.id ? null : (
-                  <Button variant="ghost" onClick={() => setEditing(r.id)}>
-                    ✎
+              },
+              { key: 'k', header: api.t('shop.ui.kind'), render: (r) => <Tag>{api.t(`shop.kind.${r.kind}`)}</Tag> },
+              { key: 'p', header: api.t('shop.ui.price_label'), right: true, render: (r) => <span className="num gold">{r.price.toLocaleString()}</span> },
+              { key: 's', header: api.t('shop.ui.stock_col'), right: true, render: (r) => <span className="num">{r.stock ?? '∞'}</span> },
+              { key: 'a', header: api.t('shop.ui.state'), render: (r) => <Status tone={r.active ? 'ok' : 'mute'}>{api.t(r.active ? 'shop.ui.on_sale' : 'shop.ui.off_sale')}</Status> },
+              {
+                key: 'e',
+                header: '',
+                right: true,
+                render: (r) => (
+                  <Button size="xs" variant="ghost" onClick={() => setEditing(r)}>
+                    {api.t('shop.ui.edit')}
                   </Button>
                 ),
-            },
-          ]}
-        />
-      </Card>
-      <Card title={api.t('shop.ui.new_item')}>
-        <ItemForm api={api} init={blank} done={load} />
-      </Card>
-      <Card title={api.t('shop.ui.all_orders')}>
-        <Table
-          rows={orders}
-          rowKey={(r) => r.id}
-          empty="—"
-          columns={[
-            { key: 'u', header: '', render: (r) => r.username ?? '?' },
-            { key: 'i', header: '', render: (r) => `${r.item_title} × ${r.quantity}` },
-            { key: 'p', header: '', render: (r) => api.t('shop.ui.price', { n: r.total }) },
-            { key: 'd', header: '', render: (r) => <span className="pt-muted small">{new Date(r.created_at).toLocaleString()}</span> },
-          ]}
-        />
-      </Card>
+              },
+            ]}
+          />
+        )}
+      </Panel>
+      <ItemSheet key={editing?.id ?? 'none'} api={api} item={editing ?? undefined} open={editing !== null} onClose={() => setEditing(null)} done={load} />
+      <ItemSheet api={api} open={creating} onClose={() => setCreating(false)} done={load} />
     </div>
   );
 }
 
-function NavItem({ api }: SlotProps) {
+function MenuItem({ api }: SlotProps) {
   return (
-    <a
-      href="/p/shop/"
-      onClick={(e) => {
-        e.preventDefault();
-        api.navigate('/p/shop/');
-      }}
-    >
+    <NavItem to="/p/shop/" navigate={api.navigate}>
       {api.t('shop.ui.nav')}
-    </a>
+    </NavItem>
   );
 }
 
 export default {
-  slots: { 'nav.user_menu': { component: NavItem, order: 50 } },
+  slots: { 'nav.user_menu': { component: MenuItem, order: 50 } },
   routes: [
     { path: '/p/shop/*', component: Shop },
     { path: '/admin/p/shop/*', component: Admin },

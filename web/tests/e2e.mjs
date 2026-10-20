@@ -44,15 +44,30 @@ async function login(page, user) {
   if (!(await page.getByRole('checkbox', { name: /保持登录/ }).isChecked())) throw new Error('remember me should default to checked');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.waitForURL(`${BASE}/`);
-  await page.getByRole('button', { name: '菜单' }).getByText(user, { exact: true }).waitFor();
+  await meCard(page).getByText(user, { exact: true }).waitFor();
   const sid = (await page.context().cookies()).find((c) => c.httpOnly && c.expires > 0);
   if (!sid || sid.expires * 1000 < Date.now() + 7 * 86400_000) throw new Error('session cookie is not persistent');
 }
 
-/** 打开顶栏用户菜单（重设计后用户名在菜单按钮里，个人主页 / 插件入口都在菜单中） */
+/** 侧栏“我的数据”卡片：用户名、流量摘要与站内信 / 通知 / 个人主页入口 */
+function meCard(page) {
+  return page.getByRole('region', { name: '我的数据' });
+}
+
+/** 窄屏时打开侧栏（桌面侧栏常驻，插件菜单项直接可见） */
 async function openMenu(page) {
-  const btn = page.getByRole('button', { name: '菜单' });
-  if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
+  const btn = page.locator('button.menu-btn');
+  if ((await btn.isVisible()) && (await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
+}
+
+/** 当前打开的抽屉（新建 / 编辑 / 确认都在抽屉里完成） */
+function sheet(page) {
+  return page.getByRole('dialog');
+}
+
+/** 侧栏导航里的插件入口（计数以单独元素显示在名称后） */
+function navLink(page, name) {
+  return page.getByRole('navigation', { name: '菜单' }).getByRole('link', { name });
 }
 
 /** RFC 6238 TOTP（SHA-1、6 位、30 秒），密钥为 base32 */
@@ -102,18 +117,18 @@ try {
   step('login and user menu slot');
   await login(p, 'web_bob');
   await openMenu(p);
-  await p.getByRole('link', { name: /邀请（\d+）/ }).waitFor();
-  await p.getByRole('link', { name: '等级说明' }).waitFor();
+  await navLink(p, /^邀请\s*\d+$/).waitFor();
+  await navLink(p, '等级说明').waitFor();
 
   // 3. 个人页：levels 插槽显示等级
   step('profile slots');
-  await p.getByRole('menuitem', { name: '个人主页' }).click();
+  await meCard(p).getByRole('link', { name: '个人主页' }).click();
   await p.getByRole('link', { name: '等级' }).waitFor();
   await p.getByText('用户', { exact: true }).waitFor({ timeout: 15000 });
   // 等级说明页（levels 插件路由）：全部等级与升级条件
   await p.getByRole('link', { name: '等级' }).click();
   await p.waitForURL(`${BASE}/p/levels/`);
-  await p.getByRole('columnheader', { name: '保级条件' }).waitFor();
+  await p.getByText('保级条件').first().waitFor();
   await p.getByText('养老族', { exact: true }).waitFor();
 
   // 4. 种子详情：hnr / promotion 插槽、下载链接
@@ -201,7 +216,7 @@ try {
   // 5. 插件页面路由
   step('plugin route /p/invite/');
   await openMenu(p);
-  await p.getByRole('link', { name: /邀请（\d+）/ }).click();
+  await navLink(p, /^邀请\s*\d+$/).click();
   await p.getByRole('heading', { name: '我的邀请' }).waitFor();
   await p.getByText('我邀请的人').waitFor();
 
@@ -209,12 +224,13 @@ try {
   step('admin settings');
   const a = await newPage();
   await login(a, ADMIN);
-  await a.getByRole('link', { name: '管理' }).click();
-  // 插件卡片列表 → 卡片上的“设置”入口；invite 声明了 schema，切到 JSON 页签编辑
-  const card = a.locator('.plugin-card').filter({ has: a.getByText(/^invite · v/) });
+  await a.getByRole('link', { name: '进入后台' }).click();
+  // 后台首页 → 插件列表 → 卡片上的“设置”入口；invite 声明了 schema，切到 JSON 页签编辑
+  await a.locator('a.plug[href="/admin/plugins"]').click();
+  const card = a.locator('.plug').filter({ has: a.getByText(/^invite · v/) });
   await card.getByRole('link', { name: '设置' }).click();
   await a.waitForURL(`${BASE}/admin/p/invite/settings`);
-  await a.getByRole('tab', { name: 'JSON' }).click();
+  await a.getByRole('button', { name: 'JSON', exact: true }).click();
   const editor = a.locator('textarea');
   await editor.waitFor();
   const cur = JSON.parse(await editor.inputValue());
@@ -254,6 +270,8 @@ try {
   const shown = await passkeyText();
   if (!/^[0-9a-f]{32}$/.test(shown.trim())) throw new Error(`passkey not shown: ${shown}`);
   await p.getByRole('button', { name: '重置 passkey' }).click();
+  await p.getByText('重置后旧的种子文件将无法汇报').waitFor();
+  await p.getByRole('button', { name: '重置 passkey' }).click();
   await p.getByText('passkey 已重置').waitFor();
   const reset = await passkeyText();
   if (reset === shown || !/^[0-9a-f]{32}$/.test(reset)) throw new Error('passkey was not reset');
@@ -278,7 +296,7 @@ try {
   await p.getByLabel('验证码').fill(recovery[0]);
   await p.getByRole('button', { name: '验证' }).click();
   await p.waitForURL(`${BASE}/`);
-  await p.getByRole('button', { name: '菜单' }).getByText('web_bob', { exact: true }).waitFor();
+  await meCard(p).getByText('web_bob', { exact: true }).waitFor();
 
   // 6c''. 安全密钥（Chromium 虚拟认证器）：添加 → 退出 → 免密码登录
   step('security key');
@@ -297,7 +315,7 @@ try {
   await p.goto(`${BASE}/login`);
   await p.getByRole('button', { name: '用安全密钥登录' }).click();
   await p.waitForURL(`${BASE}/`);
-  await p.getByRole('button', { name: '菜单' }).getByText('web_bob', { exact: true }).waitFor();
+  await meCard(p).getByText('web_bob', { exact: true }).waitFor();
 
   // 6d. 后台用户：查找、施加 / 解除限制
   step('admin users');
@@ -319,29 +337,33 @@ try {
   const getJson = (path) => a.evaluate(async (u) => (await fetch(u)).json(), path);
   await a.getByRole('tab', { name: '流量' }).click();
   const upBefore = (await getJson(`/api/p/accounting/v1/users/${bobId}/stats`)).uploaded;
+  await a.getByRole('button', { name: '调整流量' }).click();
   await a.locator('input[name=traffic_up]').fill('1');
   await a.locator('input[name=traffic_note]').fill('e2e 补偿');
-  await a.getByRole('button', { name: '调整流量' }).click();
+  await sheet(a).getByRole('button', { name: '调整流量' }).click();
   await a.waitForFunction(async ([u, before]) => (await (await fetch(u)).json()).uploaded === before + 1024 ** 3, [`/api/p/accounting/v1/users/${bobId}/stats`, upBefore]);
   await a.getByRole('tab', { name: '余额' }).click();
   const balUrl = `/api/p/ledger/v1/admin/users/${bobId}/balances`;
   const bonusOf = (r) => r.items.find((x) => x.currency === 'bonus') ?? { balance: 0, scale: 0 };
   const balBefore = bonusOf(await getJson(balUrl));
+  await a.getByRole('button', { name: '调整余额' }).click();
   await a.locator('input[name=ledger_amount]').fill('7');
   await a.locator('input[name=ledger_note]').fill('e2e 奖励');
-  await a.getByRole('button', { name: '调整余额' }).click();
+  await sheet(a).getByRole('button', { name: '调整余额' }).click();
   await a.waitForFunction(
     async ([u, want]) => ((await (await fetch(u)).json()).items.find((x) => x.currency === 'bonus')?.balance ?? 0) === want,
     [balUrl, balBefore.balance + 7 * 10 ** balBefore.scale],
   );
   await a.getByRole('tab', { name: '等级' }).click();
   await a.getByRole('button', { name: '保号' }).click();
+  await sheet(a).getByRole('button', { name: '保号' }).click();
   await a.getByText(/保号至/).waitFor();
   await a.getByRole('tab', { name: '邀请' }).click();
   const quotaBefore = (await getJson(`/api/p/invite/v1/admin/users/${bobId}/quota`)).balance;
+  await a.getByRole('button', { name: '调整名额' }).click();
   await a.locator('input[name=invite_delta]').fill('2');
   await a.locator('input[name=invite_reason]').fill('e2e 活动');
-  await a.getByRole('button', { name: '调整名额' }).click();
+  await sheet(a).getByRole('button', { name: '调整名额' }).click();
   await a.getByText(`邀请名额 ${quotaBefore + 2}`, { exact: false }).waitFor();
   await a.getByRole('tab', { name: '促销卡' }).click();
   await a.getByRole('button', { name: '调整' }).click();
@@ -351,8 +373,11 @@ try {
   step('plugin admin pages');
   await a.goto(`${BASE}/admin/p/invite/`);
   await a.getByRole('button', { name: '生成邀请' }).click();
+  await sheet(a).getByRole('button', { name: '生成邀请' }).click();
   await a.getByTestId('issued-invite').waitFor();
+  await sheet(a).getByRole('button', { name: '完成' }).click();
   await a.goto(`${BASE}/admin/p/promotion/`);
+  await a.getByRole('button', { name: '发起全站活动' }).click();
   await a.locator('select[name=event_kind]').selectOption('double_up');
   await a.locator('input[name=event_ends]').fill(new Date(Date.now() + 3_600_000 - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
   await a.locator('input[name=event_title_zh]').fill('网页 2x 活动');
@@ -374,18 +399,20 @@ try {
   await a.getByRole('heading', { name: '货币设置' }).waitFor();
   await a.goto(`${BASE}/admin/p/moderation/`);
   await a.getByRole('tab', { name: '敏感词' }).click();
-  await a.locator('input[name=word_pattern]').fill('网页违禁词');
-  await a.getByRole('button', { name: '添加', exact: true }).click();
+  await a.getByRole('button', { name: '添加敏感词' }).click();
+  await sheet(a).locator('input[name=word_pattern]').fill('网页违禁词');
+  await sheet(a).getByRole('button', { name: '添加', exact: true }).click();
   await a.getByRole('cell', { name: '网页违禁词' }).waitFor();
   await a.getByRole('tab', { name: '审核记录' }).click();
   await a.getByRole('button', { name: '筛选' }).waitFor();
   await a.goto(`${BASE}/torrents/${TID}`);
+  await a.getByRole('tab', { name: '管理', exact: true }).click();
   await a.getByRole('tab', { name: '促销', exact: true }).click();
   await a.locator('select[name=manual_kind]').selectOption('free');
   await a.getByRole('button', { name: '设置', exact: true }).click();
-  await a.getByRole('tabpanel').locator('.pt-badge', { hasText: '免费' }).first().waitFor();
+  await a.getByRole('tabpanel').locator('.seal', { hasText: '免费' }).first().waitFor();
   await a.getByRole('button', { name: '取消手动促销' }).click();
-  await a.getByRole('tabpanel').getByText(/当前促销: 无/).waitFor();
+  await a.getByRole('tabpanel').getByText('无', { exact: true }).waitFor();
 
   // 6d''''. 用户侧补齐的页面：我的 H&R、转账、个人页标签、站内信设置（接收范围）
   step('more user pages');
@@ -394,23 +421,23 @@ try {
   await p.goto(`${BASE}/p/ledger/transfer`);
   await p.getByRole('heading', { name: '转账给其他用户' }).waitFor();
   await openMenu(p);
-  await p.getByRole('menuitem', { name: '个人主页' }).click();
+  await meCard(p).getByRole('link', { name: '个人主页' }).click();
   await p.getByRole('tab', { name: '评论' }).click();
   await p.getByText('好资源').waitFor();
   await p.getByRole('tab', { name: '邀请树' }).click();
   await p.getByText('邀请链').waitFor();
   await p.goto(`${BASE}/settings`);
-  await p.getByRole('tab', { name: '更多' }).click();
   await p.getByRole('tab', { name: '站内信' }).click();
-  await p.getByRole('radio', { name: '仅管理组' }).check();
+  await p.getByRole('button', { name: '仅管理组', exact: true }).click();
   await p.getByText('已保存').first().waitFor();
   await p.waitForFunction(async () => (await (await fetch('/api/p/messages/v1/settings')).json()).accept === 'staff_only');
-  await p.getByRole('radio', { name: '所有用户' }).check();
+  await p.getByRole('button', { name: '所有用户', exact: true }).click();
   await p.waitForFunction(async () => (await (await fetch('/api/p/messages/v1/settings')).json()).accept === 'all');
 
   // 6e. 种子审核：管理员设为 disabled
   step('torrent moderation');
   await a.goto(`${BASE}/torrents/${TID}`);
+  await a.getByRole('tab', { name: '管理', exact: true }).click();
   await a.locator('select[name=status]').selectOption('disabled');
   await a.getByRole('button', { name: '设置状态' }).click();
   await a.getByText('已禁用', { exact: true }).first().waitFor();
@@ -418,7 +445,6 @@ try {
   // 6f. AI 客户端（mcp）：设置页签发 token → 客户端发起写操作 → 待确认页确认执行
   step('mcp tokens and confirmations');
   await a.goto(`${BASE}/settings`);
-  await a.getByRole('tab', { name: '更多' }).click();
   await a.getByRole('tab', { name: 'AI 客户端' }).click();
   await a.getByText(`${BASE}/mcp`).first().waitFor();
   await a.getByRole('checkbox', { name: '写操作（每次需在站内确认）', exact: true }).check();
@@ -436,28 +462,32 @@ try {
   if (rpc.result?.structuredContent?.status !== 'confirmation_required') throw new Error(`mcp call: ${JSON.stringify(rpc)}`);
   await a.goto(`${BASE}/p/mcp/confirmations`);
   await a.getByTestId('mcp-confirmation').getByText('admin_set_user_status').waitFor();
-  await a.getByText('e2e-mcp').waitFor();
+  await a.getByText('e2e-mcp', { exact: true }).waitFor();
   await a.getByRole('button', { name: '确认执行' }).click();
   await a.getByText('已执行').waitFor();
 
   // 6g. 论坛：后台建分区与版块 → 用户发主题、回复
   step('forum');
   await a.goto(`${BASE}/admin/p/forum/`);
-  await a.locator('input[name=category_name]').fill('站务');
   await a.getByRole('button', { name: '新建分区' }).click();
-  await a.locator('select[name=board_category] option', { hasText: '站务' }).waitFor({ state: 'attached' });
-  await a.locator('select[name=board_category]').selectOption({ label: '站务' });
-  await a.locator('input[name=board_name]').fill('综合讨论');
+  await sheet(a).locator('input[name=category_name]').fill('站务');
+  await sheet(a).getByRole('button', { name: '新建分区' }).click();
+  await sheet(a).waitFor({ state: 'detached' });
   await a.getByRole('button', { name: '新建版块' }).click();
+  await sheet(a).locator('select[name=board_category] option', { hasText: '站务' }).waitFor({ state: 'attached' });
+  await sheet(a).locator('select[name=board_category]').selectOption({ label: '站务' });
+  await sheet(a).locator('input[name=board_name]').fill('综合讨论');
+  await sheet(a).getByRole('button', { name: '保存' }).click();
   await a.getByRole('cell', { name: '综合讨论' }).waitFor();
   await p.goto(`${BASE}/p/forum/`);
   await p.getByRole('link', { name: '综合讨论' }).click();
+  await p.getByRole('button', { name: '发主题' }).click();
   await p.locator('input[name=topic_title]').fill('第一次发帖');
   await p.locator('textarea[name=post_body]').fill('大家好，**请多关照**');
   await p.getByRole('tab', { name: '预览' }).click();
   await p.getByTestId('md-preview').locator('strong', { hasText: '请多关照' }).waitFor();
   await p.getByRole('tab', { name: '编辑' }).click();
-  await p.getByRole('button', { name: '发表' }).click();
+  await sheet(p).getByRole('button', { name: '发表' }).click();
   await p.getByRole('heading', { name: /第一次发帖/ }).waitFor();
   await p.locator('strong', { hasText: '请多关照' }).waitFor();
   await p.locator('textarea[name=post_body]').fill('自己顶一下');
@@ -467,29 +497,32 @@ try {
   // 6h. 置顶（列表排序见 e2e_search，本测试未接 Meilisearch）、收藏、合集、排行榜
   step('sticky, bookmarks, collections, top10');
   await a.goto(movieUrl);
+  await a.getByRole('tab', { name: '管理', exact: true }).click();
   await a.locator('select[name=sticky_days]').selectOption('3');
   await a.getByRole('button', { name: '置顶', exact: true }).click();
   await a.getByText(/置顶至/).waitFor();
   await p.goto(movieUrl);
-  await p.getByRole('button', { name: '☆ 收藏' }).click();
-  await p.getByRole('button', { name: '★ 取消收藏' }).waitFor();
-  await p.getByText('1 人收藏').waitFor();
+  await p.getByRole('button', { name: /^收藏\s*\d+$/ }).click();
+  await p.getByRole('button', { name: /^已收藏\s*1$/ }).waitFor();
   await p.goto(`${BASE}/p/bookmarks/`);
   await p.getByRole('link', { name: /Web\.Movie\.2024/ }).waitFor();
   await p.goto(`${BASE}/p/bookmarks/collections`);
-  await p.locator('input[name=collection_title]').fill('我的片单');
-  await p.getByRole('button', { name: '创建' }).click();
+  await p.getByRole('button', { name: '新建合集' }).click();
+  await sheet(p).locator('input[name=collection_title]').fill('我的片单');
+  await sheet(p).getByRole('button', { name: '创建' }).click();
   await p.waitForURL(/\/p\/bookmarks\/collections\/\d+$/);
   await p.goto(movieUrl);
-  await p.locator('select[name=add_to_collection]').selectOption({ label: '我的片单' });
+  await p.getByRole('button', { name: '加入合集' }).click();
+  await sheet(p).getByRole('checkbox', { name: '我的片单' }).click();
   await p.getByText('已加入合集').waitFor();
   await p.reload();
   await p.getByRole('link', { name: '我的片单' }).click();
   await p.getByRole('link', { name: /Web\.Movie\.2024/ }).waitFor();
   await p.goto(movieUrl);
   await p.getByRole('tab', { name: '字幕' }).click();
-  await p.locator('input[name=subtitle_file]').setInputFiles({ name: 'chs.srt', mimeType: 'text/plain', buffer: Buffer.from('1\n00:00:01,000 --> 00:00:02,000\n你好\n') });
-  await p.getByRole('button', { name: '上传', exact: true }).click();
+  await p.getByRole('button', { name: '上传字幕' }).click();
+  await sheet(p).locator('input[name=subtitle_file]').setInputFiles({ name: 'chs.srt', mimeType: 'text/plain', buffer: Buffer.from('1\n00:00:01,000 --> 00:00:02,000\n你好\n') });
+  await sheet(p).getByRole('button', { name: '上传', exact: true }).click();
   await p.getByText('字幕已上传').waitFor();
   await p.getByText('chs.srt').waitFor();
   await p.goto(`${BASE}/p/top10/`);
@@ -500,30 +533,34 @@ try {
   // 6i. 商城：后台新建商品 → 用户购买（发种奖励的魔力值够买 1 魔力值的商品）
   step('shop');
   await a.goto(`${BASE}/admin/p/shop/`);
-  await a.locator('input[name=item_title]').fill('1 GiB 体验包');
-  await a.locator('input[name=item_price]').fill('1');
-  await a.locator('input[name=item_params]').fill('{"bytes": 1073741824}');
-  await a.getByRole('button', { name: '保存' }).click();
-  await a.getByText('1 GiB 体验包').waitFor();
+  await a.getByRole('button', { name: '新增商品' }).click();
+  await sheet(a).locator('input[name=item_title]').fill('1 GiB 体验包');
+  await sheet(a).locator('input[name=item_price]').fill('1');
+  await sheet(a).locator('input[name=item_params]').fill('{"bytes": 1073741824}');
+  await sheet(a).getByRole('button', { name: '保存' }).click();
+  await a.getByText('1 GiB 体验包').first().waitFor();
   await p.goto(`${BASE}/p/shop/`);
   await p.getByRole('heading', { name: '魔力值商城' }).waitFor();
   await p.getByText(/我的魔力值/).waitFor();
-  await p.locator('.pt-card', { hasText: '1 GiB 体验包' }).getByRole('button', { name: '购买' }).click();
+  await p.locator('.good', { hasText: '1 GiB 体验包' }).getByRole('button', { name: '购买' }).click();
+  await sheet(p).getByRole('button', { name: '购买' }).click();
   await p.getByText('购买成功').waitFor();
+  await p.getByRole('tab', { name: /我的订单/ }).click();
   await p.getByText('1 GiB 体验包 × 1').waitFor();
 
   // 6j. 勋章：后台新建头衔并授予 → 用户激活头衔 → 个人页显示
   step('medals');
   await a.goto(`${BASE}/admin/p/medals/`);
-  await a.locator('select[name=medal_kind]').selectOption('title');
-  await a.locator('input[name=medal_name]').fill('网页元老');
-  await a.getByRole('button', { name: '保存' }).click();
-  await a.locator('strong', { hasText: '网页元老' }).waitFor();
-  await a.getByRole('tab', { name: '授予' }).click();
-  await a.locator('select[name=grant_item]').selectOption({ label: '网页元老' });
-  await a.locator('textarea[name=grant_users]').fill('web_bob');
-  await a.locator('input[name=grant_reason]').fill('首批用户');
-  await a.getByRole('button', { name: '授予', exact: true }).click();
+  await a.getByRole('button', { name: '新增物品' }).click();
+  await sheet(a).getByRole('button', { name: '头衔' }).click();
+  await sheet(a).locator('input[name=medal_name]').fill('网页元老');
+  await sheet(a).getByRole('button', { name: '保存' }).click();
+  await a.locator('b', { hasText: '网页元老' }).waitFor();
+  await a.locator('.page-h').getByRole('button', { name: '授予' }).click();
+  await sheet(a).locator('select[name=grant_item]').selectOption({ label: '网页元老 · 头衔' });
+  await sheet(a).locator('textarea[name=grant_users]').fill('web_bob');
+  await sheet(a).locator('input[name=grant_reason]').fill('首批用户');
+  await sheet(a).getByRole('button', { name: '授予', exact: true }).click();
   await a.getByText('已授予 1 人').waitFor();
   await p.goto(`${BASE}/p/medals/`);
   await p.getByRole('heading', { name: '我的勋章' }).waitFor();
@@ -532,45 +569,40 @@ try {
   await p.getByRole('button', { name: '保存' }).click();
   await p.getByText('已保存').waitFor();
   await openMenu(p);
-  await p.getByRole('menuitem', { name: '个人主页' }).click();
+  await meCard(p).getByRole('link', { name: '个人主页' }).click();
   await p.locator('[data-testid=medal-display]', { hasText: '网页元老' }).waitFor();
 
-  // 6k. 抽奖：后台开期 → 用户买票 → 立即开奖 → 浏览器内复算验证
+  // 6k. 幸运转盘：后台开启并设为免费 → 用户转一次，结果出现在“我的记录”
   step('lottery');
   await a.goto(`${BASE}/admin/p/lottery/`);
-  await a.locator('input[name=round_title]').fill('网页抽奖');
-  await a.locator('input[name=round_price]').fill('1');
-  await a.locator('input[name=round_min]').fill('1');
-  await a.locator('input[name=round_tiers]').fill('1:50');
-  await a.getByRole('button', { name: '开期' }).click();
-  await a.getByRole('link', { name: '网页抽奖' }).waitFor();
+  const wheelOn = a.getByRole('switch', { name: '开启幸运转盘' });
+  if ((await wheelOn.getAttribute('aria-checked')) !== 'true') await wheelOn.click();
+  await a.getByLabel('每次消耗魔力值（0 为免费）').fill('0');
+  await a.locator('form#lottery-settings').evaluate((f) => f.requestSubmit());
+  await a.getByText('已保存').first().waitFor();
   await p.goto(`${BASE}/p/lottery/`);
-  await p.getByRole('link', { name: '网页抽奖' }).click();
-  await p.getByRole('button', { name: /^购买/ }).click();
-  await p.getByText(/已购买 1 张/).waitFor();
-  await a.getByRole('button', { name: '立即开奖' }).click();
-  await a.getByText('已开奖').waitFor();
-  await p.reload();
-  await p.getByRole('heading', { name: '中奖名单' }).waitFor();
-  await p.getByRole('button', { name: '在浏览器中复算' }).click();
-  await p.getByText(/验证通过/).waitFor();
+  await p.getByRole('button', { name: /^抽奖/ }).click();
+  await p.getByRole('status').getByText(/恭喜|谢谢参与/).waitFor({ timeout: 15000 });
+  await p.getByRole('heading', { name: '我的记录' }).waitFor();
 
   // 6l. 群发公告与联系管理组：后台发布公告 → 首页横幅；用户提交工单 → 员工回复 → 用户看到回复
   step('broadcasts and tickets');
   await a.goto(`${BASE}/admin/p/messages/`);
-  await a.locator('input[name=broadcast_subject]').fill('网页公告');
-  await a.locator('textarea[name=broadcast_body]').fill('今晚 **维护**');
-  await a.getByRole('button', { name: '发布' }).click();
+  await a.getByRole('button', { name: '发布公告' }).click();
+  await sheet(a).locator('input[name=broadcast_subject]').fill('网页公告');
+  await sheet(a).locator('textarea[name=broadcast_body]').fill('今晚 **维护**');
+  await sheet(a).getByRole('button', { name: '发布', exact: true }).click();
   await a.getByText('公告已发布').waitFor();
   await p.goto(`${BASE}/`);
   await p.locator('[data-testid=broadcast]', { hasText: '网页公告' }).waitFor();
   await p.getByRole('button', { name: '知道了' }).click();
   await p.locator('[data-testid=broadcast]').waitFor({ state: 'detached' });
   await p.goto(`${BASE}/p/tickets/`);
-  await p.locator('select[name=ticket_category]').selectOption('torrent');
-  await p.locator('input[name=ticket_subject]').fill('种子无法下载');
-  await p.locator('textarea[name=ticket_body]').fill('提示 tracker 错误');
-  await p.getByRole('button', { name: '提交' }).click();
+  await p.getByRole('button', { name: '提交新工单' }).click();
+  await sheet(p).getByRole('button', { name: '种子', exact: true }).click();
+  await sheet(p).locator('input[name=ticket_subject]').fill('种子无法下载');
+  await sheet(p).locator('textarea[name=ticket_body]').fill('提示 tracker 错误');
+  await sheet(p).getByRole('button', { name: '提交' }).click();
   await p.waitForURL(/\/p\/tickets\/\d+$/);
   const ticketUrl = p.url();
   await a.goto(`${BASE}/admin/p/tickets/`);
@@ -580,14 +612,15 @@ try {
   await a.getByText('请重新下载种子文件').waitFor();
   await p.goto(ticketUrl);
   await p.getByText('请重新下载种子文件').waitFor();
-  await p.getByText('等待用户').waitFor();
+  await p.getByText('等待用户').first().waitFor();
 
   step('donations and bonus history');
   await a.goto(`${BASE}/admin/p/donations/`);
-  await a.locator('input[name=donation_username]').fill('web_bob');
-  await a.locator('input[name=donation_amount]').fill('50');
-  await a.getByLabel('用户同意出现在捐赠名单').check();
-  await a.getByRole('button', { name: '登记并发放奖励' }).click();
+  await a.getByRole('button', { name: '登记一笔捐赠' }).click();
+  await sheet(a).locator('input[name=donation_username]').fill('web_bob');
+  await sheet(a).locator('input[name=donation_amount]').fill('50');
+  await sheet(a).getByLabel('用户同意出现在捐赠名单').check();
+  await sheet(a).getByRole('button', { name: '登记并发放奖励' }).click();
   await a.getByText('已登记，奖励已发放').waitFor();
   await p.goto(`${BASE}/p/donations/`);
   await p.locator('[data-testid=donor-list]', { hasText: 'web_bob' }).waitFor();
@@ -641,7 +674,7 @@ try {
   // 7. 普通用户进不了后台
   step('non-staff admin access');
   await p.goto(`${BASE}/admin`);
-  await p.getByText('页面不存在').waitFor();
+  await p.getByRole('heading', { name: '页面不存在' }).waitFor();
 
   if (problems.length) throw new Error(`browser problems:\n${problems.join('\n')}`);
   console.log('e2e ok');
