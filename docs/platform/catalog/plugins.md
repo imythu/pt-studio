@@ -67,6 +67,7 @@
 | G10 社区 | `subtitles` | SUB | WASM | `ctx.subtitles` | 字幕 |
 | G10 社区 | `moderation` | MOD | WASM | `ctx.moderation` | 候选区与审核 |
 | G10 社区 | `reports` | RPT | WASM | `ctx.reports` | 举报 |
+| G10 社区 | `server-load` | SLOAD | WASM | — | 首页「服务器负载」：注册用户数 / 用户上限（默认取 `ctx.registration` 的全站上限）、今日新注册、近一小时活跃；可限定可查看的等级或角色（满足其一） |
 | G11 集成 | `rss` | RSS | WASM | — | RSS 订阅 |
 | G11 集成 | `notify` | NOTIFY | WASM | `ctx.notify` | 通知（邮件 / Telegram / Discord） |
 | G11 集成 | `crossseed-api` | XSEED | WASM | — | 辅种接口（IYUU 兼容等） |

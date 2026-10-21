@@ -132,23 +132,53 @@ pub async fn history(
     } else {
         None
     };
-    let items = rows
-        .iter()
-        .map(|r| HistoryItem {
-            entry_id: r.get::<uuid::Uuid, _>(0).to_string(),
-            currency: r.get(1),
-            kind: r.get(2),
-            amount: r.get(3),
-            balance_after: r.get::<Option<i64>, _>(4).unwrap_or_default(),
-            reason: r.get(5),
-            memo: r.get(6),
-            counterparty_user_id: r.get::<Option<i64>, _>(7).and_then(|u| u64::try_from(u).ok()),
-            caller_plugin: r.get(8),
-            reversed: r.get(9),
-            created_at: r.get::<chrono::DateTime<chrono::Utc>, _>(10).timestamp_millis(),
-        })
-        .collect();
+    let items = rows.iter().map(history_item).collect();
     Ok(HistoryPage { items, next_cursor })
+}
+
+fn history_item(r: &sqlx::postgres::PgRow) -> HistoryItem {
+    HistoryItem {
+        entry_id: r.get::<uuid::Uuid, _>(0).to_string(),
+        currency: r.get(1),
+        kind: r.get(2),
+        amount: r.get(3),
+        balance_after: r.get::<Option<i64>, _>(4).unwrap_or_default(),
+        reason: r.get(5),
+        memo: r.get(6),
+        counterparty_user_id: r.get::<Option<i64>, _>(7).and_then(|u| u64::try_from(u).ok()),
+        caller_plugin: r.get(8),
+        reversed: r.get(9),
+        created_at: r.get::<chrono::DateTime<chrono::Utc>, _>(10).timestamp_millis(),
+    }
+}
+
+/// 按页码分页的流水（魔力值明细页用）：第 `page` 页（从 1 起）与总条数
+pub async fn history_paged(ctx: &Ctx, currency: Option<&str>, user: i64, page: u32, limit: u32) -> PResult<(Vec<HistoryItem>, i64)> {
+    let limit = i64::from(limit.clamp(1, 200));
+    let offset = i64::from(page.clamp(1, 100_000) - 1) * limit;
+    let mut c = ctx.sql.conn().await?;
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM lines WHERE user_id = $1 AND ($2::text IS NULL OR currency = $2)")
+        .bind(user)
+        .bind(currency)
+        .fetch_one(&mut *c)
+        .await?;
+    let rows = sqlx::query(
+        "SELECT l.entry_id, l.currency, e.kind, l.amount, l.balance_after, e.reason, e.memo, l.counterparty_user_id,
+                e.caller_plugin, (r.entry_id IS NOT NULL) AS reversed, l.created_at, l.line_no
+           FROM lines l
+           JOIN entries e ON e.id = l.entry_id AND e.created_at = l.created_at
+           LEFT JOIN entry_reversals r ON r.entry_id = l.entry_id
+          WHERE l.user_id = $1 AND ($2::text IS NULL OR l.currency = $2)
+          ORDER BY l.created_at DESC, l.entry_id DESC, l.line_no DESC
+          LIMIT $3 OFFSET $4",
+    )
+    .bind(user)
+    .bind(currency)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&mut *c)
+    .await?;
+    Ok((rows.iter().map(history_item).collect(), total))
 }
 
 pub async fn supply(ctx: &Ctx, currency: &str) -> PResult<SupplyInfo> {
@@ -340,9 +370,15 @@ struct EntriesQuery {
     currency: Option<String>,
     cursor: Option<String>,
     limit: Option<u32>,
+    /// 给出时按页码分页并返回 total（忽略 cursor）
+    page: Option<u32>,
 }
 
 async fn http_my_entries(ctx: RequestCtx, Query(q): Query<EntriesQuery>) -> PResult<Response> {
+    if let Some(page) = q.page {
+        let (items, total) = history_paged(&ctx, q.currency.as_deref(), me(&ctx)?, page, q.limit.unwrap_or(20)).await?;
+        return Ok(Json(json!({ "items": items, "total": total, "page": page.max(1) })).into_response());
+    }
     let page = history(
         &ctx,
         q.currency.as_deref(),

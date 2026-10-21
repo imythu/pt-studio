@@ -261,10 +261,53 @@ fn my_balances() -> R<Value> {
     Ok(json!({ "balances": items }))
 }
 
+/// 已接入事件的行为奖励触发点（其余触发点的规则即使启用也不会发放，不对用户展示）
+const LIVE_TRIGGERS: &[&str] = &["torrent_approved"];
+
+/// 魔力值获取方式说明：币种与已启用的行为奖励规则（做种奖励由 seeding-bonus 的说明接口提供）
+fn explain() -> R<Value> {
+    let curs = sql::query("SELECT code, scale, name_term FROM currencies WHERE is_active ORDER BY code", &[])?;
+    let live = LIVE_TRIGGERS.iter().map(|t| format!("'{t}'")).collect::<Vec<_>>().join(", ");
+    let rules = sql::query(
+        &format!(
+            "SELECT code, trigger, currency, amount, daily_count_limit, daily_amount_limit FROM action_rules
+              WHERE is_enabled AND trigger IN ({live}) ORDER BY id"
+        ),
+        &[],
+    )?;
+    // 本人最近一个已结算的做种小时（只看最近两天，命中近期分区）
+    let me = invocation::current().actor.user_id.and_then(|u| i64::try_from(u).ok());
+    let last = match me {
+        Some(uid) => sql::query(
+            "SELECT (extract(epoch FROM period_start) * 1000)::bigint, torrent_count, amounts, skipped_reason FROM user_hours
+              WHERE user_id = $1 AND period_start > now() - interval '2 days' ORDER BY period_start DESC LIMIT 1",
+            &[SqlValue::Int(uid)],
+        )?
+        .rows
+        .first()
+        .map(|r| {
+            let amounts = match &r[2] {
+                SqlValue::Json(j) => serde_json::from_str(j).unwrap_or(Value::Null),
+                _ => Value::Null,
+            };
+            json!({ "period_start": int(&r[0]), "torrent_count": int(&r[1]), "amounts": amounts,
+                    "skipped_reason": match &r[3] { SqlValue::Text(t) => json!(t), _ => Value::Null } })
+        }),
+        None => None,
+    };
+    Ok(json!({
+        "last_hour": last,
+        "currencies": curs.rows.iter().map(|r| json!({ "currency": text(&r[0]), "scale": int(&r[1]), "name_term": text(&r[2]) })).collect::<Vec<_>>(),
+        "actions": rules.rows.iter().map(|r| json!({ "code": text(&r[0]), "trigger": text(&r[1]), "currency": text(&r[2]),
+            "amount": int(&r[3]), "daily_count_limit": int(&r[4]), "daily_amount_limit": int(&r[5]) })).collect::<Vec<_>>(),
+    }))
+}
+
 impl http_handler::Guest for Bonus {
     fn handle(req: http_handler::Request) -> R<http_handler::Response> {
         match req.route_id.as_str() {
             "my_summary" => Ok(json_response(200, &my_balances()?)),
+            "explain" => Ok(json_response(200, &explain()?)),
             _ => Err(err("kernel.not_found", "no such route")),
         }
     }

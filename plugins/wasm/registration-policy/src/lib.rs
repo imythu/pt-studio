@@ -8,7 +8,7 @@
 
 pt_plugin_sdk::world!("registration-policy", http);
 
-use exports::pt::plugin::{hooks, http_handler, on_cron, on_event};
+use exports::pt::plugin::{hooks, http_handler, on_cron, on_event, service_provider};
 use pt_plugin_sdk::{prelude::*, serde_json, sql, time};
 
 struct Policy;
@@ -516,6 +516,29 @@ fn cancel_window(id: i64) -> R<()> {
         details: "{}".into(),
     })?;
     Ok(())
+}
+
+/// `ctx.registration`：注册状态与全站用户上限（server-load 等插件展示“用户数 / 上限”）
+impl service_provider::Guest for Policy {
+    fn call(service: String, method: String, _args: String) -> R<String> {
+        if service != "ctx.registration" {
+            return Err(err("kernel.not_found", "unknown service"));
+        }
+        let out = match method.as_str() {
+            "status" => {
+                let s = Settings::load();
+                let users = users_total()?;
+                let mut v = status()?;
+                v["max_users"] = json!(s.max_users);
+                v["users"] = json!(users);
+                v["remaining_slots"] = if s.max_users > 0 { json!((s.max_users - users).max(0)) } else { Value::Null };
+                v["requires_invite"] = json!(!v["open"].as_bool().unwrap_or(false) && s.invite_enabled);
+                v
+            }
+            _ => return Err(err("kernel.not_found", "no such method")),
+        };
+        Ok(out.to_string())
+    }
 }
 
 impl http_handler::Guest for Policy {

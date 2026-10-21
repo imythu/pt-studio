@@ -53,6 +53,13 @@ path = "/v1/users/me/summary"
 auth = "user"
 rate_limit = "user:60/m"
 
+[[http.routes]]
+id = "explain"
+method = "GET"
+path = "/v1/explain"
+auth = "user"
+rate_limit = "user:60/m"
+
 [database]
 migrations = "migrations"
 

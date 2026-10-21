@@ -639,8 +639,13 @@ try {
   await p.goto(`${BASE}/p/donations/`);
   await p.locator('[data-testid=donor-list]', { hasText: 'web_bob' }).waitFor();
   await p.locator('[data-testid=donation-goal]', { hasText: '¥50' }).waitFor();
+  // 魔力值页：默认「获取与使用」（做种、签到等规则由各插件经 bonus.explain 插槽提供），明细分页
   await p.goto(`${BASE}/p/bonus/`);
+  await p.locator('.rule-item', { hasText: '每日签到' }).waitFor();
+  await p.locator('.rule-item', { hasText: '做种' }).first().waitFor();
+  await p.getByRole('tab', { name: '魔力明细' }).click();
   await p.getByText('捐赠奖励').first().waitFor();
+  if (!p.url().includes('tab=history')) throw new Error(`bonus history tab not in URL: ${p.url()}`);
 
   // 6z. 手机宽度（390px）：主要页面没有超出视口的元素（滚动容器内的除外，如宽表格）
   step('mobile layout');

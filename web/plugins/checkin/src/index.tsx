@@ -10,11 +10,17 @@ import {
   Panel,
   PLink,
   SideLayout,
+  RuleItem,
   SkeletonRows,
   Table,
 } from "@pt-studio/ui-kit";
 
 registerMessages("zh-CN", {
+  "checkin.ui.rule": "每日签到",
+  "checkin.ui.rule_val": "+{a}～{b} / 天",
+  "checkin.ui.rule_body": "每天签到一次，第 1 天得 {base}，连续签到每天多 {step}，最多 {cap}；断签后从头算。",
+  "checkin.ui.rule_ms": "连续 {days} 天额外 +{n}。",
+  "checkin.ui.rule_link": "去签到",
   "checkin.ui.menu": "签到",
   "checkin.ui.done_menu": "已签到（{n} 天）",
   "checkin.ui.title": "每日签到",
@@ -34,6 +40,11 @@ registerMessages("zh-CN", {
   "checkin.ui.lede": "每天来一次，连续签到在里程碑日会有额外奖励。",
 });
 registerMessages("en", {
+  "checkin.ui.rule": "Daily check-in",
+  "checkin.ui.rule_val": "+{a}–{b} / day",
+  "checkin.ui.rule_body": "Check in once a day: {base} on day 1, {step} more for each day of the streak, up to {cap}. Missing a day resets the streak.",
+  "checkin.ui.rule_ms": "{days}-day streak: +{n} extra.",
+  "checkin.ui.rule_link": "Check in",
   "checkin.ui.menu": "Check in",
   "checkin.ui.done_menu": "Checked in ({n} days)",
   "checkin.ui.title": "Daily check-in",
@@ -65,6 +76,7 @@ interface Status {
     daily: number;
     milestone: { days: number; amount: number } | null;
   };
+  rules?: { base: number; step: number; cap: number; milestones: { days: number; amount: number }[] };
 }
 
 interface Result {
@@ -98,6 +110,24 @@ function errText(api: PluginApi, e: unknown): string {
 /** 签到状态：与宿主首页共用查询缓存（菜单、首页组件同时挂载时只发一次请求） */
 const myStatus = (api: PluginApi) =>
   api.queryClient.fetchQuery({ queryKey: ["checkin-me"], queryFn: () => api.json<Status>("/api/p/checkin/v1/me"), staleTime: 30_000 });
+
+/** 魔力值页「如何获得」里的签到条目 */
+function Explain({ ctx, api }: SlotProps<{ section: string }>) {
+  const [st, setSt] = useState<Status | null>(null);
+  useEffect(() => {
+    void myStatus(api)
+      .then(setSt)
+      .catch(() => undefined);
+  }, [api]);
+  const r = st?.rules;
+  if (ctx.section !== "earn" || !r) return null;
+  return (
+    <RuleItem title={api.t("checkin.ui.rule")} value={api.t("checkin.ui.rule_val", { a: r.base, b: r.cap })} to="/p/checkin/" navigate={api.navigate} link={api.t("checkin.ui.rule_link")}>
+      {api.t("checkin.ui.rule_body", { base: r.base, step: r.step, cap: r.cap })}
+      {r.milestones.map((m) => ` ${api.t("checkin.ui.rule_ms", { days: m.days, n: m.amount })}`).join("")}
+    </RuleItem>
+  );
+}
 
 function MenuItem({ api }: SlotProps) {
   const [st, setSt] = useState<Status | null>(null);
@@ -340,6 +370,7 @@ export default {
   slots: {
     "nav.user_menu": { component: MenuItem, order: 1 },
     "home.widgets": { component: Widget, order: 10 },
+    "bonus.explain": { component: Explain, order: 20 },
   },
   routes: [{ path: "/p/checkin/*", component: Page }],
 } satisfies PluginFrontend;

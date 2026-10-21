@@ -179,12 +179,19 @@ fn status(uid: i64) -> R<Value> {
         &[uid.into(), (&day).into()],
     )?;
     let checked = last.as_deref() == Some(day.as_str());
-    let (next_daily, next_milestone) = reward(&ctx::settings(), streak + 1);
+    let s = ctx::settings();
+    let (next_daily, next_milestone) = reward(&s, streak + 1);
+    // 奖励规则（魔力值说明页展示），取值与 reward() 一致
+    let base = s["reward_base"].as_i64().unwrap_or(10).max(0);
+    let rules = json!({ "base": base, "step": s["reward_step"].as_i64().unwrap_or(2).max(0),
+                        "cap": s["reward_cap"].as_i64().unwrap_or(50).max(base),
+                        "milestones": s["milestones"].as_array().cloned().unwrap_or_default() });
     Ok(
         json!({ "date": day, "checked_in_today": checked, "streak": streak, "longest": row.int(1).unwrap_or(0),
                "total_days": row.int(2).unwrap_or(0),
                "month_days": month.rows.iter().filter_map(|r| r.int(0)).collect::<Vec<_>>(),
-               "next_reward": { "daily": next_daily, "milestone": next_milestone.map(|m| json!({ "days": m.0, "amount": m.1 })) } }),
+               "next_reward": { "daily": next_daily, "milestone": next_milestone.map(|m| json!({ "days": m.0, "amount": m.1 })) },
+               "rules": rules }),
     )
 }
 

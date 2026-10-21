@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Field, Input, NavItem, Note, PageHead, Panel, SkeletonRows } from '@pt-studio/ui-kit';
+import { Field, Input, NavItem, Note, PageHead, Panel, RuleItem, SkeletonRows } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'seeding-bonus.ui.menu': '做种魔力规则',
@@ -20,6 +20,12 @@ registerMessages('zh-CN', {
   'seeding-bonus.ui.per_day': '约 {n} / 天',
   'seeding-bonus.ui.formula': '完整公式',
   'seeding-bonus.ui.params': '本站参数',
+  'seeding-bonus.ui.rule': '做种',
+  'seeding-bonus.ui.rule_val': '≤ {n} / 小时',
+  'seeding-bonus.ui.rule_body': '每小时按你正在做的种子结算：体积越大、发布越久、做种的人越少，得分越高；每做一个种子再加 {p}（最多计 {max} 个）。',
+  'seeding-bonus.ui.rule_official': '官种另有 ×{f} 加成。',
+  'seeding-bonus.ui.rule_vip': 'VIP 基础部分 ×{f}。',
+  'seeding-bonus.ui.rule_link': '完整公式与估算器',
 });
 registerMessages('en', {
   'seeding-bonus.ui.menu': 'Seeding bonus rules',
@@ -36,6 +42,12 @@ registerMessages('en', {
   'seeding-bonus.ui.per_day': '≈ {n} / day',
   'seeding-bonus.ui.formula': 'Full formula',
   'seeding-bonus.ui.params': 'Parameters on this site',
+  'seeding-bonus.ui.rule': 'Seeding',
+  'seeding-bonus.ui.rule_val': '≤ {n} / hour',
+  'seeding-bonus.ui.rule_body': 'Settled every hour from what you seed: bigger, older and less-seeded torrents score higher, plus {p} per torrent (up to {max}).',
+  'seeding-bonus.ui.rule_official': 'Official releases earn an extra ×{f}.',
+  'seeding-bonus.ui.rule_vip': 'VIP base ×{f}.',
+  'seeding-bonus.ui.rule_link': 'Full formula and estimator',
 });
 
 interface Params {
@@ -102,8 +114,31 @@ function Calc({ api, p }: { api: PluginApi; p: Params }) {
   );
 }
 
+function useParams(api: PluginApi) {
+  return useQuery({ queryKey: ['seeding-bonus', 'explain'], queryFn: () => api.json<Params>('/api/p/seeding-bonus/v1/explain'), staleTime: 300_000 });
+}
+
+/** 魔力值页「如何获得」里的做种条目 */
+function Explain({ ctx, api }: SlotProps<{ section: string }>) {
+  const p = useParams(api).data;
+  if (ctx.section !== 'earn' || !p) return null;
+  return (
+    <RuleItem
+      title={api.t('seeding-bonus.ui.rule')}
+      value={api.t('seeding-bonus.ui.rule_val', { n: fmt(Math.min(p.b0 + p.p * p.max_count, p.hourly_cap)) })}
+      to="/p/seeding-bonus/"
+      navigate={api.navigate}
+      link={api.t('seeding-bonus.ui.rule_link')}
+    >
+      {api.t('seeding-bonus.ui.rule_body', { p: fmt(p.p), max: fmt(p.max_count) })}
+      {p.official_enabled && ` ${api.t('seeding-bonus.ui.rule_official', { f: fmt(p.official_factor) })}`}
+      {p.donor_factor !== 1 && ` ${api.t('seeding-bonus.ui.rule_vip', { f: fmt(p.donor_factor) })}`}
+    </RuleItem>
+  );
+}
+
 function Page({ api }: { api: PluginApi }) {
-  const q = useQuery({ queryKey: ['seeding-bonus', 'explain'], queryFn: () => api.json<Params>('/api/p/seeding-bonus/v1/explain'), staleTime: 300_000 });
+  const q = useParams(api);
   const p = q.data;
   return (
     <div className="stack">
@@ -161,6 +196,6 @@ function MenuItem({ api }: SlotProps) {
 }
 
 export default {
-  slots: { 'nav.user_menu': { component: MenuItem, order: 21 } },
+  slots: { 'nav.user_menu': { component: MenuItem, order: 21 }, 'bonus.explain': { component: Explain, order: 10 } },
   routes: [{ path: '/p/seeding-bonus/*', component: Page }],
 } satisfies PluginFrontend;

@@ -50,12 +50,43 @@ fn web_dir(sh: &Shared) -> Option<PathBuf> {
     sh.cfg.http.web_dir.as_ref().map(PathBuf::from)
 }
 
-/// 插件前端入口 URL：`/static/plugins/<id>/<version>/<entry>`（版本进路径，长期缓存）
-fn entry_url(id: &str, version: &str, entry: &str) -> String {
+/// 插件前端入口 URL：`/static/plugins/<id>/<tag>/<entry>`（tag 进路径，长期缓存）
+fn entry_url(id: &str, tag: &str, entry: &str) -> String {
     format!(
-        "/static/plugins/{id}/{version}/{}",
+        "/static/plugins/{id}/{tag}/{}",
         entry.trim_start_matches("./")
     )
+}
+
+/// 插件前端文件的缓存标签：`<版本>-<内容哈希>`。插件版本不随前端改动变化，
+/// 只用版本时浏览器会一直用一年缓存里的旧包，所以把文件内容哈希也放进路径。
+/// 哈希按（修改时间, 大小）缓存，文件被替换后自动重算；读不到文件时只用版本。
+fn asset_tag(sh: &Shared, id: &str, version: &str, entry: &str) -> String {
+    use std::{collections::HashMap, sync::Mutex, time::SystemTime};
+    type Cache = Mutex<HashMap<PathBuf, (SystemTime, u64, String)>>;
+    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+    let Some(path) = web_dir(sh).and_then(|d| safe_rel(entry.trim_start_matches("./")).map(|r| d.join("plugins").join(id).join(r))) else {
+        return version.to_owned();
+    };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return version.to_owned();
+    };
+    let stamp = (meta.modified().unwrap_or(SystemTime::UNIX_EPOCH), meta.len());
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((m, l, h)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&path)
+        && (*m, *l) == stamp
+    {
+        return format!("{version}-{h}");
+    }
+    let Ok(bytes) = std::fs::read(&path) else {
+        return version.to_owned();
+    };
+    let h = format!("{:012x}", xxhash_rust::xxh3::xxh3_64(&bytes) >> 16);
+    cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(path, (stamp.0, stamp.1, h.clone()));
+    format!("{version}-{h}")
 }
 
 /// 外观设置存于 `kernel.plugin_settings` 的保留键
@@ -143,8 +174,8 @@ async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
         let rt = sh.plugins.get(&id)?;
         let f = rt.manifest.frontend.as_ref()?;
         let version = rt.manifest.version.to_string();
-        Some(json!({ "id": id, "css": f.theme.as_deref().map(|c| entry_url(&id, &version, c)),
-                     "entry": f.entry.as_deref().map(|e| entry_url(&id, &version, e)) }))
+        Some(json!({ "id": id, "css": f.theme.as_deref().map(|c| entry_url(&id, &asset_tag(&sh, &id, &version, c), c)),
+                     "entry": f.entry.as_deref().map(|e| entry_url(&id, &asset_tag(&sh, &id, &version, e), e)) }))
     });
     let plugins: Vec<Json> = sh
         .order
@@ -155,7 +186,7 @@ async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
             let version = rt.manifest.version.to_string();
             Some(json!({
                 "id": rt.id, "name": rt.manifest.name, "version": version,
-                "entry": f.entry.as_deref().map(|e| entry_url(&rt.id, &version, e)),
+                "entry": f.entry.as_deref().map(|e| entry_url(&rt.id, &asset_tag(&sh, &rt.id, &version, e), e)),
                 "slots": f.slots, "routes": f.routes, "settings_ui": f.settings_ui.as_deref().unwrap_or("schema"),
                 "theme": f.theme.is_some(),
             }))

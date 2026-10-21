@@ -104,6 +104,14 @@ async fn donations_end_to_end() {
     // 魔力值流水：捐赠奖励
     let e = call(&app, "GET", "/api/p/ledger/v1/users/me/entries?currency=bonus", None, &hv(&alice.headers())).await.body;
     assert!(e["items"].as_array().unwrap().iter().any(|x| x["reason"] == "donations.reward" && x["amount"] == 3000), "{e:?}");
+    // 按页码分页（魔力值页「魔力明细」）：每页 1 条，第 2 页与列表第 2 条一致，并带总数
+    let n = e["items"].as_array().unwrap().len();
+    let p2 = call(&app, "GET", "/api/p/ledger/v1/users/me/entries?currency=bonus&page=2&limit=1", None, &hv(&alice.headers())).await.body;
+    assert_eq!(p2["total"].as_u64(), Some(n as u64), "{p2:?}");
+    assert_eq!(p2["items"].as_array().unwrap().len(), usize::from(n >= 2), "{p2:?}");
+    if n >= 2 {
+        assert_eq!(p2["items"][0]["entry_id"], e["items"][1]["entry_id"], "{p2:?}");
+    }
     let notified: i64 = sqlx::query_scalar("SELECT count(*) FROM notify.notifications WHERE user_id = $1 AND template_key = 'donations.thanks'")
         .bind(i64::try_from(alice.id).unwrap())
         .fetch_one(&mut db().await)

@@ -1,0 +1,62 @@
+id = "server-load"
+name = "服务器负载"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "首页侧栏的服务器负载：注册用户数与全站用户上限（默认取注册策略的上限）、今日新注册、近一小时活跃用户与连接数；可限定能看到的用户等级或角色（满足其一即可）"
+summary = "在首页显示用户数 / 用户上限等站点负载，可限定谁能看"
+category = "system"
+
+requires = ["ctx.rbac@^0.1"]
+# 全站用户上限（未安装时只用本插件设置里的上限）
+optional_requires = ["ctx.registration@^0.1"]
+
+[capabilities]
+sql = true
+views = ["identity.v_user_public", "accounting.v_swarm_peers"]
+
+[[http.routes]]
+id = "status"
+method = "GET"
+path = "/v1/status"
+auth = "user"
+rate_limit = "user:60/m"
+
+[wasm]
+memory_mb = 32
+default_timeout_ms = 1000
+
+[frontend]
+entry = "index.js"
+slots = ["home.widgets"]
+settings_ui = "custom"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["user_limit", "visible_classes", "visible_roles"]
+
+[settings_schema.properties.user_limit]
+type = "integer"
+title = "用户上限"
+description = "0 = 使用注册策略里的「全站用户上限」"
+minimum = 0
+maximum = 100000000
+default = 0
+
+[settings_schema.properties.visible_classes]
+type = "array"
+items = { type = "integer" }
+title = "可查看的用户等级"
+description = "等级与角色都不选时所有用户可见；选了的话满足其一即可查看"
+default = []
+
+[settings_schema.properties.visible_roles]
+type = "array"
+items = { type = "string", maxLength = 64 }
+title = "可查看的角色"
+default = []
+
+[terms]
+"server-load.name" = { zh-CN = "服务器负载", en = "Server load" }

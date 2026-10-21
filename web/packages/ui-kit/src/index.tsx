@@ -227,6 +227,24 @@ export function Stat({ label, value, hint, tone, to, navigate }: { label: ReactN
   );
 }
 
+/** 规则条目（魔力值页「获取 / 使用」列表）：标题、说明、右侧数值；给了 `to` + `navigate` 时末尾带一个文字链接 */
+export function RuleItem({ title, value, children, to, navigate, link }: { title: ReactNode; value?: ReactNode; children?: ReactNode; to?: string; navigate?(to: string): void; link?: ReactNode }) {
+  return (
+    <div className="rule-item">
+      <div>
+        <b>{title}</b>
+        {children && <div className="ri-body">{children}</div>}
+        {to && navigate && link && (
+          <PLink to={to} navigate={navigate} className="ri-link">
+            {link} →
+          </PLink>
+        )}
+      </div>
+      {value !== undefined && value !== null && <span className="ri-val">{value}</span>}
+    </div>
+  );
+}
+
 // ---------------- 状态与标记 ----------------
 
 export type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'mute';

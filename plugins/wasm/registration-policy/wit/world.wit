@@ -6,4 +6,5 @@ world registration-policy {
   export pt:plugin/on-event@1.0.0;
   export pt:plugin/on-cron@1.0.0;
   export pt:plugin/http-handler@1.0.0;
+  export pt:plugin/service-provider@1.0.0;
 }

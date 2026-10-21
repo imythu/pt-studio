@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-server-load"
+description = "PT Studio server load (WASM): registered users against the site user cap, active peers, visibility by level or role"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

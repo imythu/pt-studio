@@ -80,7 +80,7 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["nav.main", "home.widgets"]
+slots = ["nav.main", "home.widgets", "bonus.explain"]
 routes = ["/p/lottery/*", "/admin/p/lottery/*"]
 settings_ui = "schema"
 

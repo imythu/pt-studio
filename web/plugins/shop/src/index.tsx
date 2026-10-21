@@ -3,9 +3,15 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Button, Checkbox, Empty, Field, Input, NavItem, Note, PageHead, Panel, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, type Column } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Empty, Field, Input, NavItem, Note, PageHead, Panel, RuleItem, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, type Column } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
+  'shop.ui.rule': '魔力商城',
+  'shop.ui.rule_val': '{n} 起',
+  'shop.ui.rule_body': '用魔力值兑换：',
+  'shop.ui.rule_item': '{t}（{n}）',
+  'shop.ui.rule_sep': '、',
+  'shop.ui.rule_link': '去商城',
   'shop.ui.nav': '商城',
   'shop.ui.title': '魔力值商城',
   'shop.ui.balance': '我的魔力值：{n}',
@@ -70,6 +76,12 @@ registerMessages('zh-CN', {
   'shop.fulfillment_failed': '发放失败，魔力值已退回',
 });
 registerMessages('en', {
+  'shop.ui.rule': 'Shop',
+  'shop.ui.rule_val': 'from {n}',
+  'shop.ui.rule_body': 'Exchange bonus for: ',
+  'shop.ui.rule_item': '{t} ({n})',
+  'shop.ui.rule_sep': ', ',
+  'shop.ui.rule_link': 'Open the shop',
   'shop.ui.nav': 'Shop',
   'shop.ui.title': 'Bonus shop',
   'shop.ui.balance': 'My bonus: {n}',
@@ -545,8 +557,32 @@ function MenuItem({ api }: SlotProps) {
   );
 }
 
+/** 魔力值页「可以用来做什么」里的商城条目：列出在售商品与价格 */
+function Explain({ ctx, api }: SlotProps<{ section: string }>) {
+  const [items, setItems] = useState<Item[] | null>(null);
+  useEffect(() => {
+    if (ctx.section !== 'spend') return;
+    void api
+      .json<{ items: Item[] }>('/api/p/shop/v1/items')
+      .then((r) => setItems(r.items.filter((i) => i.active !== false)))
+      .catch(() => setItems([]));
+  }, [api, ctx.section]);
+  if (ctx.section !== 'spend' || !items?.length) return null;
+  const min = Math.min(...items.map((i) => i.price));
+  return (
+    <RuleItem title={api.t('shop.ui.rule')} value={api.t('shop.ui.rule_val', { n: min.toLocaleString() })} to="/p/shop/" navigate={api.navigate} link={api.t('shop.ui.rule_link')}>
+      {api.t('shop.ui.rule_body')}
+      {items
+        .slice(0, 8)
+        .map((i) => api.t('shop.ui.rule_item', { t: i.title, n: i.price.toLocaleString() }))
+        .join(api.t('shop.ui.rule_sep'))}
+      {items.length > 8 && ' …'}
+    </RuleItem>
+  );
+}
+
 export default {
-  slots: { 'nav.user_menu': { component: MenuItem, order: 50 } },
+  slots: { 'nav.user_menu': { component: MenuItem, order: 50 }, 'bonus.explain': { component: Explain, order: 20 } },
   routes: [
     { path: '/p/shop/*', component: Shop },
     { path: '/admin/p/shop/*', component: Admin },

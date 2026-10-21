@@ -4,9 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, renderPreview } from '@pt-studio/sdk';
 import { Slot, type PluginApi, type PluginFrontend, type SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Button, Chips, Field, Input, KeyFacts, MarkdownEditor, NavItem, Note, PageHead, Panel, PLink, Select, Sheet, SideLayout, SkeletonRows, Status, Table, Tabs, Textarea, UserContent, type Tone } from '@pt-studio/ui-kit';
+import { Button, Chips, Field, Input, KeyFacts, MarkdownEditor, NavItem, Note, PageHead, Panel, PLink, RuleItem, Select, Sheet, SideLayout, SkeletonRows, Status, Table, Tabs, Textarea, UserContent, type Tone } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
+  'requests.ui.rule_earn': '应求',
+  'requests.ui.rule_earn_body': '上传别人求的资源，求种人确认后拿到全部悬赏。',
+  'requests.ui.rule_spend': '求种悬赏',
+  'requests.ui.rule_spend_body': '发布求种时拿出魔力值作悬赏，其他人也可以追加；没人应求时可以撤回。',
+  'requests.ui.rule_val': '悬赏',
+  'requests.ui.rule_link': '去求种区',
   'requests.ui.menu': '求种',
   'requests.ui.title': '求种',
   'requests.ui.new': '发布求种',
@@ -60,6 +66,12 @@ registerMessages('zh-CN', {
   'requests.ui.fill_state.rejected': '已驳回',
 });
 registerMessages('en', {
+  'requests.ui.rule_earn': 'Filling requests',
+  'requests.ui.rule_earn_body': 'Upload what someone requested and collect the bounty once they confirm.',
+  'requests.ui.rule_spend': 'Request bounties',
+  'requests.ui.rule_spend_body': 'Put up bonus as a bounty when you request something; others can add to it. Withdraw it if nobody fills the request.',
+  'requests.ui.rule_val': 'bounty',
+  'requests.ui.rule_link': 'Browse requests',
   'requests.ui.menu': 'Requests',
   'requests.ui.title': 'Requests',
   'requests.ui.new': 'New request',
@@ -552,9 +564,20 @@ function Pages({ api, path }: { api: PluginApi; path: string }) {
   return <List api={api} />;
 }
 
+/** 魔力值页的求种条目：应求获得悬赏（如何获得）、悬赏求种（可以用来做什么） */
+function Explain({ ctx, api }: SlotProps<{ section: string }>) {
+  const earn = ctx.section === 'earn';
+  return (
+    <RuleItem title={api.t(earn ? 'requests.ui.rule_earn' : 'requests.ui.rule_spend')} value={api.t('requests.ui.rule_val')} to="/p/requests/" navigate={api.navigate} link={api.t('requests.ui.rule_link')}>
+      {api.t(earn ? 'requests.ui.rule_earn_body' : 'requests.ui.rule_spend_body')}
+    </RuleItem>
+  );
+}
+
 export default {
   slots: {
     'nav.user_menu': { component: MenuItem, order: 30 },
+    'bonus.explain': { component: Explain, order: 40 },
   },
   routes: [{ path: '/p/requests/*', component: Pages }],
 } satisfies PluginFrontend;

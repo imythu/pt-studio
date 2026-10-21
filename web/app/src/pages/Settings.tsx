@@ -11,6 +11,7 @@ import { ErrorText, useErrorText } from '../errors';
 import { useManifest } from '../manifest';
 import { createCredential, webauthnSupported } from '../webauthn';
 import { useSession } from '../session';
+import { NO_WALLPAPER, setWallpaper, useWallpaper, WALLPAPERS } from '../wallpaper';
 
 interface Profile {
   id: number;
@@ -109,7 +110,30 @@ function Appearance() {
           ]}
         />
       </div>
+      <WallpaperPicker />
     </Sec>
+  );
+}
+
+function WallpaperPicker() {
+  const t = useT();
+  const cur = useWallpaper();
+  const opts = [...WALLPAPERS, { id: NO_WALLPAPER, label: 'ui.wallpaper.none', thumb: null }];
+  return (
+    <div className="set-row wp-row">
+      <div>
+        <b>{t('ui.settings.wallpaper')}</b>
+        <p>{t('ui.settings.wallpaper_hint')}</p>
+      </div>
+      <div className="wp-grid" role="radiogroup" aria-label={t('ui.settings.wallpaper')}>
+        {opts.map((w) => (
+          <button key={w.id} type="button" role="radio" aria-checked={cur === w.id} className="wp-opt" onClick={() => setWallpaper(w.id)}>
+            <span className="wp-img" style={w.thumb ? { backgroundImage: `url(${w.thumb})` } : undefined} />
+            <span>{t(w.label)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

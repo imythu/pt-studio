@@ -90,6 +90,10 @@ hr { border: 0; height: 1px; background: var(--line); margin: 0; }
 .code, .ta.code, .in.code { font: 12.5px/1.55 var(--f-mono); }
 .in:focus, .sel:focus, .ta:focus, .pt-input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
 .in[type="file"] { padding: 6px 8px; height: auto; }
+/* 所有文件选择框（含未套 .in 的）：字号与按钮一致，选择按钮用描边按钮样式 */
+input[type="file"] { font: inherit; font-size: 13px; color: var(--ink-2); max-width: 100%; }
+input[type="file"]::file-selector-button { font: inherit; font-size: 13px; margin-right: 10px; padding: 5px 12px; border-radius: 5px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font-weight: 500; cursor: pointer; transition: border-color .15s, background-color .15s; }
+input[type="file"]::file-selector-button:hover { border-color: var(--gold); background: var(--gold-soft); }
 .sel { padding-right: 6px; }
 .form { display: grid; gap: 14px; }
 .form-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
@@ -164,6 +168,21 @@ hr { border: 0; height: 1px; background: var(--line); margin: 0; }
 .stat > span { font-size: 11.5px; color: var(--muted); letter-spacing: .08em; }
 .stat b { font: 600 24px/1.2 var(--f-num); }
 .stat small { font-size: 11.5px; color: var(--muted); }
+
+/* 规则条目列表（魔力值页） */
+/* 分隔线用 1px 间隙画出，这样插件经插槽插入的条目（包在 .pt-slot 里）也能连成一张表 */
+.rule-list { display: grid; gap: 1px; background: var(--line); border-radius: 0 0 var(--r) var(--r); overflow: hidden; }
+.rule-list > .pt-slot { display: contents; }
+.rule-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: start; padding: 14px 18px; background: var(--surface); }
+.rule-item > div > b { font-size: 14.5px; }
+.rule-item .ri-body { font-size: 13px; color: var(--ink-2); line-height: 1.7; margin-top: 2px; }
+.rule-item .ri-body ul { margin: 4px 0 0; padding-left: 1.2em; }
+.rule-item .ri-link { display: inline-block; margin-top: 4px; font-size: 12.5px; color: var(--gold); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--gold) 40%, transparent); }
+.rule-item .ri-link:hover { text-decoration-color: currentColor; }
+.rule-item .ri-val { font: 600 14px/1.4 var(--f-num); color: var(--gold); white-space: nowrap; text-align: right; padding-top: 1px; }
+@media (max-width: 760px) {
+  .rule-item { padding: 12px 14px; }
+}
 
 /* P3 关键信息条 */
 .keyfacts { display: none; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
@@ -245,6 +264,8 @@ hr { border: 0; height: 1px; background: var(--line); margin: 0; }
 .pager button { min-width: 32px; height: 30px; border: 1px solid var(--line); background: var(--surface); border-radius: 4px; font: 12.5px var(--f-mono); padding: 0 8px; }
 .pager button[aria-current="page"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .pager button[disabled] { opacity: .45; cursor: not-allowed; }
+.pager-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--line); }
+.pager-row .pager { padding: 0; border: 0; }
 .more-row { display: flex; justify-content: center; padding: 12px; border-top: 1px solid var(--line); }
 
 /* 侧栏列表 */

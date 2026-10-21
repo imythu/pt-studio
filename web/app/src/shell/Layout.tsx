@@ -11,6 +11,7 @@ import { fmtRatio, fromUnits, levelName, shortBytes, shortNum, useMyBonus, useMy
 import { useInstalled, useManifest } from '../manifest';
 import { useSession } from '../session';
 import { SuggestInput } from '../suggest';
+import { NO_WALLPAPER, useWallpaper } from '../wallpaper';
 
 // ---------------- 主题 ----------------
 
@@ -392,8 +393,19 @@ function Rail({ admin, open, onClose }: { admin: boolean; open: boolean; onClose
       )}
       {admin ? <AdminNav /> : <UserNav />}
       <div className="rail-foot">
-        <a href="https://github.com/imythu/pt-studio" target="_blank" rel="noopener noreferrer">
-          Powered by PT Studio
+        <a className="gh-link" href="https://github.com/imythu/pt-studio" target="_blank" rel="noopener noreferrer" title="github.com/imythu/pt-studio">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          <span>
+            Powered by <b>PT Studio</b>
+          </span>
+          <span className="gh-arrow" aria-hidden="true">
+            ↗
+          </span>
         </a>
       </div>
     </aside>
@@ -543,6 +555,13 @@ export function GuestBar({ actions = true }: { actions?: boolean }) {
   );
 }
 
+/** 全站背景壁纸（设置 → 外观） */
+function Backdrop() {
+  const w = useWallpaper();
+  if (w === NO_WALLPAPER) return null;
+  return <div className="pt-backdrop" style={{ backgroundImage: `url(${w})` }} aria-hidden="true" />;
+}
+
 export function Layout() {
   const t = useT();
   const s = useSession();
@@ -560,6 +579,7 @@ export function Layout() {
   if (!s.me) {
     return (
       <div className="bare">
+        <Backdrop />
         <SkipLink targetId="main-content">{t('ui.common.skip_to_content')}</SkipLink>
         <main id="main-content" className="bare-main">
           <Outlet />
@@ -569,6 +589,7 @@ export function Layout() {
   }
   return (
     <div className="shell">
+      <Backdrop />
       <SkipLink targetId="main-content">{t('ui.common.skip_to_content')}</SkipLink>
       {railOpen && <div className="scrim" onClick={closeRail} />}
       <Rail admin={admin} open={railOpen} onClose={closeRail} />

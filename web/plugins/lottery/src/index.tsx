@@ -3,10 +3,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Button, Checkbox, Field, Input, Kpis, NavItem as Nav, Note, PageHead, Panel, PLink, Select, SideLayout, SkeletonRows, Status, Switch, Table } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, Kpis, NavItem as Nav, Note, PageHead, Panel, PLink, RuleItem, Select, SideLayout, SkeletonRows, Status, Switch, Table } from '@pt-studio/ui-kit';
 
 
 registerMessages('zh-CN', {
+  'lottery.ui.rule': '幸运转盘',
+  'lottery.ui.rule_val': '-{n} / 次',
+  'lottery.ui.rule_free': '免费',
+  'lottery.ui.rule_body': '花魔力值转一次转盘，可能抽到魔力值、上传量或 VIP。',
+  'lottery.ui.rule_limit': '每天最多 {n} 次。',
+  'lottery.ui.rule_link': '去抽奖',
   'lottery.ui.nav': '抽奖',
   'lottery.ui.time': '时间',
   'lottery.ui.result': '结果',
@@ -77,6 +83,12 @@ registerMessages('zh-CN', {
   'lottery.unavailable': '奖品暂不可用',
 });
 registerMessages('en', {
+  'lottery.ui.rule': 'Prize wheel',
+  'lottery.ui.rule_val': '-{n} / spin',
+  'lottery.ui.rule_free': 'Free',
+  'lottery.ui.rule_body': 'Spend bonus to spin the wheel for bonus, upload credit or VIP.',
+  'lottery.ui.rule_limit': 'Up to {n} spins a day.',
+  'lottery.ui.rule_link': 'Spin',
   'lottery.ui.nav': 'Lottery',
   'lottery.ui.time': 'Time',
   'lottery.ui.result': 'Result',
@@ -439,6 +451,31 @@ function NavLink({ api }: SlotProps) {
   );
 }
 
+/** 魔力值页「可以用来做什么」里的转盘条目 */
+function Explain({ ctx, api }: SlotProps<{ section: string }>) {
+  const [w, setW] = useState<Wheel | null>(null);
+  useEffect(() => {
+    if (ctx.section !== 'spend') return;
+    api
+      .json<Wheel>('/api/p/lottery/v1/wheel')
+      .then(setW)
+      .catch(() => setW(null));
+  }, [api, ctx.section]);
+  if (ctx.section !== 'spend' || !w?.enabled) return null;
+  return (
+    <RuleItem
+      title={api.t('lottery.ui.rule')}
+      value={w.spin_cost > 0 ? api.t('lottery.ui.rule_val', { n: w.spin_cost }) : api.t('lottery.ui.rule_free')}
+      to="/p/lottery/"
+      navigate={api.navigate}
+      link={api.t('lottery.ui.rule_link')}
+    >
+      {api.t('lottery.ui.rule_body')}
+      {w.daily_limit > 0 && ` ${api.t('lottery.ui.rule_limit', { n: w.daily_limit })}`}
+    </RuleItem>
+  );
+}
+
 function Widget({ api }: SlotProps) {
   const [w, setW] = useState<Wheel | null>(null);
   useEffect(() => {
@@ -704,6 +741,7 @@ export default {
   slots: {
     'nav.main': { component: NavLink, order: 60 },
     'home.widgets': { component: Widget, order: 30 },
+    'bonus.explain': { component: Explain, order: 30 },
   },
   routes: [
     { path: '/p/lottery/*', component: WheelPage },

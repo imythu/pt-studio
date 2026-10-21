@@ -129,6 +129,9 @@ async fn web_end_to_end() {
         .clone();
     let entry = invite["entry"].as_str().unwrap().to_owned();
     assert_eq!(invite["routes"], json!(["/p/invite/*", "/admin/p/invite/*"]));
+    // 入口路径带「版本-内容哈希」：前端改了而插件版本没变时浏览器也会拿到新包
+    let tag = entry.split('/').nth(4).unwrap();
+    assert!(tag.starts_with("0.1.0-") && tag.len() == "0.1.0-".len() + 12, "{entry}");
     let js = call(&app, "GET", &entry, None, &[]).await;
     assert_eq!(js.status, StatusCode::OK);
     assert!(

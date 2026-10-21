@@ -176,6 +176,7 @@ body { background: var(--a-sky) var(--bg); background-attachment: fixed; }
 .code-box, .json, pre.pre { border-radius: 12px; }
 
 /* ---------- 按钮与表单 ---------- */
+input[type="file"]::file-selector-button { border-radius: 999px; }
 .btn { border-radius: 999px; transition: transform .15s, box-shadow .15s, border-color .15s, background-color .15s, filter .15s; }
 .btn:hover:not([disabled]) { border-color: var(--gold); transform: translateY(-1px); }
 .btn-primary, .btn-gold { background: var(--a-grad); color: #fff; border-color: transparent; box-shadow: var(--a-glow); }

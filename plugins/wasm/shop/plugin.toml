@@ -97,7 +97,7 @@ migrations = "migrations"
 
 [frontend]
 entry = "index.js"
-slots = ["nav.user_menu"]
+slots = ["nav.user_menu", "bonus.explain"]
 routes = ["/p/shop/*", "/admin/p/shop/*"]
 
 [terms]

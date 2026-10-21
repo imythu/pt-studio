@@ -141,7 +141,7 @@ views = ["v_request_public"]
 
 [frontend]
 entry = "index.js"
-slots = ["nav.user_menu"]
+slots = ["nav.user_menu", "bonus.explain"]
 routes = ["/p/requests/*"]
 settings_ui = "schema"
 

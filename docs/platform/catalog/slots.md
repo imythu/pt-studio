@@ -60,6 +60,7 @@ export default {
 | `admin.dashboard.widgets` | list | `{ user }` | moderation（待审数）、reports、anticheat、accounting |
 | `admin.user.tabs` | tabs | `{ profile }` | levels、accounting（含异常信号）、ledger（含流水与冲正）、invite、promotion、ratio-policy、newbie-exam、anticheat、hnr（计划：seedbox） |
 | `admin.torrent.tabs` | tabs | `{ torrent }` | ai-upload-review（预审报告、重审、反馈）、promotion（单种手动促销） |
+| `bonus.explain` | list | `{ user, section: "earn" \| "spend" }`（宿主为 bonus 插件的魔力值页；同一插槽渲染两次，组件只在自己所属的 `section` 输出一张规则卡片） | seeding-bonus（做种）、checkin（签到）、lottery、shop、requests（悬赏） |
 | `user.name.decorations` | list（行内，批量） | `{ user_id, size: "sm" \| "md" }` | medals（头衔、佩戴的勋章）；宿主在种子页上传者处渲染，comments / forum 在作者名旁渲染（评审 R1；列表中每个用户名一个实例，插件须用 `api.batch` 合并请求） |
 | `auth.register.form_extra` | list | `{ form: FormBinding, attempt: number }`（插件把字段写入注册请求的 `form{}` 或顶层 `invite_code` / `captcha_token`） | invite、registration-policy（问卷）、captcha |
 | `auth.login.extra` | list | `{ form: FormBinding, attempt: number }`（`attempt` 每次提交失败后加 1，验证码据此重置） | captcha（人机验证） |

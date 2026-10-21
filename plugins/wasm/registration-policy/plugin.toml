@@ -9,6 +9,8 @@ description = "注册策略：开放注册开关与每周时段、限时开放�
 summary = "控制注册方式：开放注册时段、名额、邀请制、邮箱白名单"
 category = "users"
 
+provides = ["ctx.registration@0.1.0"]
+
 [capabilities]
 sql = true
 views = ["identity.v_user_public"]

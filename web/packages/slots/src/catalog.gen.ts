@@ -30,6 +30,7 @@ export const SLOT_KINDS = {
   'admin.dashboard.widgets': 'list',
   'admin.user.tabs': 'tabs',
   'admin.torrent.tabs': 'tabs',
+  'bonus.explain': 'list',
   'user.name.decorations': 'list',
   'auth.register.form_extra': 'list',
   'auth.login.extra': 'list',
