@@ -288,6 +288,19 @@ async fn wasm_bonus_end_to_end() {
     .execute(&mut db)
     .await
     .unwrap();
+    // VIP（等级绑定或直接授予 `levels:vip` 角色）：做种魔力的基础部分 ×DONOR，做种积分不变
+    sqlx::query(
+        "INSERT INTO identity.roles (name, kind, owner_plugin, name_term) VALUES ('levels:vip', 'plugin', 'levels', 'levels.role.vip')
+         ON CONFLICT (name) DO NOTHING",
+    )
+    .execute(&mut db)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO identity.user_roles (user_id, role, granted_by) VALUES ($1, 'levels:vip', 'test')")
+        .bind(i64::try_from(uid).unwrap())
+        .execute(&mut db)
+        .await
+        .unwrap();
     let hour = chrono::Utc::now().timestamp().div_euclid(3600);
     kernel
         .run_job_now(
@@ -300,7 +313,7 @@ async fn wasm_bonus_end_to_end() {
     let mut amounts = Value::Null;
     for _ in 0..100 {
         if let Some(a) =
-            sqlx::query_scalar::<_, Value>("SELECT amounts FROM bonus.user_hours WHERE user_id = $1")
+            sqlx::query_scalar::<_, Value>("SELECT amounts || jsonb_build_object('flags', flags) FROM bonus.user_hours WHERE user_id = $1")
                 .bind(i64::try_from(uid).unwrap())
                 .fetch_optional(&mut db)
                 .await
@@ -313,7 +326,7 @@ async fn wasm_bonus_end_to_end() {
     }
     assert_eq!(
         amounts,
-        json!({"bonus": 5, "seed_points": 5}),
+        json!({"bonus": 10, "seed_points": 5, "flags": {}}),
         "user hour amounts"
     );
     let next_hour = chrono::DateTime::from_timestamp((hour + 1) * 3600, 0)
@@ -341,7 +354,7 @@ async fn wasm_bonus_end_to_end() {
             s["balances"][0]["balance"].as_i64(),
             s["balances"][1]["balance"].as_i64()
         ),
-        (Some(160), Some(5)),
+        (Some(165), Some(5)),
         "{s}"
     );
     let states: Vec<String> = sqlx::query_scalar("SELECT state FROM bonus.postings ORDER BY currency")

@@ -10,7 +10,8 @@ summary = "魔力值的发放规则：做种、发布等行为获得奖励"
 category = "play"
 
 provides = ["ctx.bonus@0.1.0"]
-requires = ["ctx.ledger@^0.1", "ctx.users@^0.1"]
+# ctx.rbac：做种魔力公式里的 has_role（VIP 加成）
+requires = ["ctx.ledger@^0.1", "ctx.users@^0.1", "ctx.rbac@^0.1"]
 # 做种魔力公式与官种认定（未安装时使用本插件规则表中的版本）
 optional_requires = ["ctx.seeding_bonus@^0.1"]
 publishes = ["bonus.awarded", "bonus.hourly_settled"]

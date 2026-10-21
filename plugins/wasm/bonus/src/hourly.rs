@@ -374,11 +374,22 @@ fn finalize(user: i64, period: &str, ver: i64, c: &CompiledRules, agg: Partial) 
         for t in &c.terms {
             vals.push(agg.sums.get(&t.name).copied().unwrap_or(0.0));
         }
-        if c.needs_roles {
-            // ctx.rbac.roles_of 尚未提供：has_role 一律为假
-            flags.insert("roles_unavailable".into(), true);
-        }
-        let env = UserEnv { vals, roles: vec![] };
+        // has_role：用户的有效角色（含等级绑定的角色，如 VIP 等级的 `levels:vip`）；取不到时按无角色结算并标记
+        let roles: Vec<String> = if c.needs_roles {
+            match services::call("ctx.rbac", "roles_of", &json!({ "user": user }).to_string())
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+            {
+                Some(r) => r,
+                None => {
+                    flags.insert("roles_unavailable".into(), true);
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        let env = UserEnv { vals, roles };
         for (cur, f) in &c.formulas {
             let mut nf = false;
             let v = f.eval(&env, &mut nf).unwrap_or(0.0);

@@ -100,7 +100,7 @@ fn opts() -> Opts {
 const MANIFEST: &str = include_str!("../plugin.toml");
 
 /// 条件可用的指标（单位已换算：GiB、小时），与 settings_schema 的枚举一致
-const METRICS: [&str; 8] = [
+const METRICS: [&str; 9] = [
     "account_age_days",
     "uploaded_gib",
     "downloaded_gib",
@@ -109,12 +109,13 @@ const METRICS: [&str; 8] = [
     "avg_seed_hours",
     "seeding_size_gib",
     "uploads_count",
+    "seed_points",
 ];
 const OPS: [&str; 4] = ["gte", "gt", "lte", "lt"];
 const TYPES: [&str; 4] = ["normal", "vip", "honor", "staff"];
 const MAX_CLASSES: usize = 64;
 /// 设置规范化规则变化时递增，使已同步的设置重新处理
-const SYNC_VERSION: &str = "2";
+const SYNC_VERSION: &str = "3";
 
 /// 预设等级的固定数字 id：与旧版本数据以及按数字 id 配置的其他规则（限流倍数、魔力加成等）保持兼容
 fn preset_id(key: &str) -> Option<i64> {
@@ -342,21 +343,28 @@ fn sync_classes() -> R<()> {
     sync_roles()
 }
 
-/// 每个等级一个角色并绑定到该等级（权限由管理员在 identity 中为角色配置）
+/// VIP 类型的等级共有的角色（bonus 的做种魔力公式用 `has_role("levels:vip")` 判断 VIP 加成）
+const VIP_ROLE: &str = "levels:vip";
+
+/// 每个等级一个角色并绑定到该等级（权限由管理员在 identity 中为角色配置）；VIP 类型的等级再绑定 [`VIP_ROLE`]
 fn sync_roles() -> R<()> {
+    call("ctx.rbac", "define_role", &json!({ "role": VIP_ROLE }))?;
     for c in classes()? {
         let role = format!("levels:class_{}", c.id);
         call("ctx.rbac", "define_role", &json!({ "role": role }))?;
+        let roles = if c.kind == "vip" { json!([role, VIP_ROLE]) } else { json!([role]) };
         call(
             "ctx.rbac",
             "set_class_roles",
-            &json!({ "class_id": c.id, "roles": [role] }),
+            &json!({ "class_id": c.id, "roles": roles }),
         )?;
     }
     Ok(())
 }
 
 const GIB: f64 = 1_073_741_824.0;
+/// 做种积分（bonus 插件的 `seed_points` 币种，1 位小数）的最小单位换算
+const SEED_POINTS_UNIT: f64 = 10.0;
 
 #[derive(Debug, Clone)]
 struct Class {
@@ -433,10 +441,12 @@ fn metrics_of(ids: &[i64]) -> R<BTreeMap<i64, Metrics>> {
     let r = sql::query(
         "SELECT u.id, extract(epoch FROM now() - u.created_at)::float8 / 86400,
                 coalesce(t.uploaded, 0), coalesce(t.downloaded, 0), coalesce(t.seed_secs, 0),
-                coalesce(t.completed_count, 0), coalesce(t.seeding_size, 0), coalesce(c.approved_count, 0)
+                coalesce(t.completed_count, 0), coalesce(t.seeding_size, 0), coalesce(c.approved_count, 0),
+                coalesce(b.balance, 0)::float8
            FROM identity.v_user_public u
            LEFT JOIN accounting.v_user_totals t ON t.user_id = u.id
            LEFT JOIN torrent.v_uploader_counts c ON c.user_id = u.id
+           LEFT JOIN ledger.v_balance b ON b.user_id = u.id AND b.currency = 'seed_points'
           WHERE u.id = ANY($1) AND u.status <> 'deleted'",
         &[SqlValue::IntArray(ids.to_vec())],
     )?;
@@ -454,6 +464,7 @@ fn metrics_of(ids: &[i64]) -> R<BTreeMap<i64, Metrics>> {
             m.insert("avg_seed_hours".into(), seed_hours / num(&row[5]).max(1.0));
             m.insert("seeding_size_gib".into(), num(&row[6]) / GIB);
             m.insert("uploads_count".into(), num(&row[7]));
+            m.insert("seed_points".into(), num(&row[8]) / SEED_POINTS_UNIT);
             (int(&row[0]), m)
         })
         .collect())
@@ -482,7 +493,7 @@ fn all(m: &Metrics, ps: &[Value]) -> bool {
 fn fmt_metric(field: &str, v: f64) -> String {
     if v.is_infinite() {
         "inf".into()
-    } else if matches!(field, "account_age_days" | "uploads_count") {
+    } else if matches!(field, "account_age_days" | "uploads_count" | "seed_points") {
         format!("{}", v.floor() as i64)
     } else if field.ends_with("_hours") {
         format!("{v:.1}")
@@ -1137,6 +1148,9 @@ mod tests {
         assert_eq!(defs.iter().filter(|d| d.is_default).map(|d| d.key.as_str()).collect::<Vec<_>>(), ["user"]);
         let pu = defs.iter().find(|d| d.key == "power_user").unwrap();
         let x = m(&[("ratio", f64::INFINITY), ("uploaded_gib", 60.0), ("account_age_days", 30.0)]);
+        // 还需要做种积分（魔力值不参与升级）
+        assert!(!all(&x, &pu.promote));
+        let x = m(&[("ratio", f64::INFINITY), ("uploaded_gib", 60.0), ("account_age_days", 30.0), ("seed_points", 40_000.0)]);
         assert!(all(&x, &pu.promote));
         assert!(!all(&m(&[("ratio", 0.9)]), &pu.keep));
     }

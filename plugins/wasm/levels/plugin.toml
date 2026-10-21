@@ -15,7 +15,7 @@ publishes = ["level.promoted", "level.demoted", "level.warned", "level.warning_c
 
 [capabilities]
 sql = true
-views = ["identity.v_user_public", "accounting.v_user_totals", "torrent.v_uploader_counts"]
+views = ["identity.v_user_public", "accounting.v_user_totals", "torrent.v_uploader_counts", "ledger.v_balance"]
 
 [capabilities.scopes]
 "ctx.users" = ["write:class"]
@@ -219,8 +219,8 @@ x-pt-order = ["metric", "op", "value"]
 [settings_schema.properties.classes.items.properties.promote.items.properties.metric]
 type = "string"
 title = "指标"
-enum = ["account_age_days", "uploaded_gib", "downloaded_gib", "ratio", "seed_hours", "avg_seed_hours", "seeding_size_gib", "uploads_count"]
-x-pt-enum-titles = ["注册天数", "上传量（GiB）", "下载量（GiB）", "分享率", "做种时长（小时）", "平均每个完成种子的做种时长（小时）", "当前做种体积（GiB）", "发布数（已通过）"]
+enum = ["account_age_days", "uploaded_gib", "downloaded_gib", "ratio", "seed_hours", "avg_seed_hours", "seeding_size_gib", "uploads_count", "seed_points"]
+x-pt-enum-titles = ["注册天数", "上传量（GiB）", "下载量（GiB）", "分享率", "做种时长（小时）", "平均每个完成种子的做种时长（小时）", "当前做种体积（GiB）", "发布数（已通过）", "做种积分"]
 
 [settings_schema.properties.classes.items.properties.promote.items.properties.op]
 type = "string"
@@ -247,8 +247,8 @@ x-pt-order = ["metric", "op", "value"]
 [settings_schema.properties.classes.items.properties.keep.items.properties.metric]
 type = "string"
 title = "指标"
-enum = ["account_age_days", "uploaded_gib", "downloaded_gib", "ratio", "seed_hours", "avg_seed_hours", "seeding_size_gib", "uploads_count"]
-x-pt-enum-titles = ["注册天数", "上传量（GiB）", "下载量（GiB）", "分享率", "做种时长（小时）", "平均每个完成种子的做种时长（小时）", "当前做种体积（GiB）", "发布数（已通过）"]
+enum = ["account_age_days", "uploaded_gib", "downloaded_gib", "ratio", "seed_hours", "avg_seed_hours", "seeding_size_gib", "uploads_count", "seed_points"]
+x-pt-enum-titles = ["注册天数", "上传量（GiB）", "下载量（GiB）", "分享率", "做种时长（小时）", "平均每个完成种子的做种时长（小时）", "当前做种体积（GiB）", "发布数（已通过）", "做种积分"]
 
 [settings_schema.properties.classes.items.properties.keep.items.properties.op]
 type = "string"
@@ -308,7 +308,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 28 }, { metric = "uploaded_gib", op = "gte", value = 50 }, { metric = "ratio", op = "gte", value = 1.05 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 28 }, { metric = "uploaded_gib", op = "gte", value = 50 }, { metric = "ratio", op = "gte", value = 1.05 }, { metric = "seed_points", op = "gte", value = 40000 }]
 keep = [{ metric = "ratio", op = "gte", value = 0.95 }]
 can_invite = true
 protected = false
@@ -320,7 +320,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 56 }, { metric = "uploaded_gib", op = "gte", value = 120 }, { metric = "ratio", op = "gte", value = 1.55 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 56 }, { metric = "uploaded_gib", op = "gte", value = 120 }, { metric = "ratio", op = "gte", value = 1.55 }, { metric = "seed_points", op = "gte", value = 80000 }]
 keep = [{ metric = "ratio", op = "gte", value = 1.45 }]
 can_invite = true
 protected = false
@@ -332,7 +332,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 84 }, { metric = "uploaded_gib", op = "gte", value = 300 }, { metric = "ratio", op = "gte", value = 2.05 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 84 }, { metric = "uploaded_gib", op = "gte", value = 300 }, { metric = "ratio", op = "gte", value = 2.05 }, { metric = "seed_points", op = "gte", value = 150000 }]
 keep = [{ metric = "ratio", op = "gte", value = 1.95 }]
 can_invite = true
 protected = false
@@ -344,7 +344,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 112 }, { metric = "uploaded_gib", op = "gte", value = 500 }, { metric = "ratio", op = "gte", value = 2.55 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 112 }, { metric = "uploaded_gib", op = "gte", value = 500 }, { metric = "ratio", op = "gte", value = 2.55 }, { metric = "seed_points", op = "gte", value = 250000 }]
 keep = [{ metric = "ratio", op = "gte", value = 2.45 }]
 can_invite = true
 protected = false
@@ -356,7 +356,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 168 }, { metric = "uploaded_gib", op = "gte", value = 750 }, { metric = "ratio", op = "gte", value = 3.05 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 168 }, { metric = "uploaded_gib", op = "gte", value = 750 }, { metric = "ratio", op = "gte", value = 3.05 }, { metric = "seed_points", op = "gte", value = 400000 }]
 keep = [{ metric = "ratio", op = "gte", value = 2.95 }]
 can_invite = true
 protected = true
@@ -368,7 +368,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 224 }, { metric = "uploaded_gib", op = "gte", value = 1024 }, { metric = "ratio", op = "gte", value = 3.55 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 224 }, { metric = "uploaded_gib", op = "gte", value = 1024 }, { metric = "ratio", op = "gte", value = 3.55 }, { metric = "seed_points", op = "gte", value = 600000 }]
 keep = [{ metric = "ratio", op = "gte", value = 3.45 }]
 can_invite = true
 protected = true
@@ -380,7 +380,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 280 }, { metric = "uploaded_gib", op = "gte", value = 1536 }, { metric = "ratio", op = "gte", value = 4.05 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 280 }, { metric = "uploaded_gib", op = "gte", value = 1536 }, { metric = "ratio", op = "gte", value = 4.05 }, { metric = "seed_points", op = "gte", value = 800000 }]
 keep = [{ metric = "ratio", op = "gte", value = 3.95 }]
 can_invite = true
 protected = true
@@ -392,7 +392,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 364 }, { metric = "uploaded_gib", op = "gte", value = 3072 }, { metric = "ratio", op = "gte", value = 4.55 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 364 }, { metric = "uploaded_gib", op = "gte", value = 3072 }, { metric = "ratio", op = "gte", value = 4.55 }, { metric = "seed_points", op = "gte", value = 1000000 }]
 keep = [{ metric = "ratio", op = "gte", value = 4.45 }]
 can_invite = true
 protected = true
@@ -483,6 +483,7 @@ protected = true
 color = "#000000"
 
 [terms]
+"levels.role.vip" = { zh-CN = "VIP（做种魔力加成）", en = "VIP (seeding bonus multiplier)" }
 "levels.class.peasant.name" = { zh-CN = "农民", en = "Peasant" }
 "levels.class.peasant.desc" = { zh-CN = "分享率过低被降级的用户。不能发送邀请。", en = "Demoted for a low share ratio. Cannot send invites." }
 "levels.class.user.name" = { zh-CN = "用户", en = "User" }

@@ -75,7 +75,13 @@ async fn levels_end_to_end() {
             .fetch_one(&mut db)
             .await
             .unwrap();
-    assert_eq!(n, 17);
+    // 17 个等级各一个角色，VIP 等级另绑定 levels:vip（做种魔力的 VIP 加成）
+    assert_eq!(n, 18);
+    let vip_roles: Vec<String> = sqlx::query_scalar("SELECT role FROM identity.class_roles WHERE class_id = 200 ORDER BY role")
+        .fetch_all(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(vip_roles, vec!["levels:class_200".to_owned(), "levels:vip".to_owned()]);
 
     let admin = register_login(&app, "lv_admin").await;
     common::grant_role(admin.id, "admin").await;
@@ -112,7 +118,7 @@ async fn levels_end_to_end() {
     assert_eq!(r.body["next"]["id"], 30);
     assert_eq!(r.body["next"]["key"], "power_user");
     let progress = r.body["next"]["progress"].as_array().unwrap();
-    assert_eq!(progress.len(), 3);
+    assert_eq!(progress.len(), 4);
     assert!(
         progress
             .iter()
@@ -134,13 +140,47 @@ async fn levels_end_to_end() {
     assert_eq!(items[16]["key"], "staff_leader");
     assert_eq!(r.body["items"][1]["is_default"], true);
 
-    // 满足 power_user：注册 30 天、上传 60 GiB、分享率 ∞ → 每日评估升级，带保护期
+    // 满足 power_user：注册 30 天、上传 60 GiB、分享率 ∞，还要做种积分 ≥ 40000（魔力值不算）→ 每日评估升级，带保护期
     sqlx::query("UPDATE identity.users SET created_at = now() - interval '30 days' WHERE id = $1")
         .bind(user.id as i64)
         .execute(&mut db)
         .await
         .unwrap();
     set_traffic(&mut db, user.id, 60 * GIB, 0).await;
+    let adjust = |currency: &'static str, amount: i64, key: &'static str| {
+        let app = app.clone();
+        let h = [admin.headers(), vec![("idempotency-key", key.to_owned())]].concat();
+        let uid = user.id;
+        async move {
+            let r = call(
+                &app,
+                "POST",
+                "/api/p/ledger/v1/admin/adjustments",
+                Some(json!({ "user_id": uid, "currency": currency, "amount": amount, "reason_note": "levels test" })),
+                &hv(&h),
+            )
+            .await;
+            assert!(r.status.is_success(), "{:?}", r.body);
+        }
+    };
+    adjust("bonus", 1_000_000, "lv-bonus").await;
+    kernel
+        .run_job_now("levels", "daily_evaluate", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(class_of(&mut db, user.id).await, (20, 20));
+    let r = call(&app, "GET", "/api/p/levels/v1/me", None, &hv(&user.headers())).await;
+    assert!(
+        r.body["next"]["progress"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["metric"] == "seed_points" && p["met"] == false && p["current"] == "0" && p["target"] == "40000"),
+        "{:?}",
+        r.body
+    );
+    // 做种积分以 1 位小数记账：400000 = 40000.0
+    adjust("seed_points", 400_000, "lv-sp").await;
     kernel
         .run_job_now("levels", "daily_evaluate", json!({}))
         .await
