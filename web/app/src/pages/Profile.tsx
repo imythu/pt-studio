@@ -11,6 +11,7 @@ import { ErrorText } from '../errors';
 import { fmtRatio, fmtSeed, levelName, type LevelClass } from '../lib';
 import { useInstalled } from '../manifest';
 import { useSession } from '../session';
+import { statusName } from './AdminUsers';
 
 interface Profile {
   id: number;
@@ -172,7 +173,7 @@ export function ProfilePage() {
                 </span>
               )}
               {profile.title && <span className="tag tag-g">{profile.title}</span>}
-              {profile.status !== 'active' && <Status tone="bad">{profile.status}</Status>}
+              {profile.status !== 'active' && <Status tone="bad">{statusName(t, profile.status)}</Status>}
             </h1>
             <p>{t('ui.profile.joined_line', { date: new Date(profile.created_at).toLocaleDateString(), n: days })}</p>
             <Slot name="user.profile.header" ctx={ctx} className="row" />

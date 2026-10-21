@@ -121,7 +121,7 @@ registerMessages("zh-CN", {
   "levels.ui.sync_error": "最新的等级设置未能生效：{e}",
   "levels.ui.edit_settings": "编辑等级",
   "levels.ui.role_hint":
-    "每个等级有自己的角色 levels:class_<id>，可在角色管理中为它配置权限。把用户设为管理组类型的等级（如“管理员”）只改变头衔与颜色，内置角色（moderator / admin）需要另外授予。",
+    "每个等级有自己的角色 levels:class_<id>，可在角色管理中为它配置权限。把用户设为管理组类型的等级（如“管理员”）只改变头衔与颜色，内置角色（版主 / 管理员）需要另外授予。",
   "levels.ui.type": "类型",
   "levels.ui.type.normal": "普通",
   "levels.ui.type.vip": "VIP",
@@ -131,6 +131,13 @@ registerMessages("zh-CN", {
   "levels.ui.flags": "属性",
   "levels.ui.cancel": "取消",
   "levels.ui.until_col": "截止",
+  "levels.ui.source.auto": "按条件自动",
+  "levels.ui.source.manual": "管理员设置",
+  "levels.ui.kind.manual": "手动设置",
+  "levels.ui.kind.honor": "荣誉",
+  "levels.ui.kind.vip": "VIP",
+  "levels.ui.set_hint":
+    "VIP 类型的等级会同时获得 VIP 角色（做种魔力加成）；限时 VIP 填锁定天数，到期自动回到按条件评估的等级。管理组类型的等级（如管理员、维护开发员）只改变头衔与颜色，权限需在「概览」里另外授予角色。",
 });
 registerMessages("en", {
   "levels.ui.class": "Class",
@@ -191,6 +198,13 @@ registerMessages("en", {
   "levels.ui.flags": "Flags",
   "levels.ui.cancel": "Cancel",
   "levels.ui.until_col": "Until",
+  "levels.ui.source.auto": "automatic",
+  "levels.ui.source.manual": "set by staff",
+  "levels.ui.kind.manual": "manual",
+  "levels.ui.kind.honor": "honour",
+  "levels.ui.kind.vip": "VIP",
+  "levels.ui.set_hint":
+    "VIP-type classes also get the VIP role (seeding bonus multiplier); for a time-limited VIP enter lock days and the user returns to the automatically evaluated class when it ends. Staff-type classes (e.g. Administrator, SysOp) only change the title and colour; grant roles separately under Overview.",
 });
 
 const OPS: Record<string, string> = { gte: "≥", gt: ">", lte: "≤", lt: "<" };
@@ -469,6 +483,12 @@ const errText = (api: PluginApi, e: unknown) =>
       ? e.message
       : String(e);
 
+/** `<prefix>.<code>` 的显示名；没有对应文案时显示原值 */
+const label = (api: PluginApi, prefix: string, code: string) => {
+  const v = api.t(`${prefix}.${code}`);
+  return v === `${prefix}.${code}` ? code : v;
+};
+
 /** 后台用户详情页“等级”标签：当前等级与来源、生效中的覆盖；手动设置 / 锁定与保号在抽屉里操作 */
 function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   const uid = ctx.profile.id;
@@ -531,7 +551,9 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
         <div className="row">
           <ClassName api={api} c={d.class} />
           <span className="small muted">
-            {api.t("levels.ui.source", { s: d.class.source })}
+            {api.t("levels.ui.source", {
+              s: label(api, "levels.ui.source", d.class.source),
+            })}
           </span>
           {d.protected_until && (
             <Status tone="ok">
@@ -573,7 +595,9 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
               {
                 key: "k",
                 header: api.t("levels.ui.type"),
-                render: (o) => <Tag>{o.kind}</Tag>,
+                render: (o) => (
+                  <Tag>{label(api, "levels.ui.kind", o.kind)}</Tag>
+                ),
               },
               {
                 key: "c",
@@ -628,6 +652,7 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
         }
       >
         <form id="level-set" className="form" onSubmit={setClass}>
+          <Note>{api.t("levels.ui.set_hint")}</Note>
           <Field label={api.t("levels.ui.class")}>
             <Select
               name="level_class"

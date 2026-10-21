@@ -4,7 +4,7 @@ import { Suspense, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '@pt-studio/sdk';
 import { SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-studio/slots';
-import { useT } from '@pt-studio/terms';
+import { useT, type Translator } from '@pt-studio/terms';
 import { Avatar, Button, Field, Input, Kpis, LoadMore, Note, PageHead, Panel, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, useToast, type Tone } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { useSession } from '../session';
@@ -26,6 +26,21 @@ export function statusTone(s: string): Tone {
   return s === 'active' ? 'ok' : s === 'pending' ? 'warn' : s === 'banned' ? 'bad' : 'warn';
 }
 
+/** 账号状态 / 限制类型的显示名；未知值原样显示 */
+export function statusName(t: Translator['t'], s: string): string {
+  const k = `ui.admin.status.${s}`;
+  const v = t(k);
+  return v === k ? s : v;
+}
+
+/** 角色显示名：内置角色用 identity.role.<name>，插件角色 <plugin>:<name> 用 <plugin>.role.<name>；没有术语时显示原名 */
+export function roleName(t: Translator['t'], r: string): string {
+  const [p, n] = r.includes(':') ? r.split(':', 2) : ['identity', r];
+  const k = `${p}.role.${n}`;
+  const v = t(`term:${k}`);
+  return v === k ? r : v;
+}
+
 interface IpUser {
   user_id: number;
   username: string;
@@ -36,12 +51,13 @@ interface IpUser {
 }
 
 function UserLinks({ rows, extra }: { rows: IpUser[]; extra: (u: IpUser) => string | number }) {
+  const t = useT();
   return (
     <div className="side-list plain">
       {rows.map((u) => (
         <Link key={u.user_id} to={`/admin/users/${u.user_id}`}>
           <span className="nm">
-            {u.username} <Status tone={statusTone(u.status)}>{u.status}</Status>
+            {u.username} <Status tone={statusTone(u.status)}>{statusName(t, u.status)}</Status>
           </span>
           <span className="v">{extra(u)}</span>
         </Link>
@@ -121,7 +137,7 @@ export function AdminUsers() {
           }}
         >
           <Input name="username_prefix" placeholder={t('ui.admin.user_search')} value={prefix} onChange={(e) => setPrefix(e.target.value)} style={{ maxWidth: 280 }} />
-          <Select name="status" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })} options={STATUSES.map((s) => ({ value: s, label: s || t('ui.admin.all_status') }))} />
+          <Select name="status" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })} options={STATUSES.map((s) => ({ value: s, label: s ? statusName(t, s) : t('ui.admin.all_status') }))} />
           <Button type="submit" size="sm" variant="primary">
             {t('ui.admin.search')}
           </Button>
@@ -139,8 +155,8 @@ export function AdminUsers() {
             columns={[
               { key: 'id', header: 'ID', render: (r) => <span className="mono">{r.id}</span> },
               { key: 'u', header: t('ui.login.username'), render: (r) => <Link className="u" to={`/admin/users/${r.id}`}>{r.username}</Link> },
-              { key: 's', header: t('ui.admin.status'), render: (r) => <Status tone={statusTone(r.status)}>{r.status}</Status> },
-              { key: 'r', header: t('ui.admin.roles'), render: (r) => <span className="row" style={{ gap: 4 }}>{r.roles.filter((x) => !x.startsWith('levels:') && x !== 'user' && x !== 'guest').map((x) => <Tag key={x}>{x}</Tag>)}</span> },
+              { key: 's', header: t('ui.admin.status'), render: (r) => <Status tone={statusTone(r.status)}>{statusName(t, r.status)}</Status> },
+              { key: 'r', header: t('ui.admin.roles'), render: (r) => <span className="row" style={{ gap: 4 }}>{r.roles.filter((x) => !x.startsWith('levels:') && x !== 'user' && x !== 'guest').map((x) => <Tag key={x}>{roleName(t, x)}</Tag>)}</span> },
               { key: 'c', header: t('ui.profile.joined'), render: (r) => <span className="small nowrap">{new Date(r.created_at).toLocaleDateString()}</span> },
               { key: 'l', header: t('ui.settings.last_seen'), render: (r) => <span className="small nowrap">{r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : '—'}</span> },
             ]}
@@ -285,8 +301,8 @@ function Overview({ d, refresh }: { d: Detail; refresh(): Promise<unknown> }) {
           <h3>{t('ui.admin.roles')}</h3>
           <div className="row">
             {d.granted_roles.map((r) => (
-              <span key={r.role} className="chip-x" title={r.granted_by}>
-                {r.role}
+              <span key={r.role} className="chip-x" title={`${r.role} · ${r.granted_by}`}>
+                {roleName(t, r.role)}
                 <button type="button" className="txt-btn" aria-label={t('ui.common.remove')} onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/roles/${r.role}`, { method: 'DELETE' }))}>
                   ×
                 </button>
@@ -295,7 +311,7 @@ function Overview({ d, refresh }: { d: Detail; refresh(): Promise<unknown> }) {
             {d.granted_roles.length === 0 && <span className="small muted">—</span>}
           </div>
           <div className="row">
-            <Select value={role} onChange={(e) => setRole(e.target.value)} options={ROLES} style={{ width: 'auto' }} />
+            <Select value={role} onChange={(e) => setRole(e.target.value)} options={ROLES.map((r) => ({ value: r, label: roleName(t, r) }))} style={{ width: 'auto' }} />
             <Button size="sm" onClick={() => act(() => api(`/api/p/identity/v1/admin/users/${d.id}/roles`, { json: { role } }), t('ui.admin.saved'))}>
               {t('ui.admin.grant')}
             </Button>
@@ -314,7 +330,7 @@ function Overview({ d, refresh }: { d: Detail; refresh(): Promise<unknown> }) {
           rowKey={(r) => r.id}
           empty="—"
           columns={[
-            { key: 'k', header: t('ui.admin.kind'), render: (r) => <Status tone={r.lifted_at ? 'mute' : 'bad'}>{r.kind}</Status> },
+            { key: 'k', header: t('ui.admin.kind'), render: (r) => <Status tone={r.lifted_at ? 'mute' : 'bad'}>{statusName(t, r.kind)}</Status> },
             { key: 'r', header: t('ui.admin.reason'), render: (r) => <span className="small">{r.reason_code}<span className="muted"> · {r.source}</span></span> },
             { key: 'u', header: t('ui.admin.until'), render: (r) => <span className="small nowrap">{r.until ? new Date(r.until).toLocaleString() : '∞'}</span> },
             {
@@ -335,7 +351,7 @@ function Overview({ d, refresh }: { d: Detail; refresh(): Promise<unknown> }) {
         />
         <form onSubmit={restrict} className="form-2">
           <Field label={t('ui.admin.kind')}>
-            <Select name="kind" value={ban.kind} onChange={(e) => setBan({ ...ban, kind: e.target.value })} options={['ban', 'leech_disabled']} />
+            <Select name="kind" value={ban.kind} onChange={(e) => setBan({ ...ban, kind: e.target.value })} options={['ban', 'leech_disabled'].map((k) => ({ value: k, label: statusName(t, k) }))} />
           </Field>
           <Field label={t('ui.admin.days')}>
             <Input name="days" type="number" min={1} value={ban.days} onChange={(e) => setBan({ ...ban, days: e.target.value })} />
@@ -402,7 +418,7 @@ export function AdminUser() {
           <span className="row" style={{ gap: 12 }}>
             <Avatar name={d.username} size={44} />
             {d.username}
-            <Status tone={statusTone(d.status)}>{d.status}</Status>
+            <Status tone={statusTone(d.status)}>{statusName(t, d.status)}</Status>
           </span>
         }
         actions={
