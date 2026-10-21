@@ -89,13 +89,11 @@ function BonusStat({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
       {s.balances.map((b) => (
         <Stat
           key={b.currency}
-          label={
-            <PLink to="/p/bonus/" navigate={api.navigate}>
-              {api.t(`term:${b.name_term}`)}
-            </PLink>
-          }
+          label={api.t(`term:${b.name_term}`)}
           value={fmt(b.balance, b.scale)}
           tone="gold"
+          to="/p/bonus/"
+          navigate={api.navigate}
         />
       ))}
     </>

@@ -39,11 +39,9 @@ function HnrStat({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   if (!s) return null;
   return (
     <Stat
-      label={
-        <PLink to="/p/hnr/" navigate={api.navigate}>
-          H&amp;R
-        </PLink>
-      }
+      label="H&R"
+      to="/p/hnr/"
+      navigate={api.navigate}
       value={
         <>
           {s.active} / <span className={s.failed > 0 ? 'down' : undefined}>{s.failed}</span>

@@ -118,11 +118,9 @@ function ProfileStat({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
   if (!s) return null;
   return (
     <Stat
-      label={
-        <PLink to="/p/ratio-policy/" navigate={api.navigate}>
-          {api.t('ratio-policy.ui.required')}
-        </PLink>
-      }
+      label={api.t('ratio-policy.ui.required')}
+      to="/p/ratio-policy/"
+      navigate={api.navigate}
       value={<span className={s.state === 'ok' ? undefined : 'down'}>{s.required.toFixed(3)}</span>}
       hint={s.state === 'ok' ? undefined : api.t(`ratio-policy.ui.state.${s.state}`)}
     />

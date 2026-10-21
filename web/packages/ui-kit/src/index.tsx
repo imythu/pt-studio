@@ -209,13 +209,21 @@ export function KeyFacts({ items }: { items: Fact[] }) {
   );
 }
 
-export function Stat({ label, value, hint, tone }: { label: ReactNode; value: ReactNode; hint?: ReactNode; tone?: Fact['tone'] }) {
-  return (
-    <div className="stat">
+/** 统计格；给了 `to` + `navigate` 时整格可点，进入对应详情页 */
+export function Stat({ label, value, hint, tone, to, navigate }: { label: ReactNode; value: ReactNode; hint?: ReactNode; tone?: Fact['tone']; to?: string; navigate?(to: string): void }) {
+  const body = (
+    <>
       <span>{label}</span>
       <b className={tone}>{value}</b>
       {hint && <small>{hint}</small>}
-    </div>
+    </>
+  );
+  return to && navigate ? (
+    <PLink to={to} navigate={navigate} className="stat link">
+      {body}
+    </PLink>
+  ) : (
+    <div className="stat">{body}</div>
   );
 }
 

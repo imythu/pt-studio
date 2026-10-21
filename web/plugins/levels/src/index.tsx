@@ -280,11 +280,9 @@ function LevelStat({
   if (!c) return null;
   return (
     <Stat
-      label={
-        <PLink to="/p/levels/" navigate={api.navigate}>
-          {api.t("levels.ui.class")}
-        </PLink>
-      }
+      label={api.t("levels.ui.class")}
+      to="/p/levels/"
+      navigate={api.navigate}
       value={<ClassName api={api} c={c} />}
       hint={me ? <NextHint api={api} me={me} /> : null}
     />

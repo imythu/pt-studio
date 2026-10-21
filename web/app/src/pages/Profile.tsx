@@ -1,12 +1,12 @@
 // 个人页（identity + accounting）：封面、头像与等级、数据带（插件 user.profile.stats 并入）、动态页签（做种中 / 下载中 / 已完成 + 插件页签）、
 // 侧栏（简介、插件 header / badges）；窄屏侧栏排在动态之后（P3）。
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { Suspense, useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api } from '@pt-studio/sdk';
 import { Slot, SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-studio/slots';
 import { formatBytes, formatDuration, useT } from '@pt-studio/terms';
-import { Avatar, Panel, SkeletonRows, Status, Table, Tabs } from '@pt-studio/ui-kit';
+import { Avatar, Panel, SkeletonRows, Stat, Status, Table, Tabs } from '@pt-studio/ui-kit';
 import { ErrorText } from '../errors';
 import { fmtRatio, fmtSeed, levelName, type LevelClass } from '../lib';
 import { useInstalled } from '../manifest';
@@ -104,22 +104,27 @@ function ActivityTabs({ profile, stats }: { profile: Profile; stats?: Stats }) {
   // ?tab=seeding 等：从「我的数据」点进来直接打开对应页签
   const want = useSearchParams()[0].get('tab');
   const [tab, setTab] = useState(want ?? tabs[0]?.id ?? '');
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (want) setTab(want);
+    if (!want) return;
+    setTab(want);
+    box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [want]);
   if (tabs.length === 0) return null;
   const cur = entries.find((e) => `p:${e.plugin}` === tab);
   return (
-    <Panel flush>
-      <Tabs tabs={tabs} value={tab} onChange={setTab} label={t('ui.profile.activity')} />
-      {cur ? (
-        <div className="tabp">
-          <SlotEntryView entry={cur} ctx={{ profile }} />
-        </div>
-      ) : (
-        <Snatches uid={profile.id} state={tab} />
-      )}
-    </Panel>
+    <div ref={box} className="scroll-mt">
+      <Panel flush>
+        <Tabs tabs={tabs} value={tab} onChange={setTab} label={t('ui.profile.activity')} />
+        {cur ? (
+          <div className="tabp">
+            <SlotEntryView entry={cur} ctx={{ profile }} />
+          </div>
+        ) : (
+          <Snatches uid={profile.id} state={tab} />
+        )}
+      </Panel>
+    </div>
   );
 }
 
@@ -130,6 +135,8 @@ export function ProfilePage() {
   const hasAccounting = useInstalled('accounting');
   const hasMessages = useInstalled('messages');
   const hasLevels = useInstalled('levels');
+  const hasRatioPolicy = useInstalled('ratio-policy');
+  const nav = useNavigate();
   const p = useQuery({ queryKey: ['user', id], queryFn: () => api<Profile>(`/api/p/identity/v1/users/${id}`) });
   const stats = useQuery({ queryKey: ['user-stats', id], queryFn: () => api<Stats>(`/api/p/accounting/v1/users/${id}/stats`), enabled: hasAccounting, retry: false });
   const cls = useQuery({
@@ -148,6 +155,8 @@ export function ProfilePage() {
   const level = cls.data?.items.find((c) => c.id === profile.class_id);
   const mine = s.me?.id === profile.id;
   const days = Math.max(1, Math.ceil((Date.now() - profile.created_at) / 86_400_000));
+  // ?tab= 只替换查询串，不新增历史记录
+  const go = (to: string) => void nav(to, { replace: to.startsWith('?') });
   return (
     <div className="profile">
       <div className="pf-cover" aria-hidden="true" />
@@ -190,28 +199,35 @@ export function ProfilePage() {
         <div className="pf-stats">
           {st && (
             <>
-              <div className="stat">
-                <span>{t('ui.profile.uploaded')}</span>
-                <b className="up">{formatBytes(st.uploaded)}</b>
-                {st.uploaded_raw !== undefined && <small>{t('ui.profile.real', { v: formatBytes(st.uploaded_raw) })}</small>}
-              </div>
-              <div className="stat">
-                <span>{t('ui.profile.downloaded')}</span>
-                <b className="down">{formatBytes(st.downloaded)}</b>
-                {st.downloaded_raw !== undefined && <small>{t('ui.profile.real', { v: formatBytes(st.downloaded_raw) })}</small>}
-              </div>
-              <div className="stat">
-                <span>{t('ui.profile.ratio')}</span>
-                <b>{fmtRatio(st.ratio)}</b>
-              </div>
-              <div className="stat">
-                <span>{t('ui.profile.seed_time')}</span>
-                <b>
-                  {seed?.v}
-                  <small> {seed?.u}</small>
-                </b>
-                {st.seeding_count !== undefined && <small>{t('ui.profile.seeding_n', { n: st.seeding_count })}</small>}
-              </div>
+              <Stat
+                label={t('ui.profile.uploaded')}
+                value={formatBytes(st.uploaded)}
+                tone="up"
+                hint={st.uploaded_raw !== undefined && t('ui.profile.real', { v: formatBytes(st.uploaded_raw) })}
+                to="?tab=completed"
+                navigate={go}
+              />
+              <Stat
+                label={t('ui.profile.downloaded')}
+                value={formatBytes(st.downloaded)}
+                tone="down"
+                hint={st.downloaded_raw !== undefined && t('ui.profile.real', { v: formatBytes(st.downloaded_raw) })}
+                to="?tab=completed"
+                navigate={go}
+              />
+              <Stat label={t('ui.profile.ratio')} value={fmtRatio(st.ratio)} to={mine && hasRatioPolicy ? '/p/ratio-policy/' : '?tab=completed'} navigate={go} />
+              <Stat
+                label={t('ui.profile.seed_time')}
+                value={
+                  <>
+                    {seed?.v}
+                    <small> {seed?.u}</small>
+                  </>
+                }
+                hint={st.seeding_count !== undefined && t('ui.profile.seeding_n', { n: st.seeding_count })}
+                to="?tab=seeding"
+                navigate={go}
+              />
             </>
           )}
           <Slot name="user.profile.stats" ctx={ctx} className="pf-slot" />
