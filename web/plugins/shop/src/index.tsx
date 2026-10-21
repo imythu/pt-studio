@@ -172,6 +172,8 @@ function summary(api: PluginApi, it: Item): string {
 }
 
 /** 购买抽屉：数量（或要消除的 H&R 记录）与合计，确认后下单 */
+type Bal = { currency: string; available: number; scale: number };
+
 function BuySheet({ api, it, balance, onClose, done }: { api: PluginApi; it: Item | null; balance: number | null; onClose(): void; done(): void }) {
   const [qty, setQty] = useState(1);
   const [records, setRecords] = useState<{ id: number; torrent_id: number; title?: string | null; state: string }[] | null>(null);
@@ -286,8 +288,12 @@ function Shop({ api }: { api: PluginApi }) {
     void api.json<{ items: Item[] }>('/api/p/shop/v1/items').then((r) => setItems(r.items));
     void api.json<{ items: Order[] }>('/api/p/shop/v1/orders').then((r) => setOrders(r.items));
     void api
-      .json<{ currency: string; balance: number }[] | { items: { currency: string; balance: number }[] }>('/api/p/ledger/v1/users/me/balances')
-      .then((r) => setBalance((Array.isArray(r) ? r : r.items).find((x) => x.currency === 'bonus')?.balance ?? 0))
+      .json<Bal[] | { items: Bal[] }>('/api/p/ledger/v1/users/me/balances')
+      .then((r) => {
+        // 账本金额是最小单位（小数位 scale），商品价格按显示单位
+        const b = (Array.isArray(r) ? r : r.items).find((x) => x.currency === 'bonus');
+        setBalance(b ? Math.floor(b.available / 10 ** b.scale) : 0);
+      })
       .catch(() => undefined);
   };
   useEffect(load, [api]);

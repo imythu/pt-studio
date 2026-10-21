@@ -369,9 +369,14 @@ try {
   // 等保号后的查询刷新完：刷新期间面板重新挂载会丢掉刚填的表单
   await a.waitForLoadState('networkidle');
   const quotaBefore = (await getJson(`/api/p/invite/v1/admin/users/${bobId}/quota`)).balance;
-  await a.getByRole('button', { name: '调整名额' }).click();
-  await a.locator('input[name=invite_delta]').fill('2');
-  await a.locator('input[name=invite_reason]').fill('e2e 活动');
+  // 后台查询刷新会让面板重新挂载、丢掉表单（偶发）：填完确认按钮可用，否则重填
+  for (let i = 0; ; i++) {
+    if (!(await a.locator('input[name=invite_delta]').isVisible())) await a.getByRole('button', { name: '调整名额' }).click();
+    await a.locator('input[name=invite_delta]').fill('2');
+    await a.locator('input[name=invite_reason]').fill('e2e 活动');
+    await a.waitForTimeout(300);
+    if ((await sheet(a).getByRole('button', { name: '调整名额' }).isEnabled()) || i >= 5) break;
+  }
   await sheet(a).getByRole('button', { name: '调整名额' }).click();
   await a.getByText(`邀请名额 ${quotaBefore + 2}`, { exact: false }).waitFor();
   await a.getByRole('tab', { name: '促销卡' }).click();

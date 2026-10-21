@@ -57,6 +57,21 @@ pub fn call(service: &str, method: &str, args: &Value) -> R<Value> {
     serde_json::from_str(&out).map_err(|_| err("kernel.internal", "service returned invalid JSON"))
 }
 
+/// 币种最小单位的倍数（10^scale）：插件设置与界面里的金额按显示单位（如 18 魔力值），经 ledger 记账前乘以它，
+/// 读回余额时除以它。ledger 未安装或币种不存在时为 1
+pub fn currency_unit(code: &str) -> i64 {
+    call("ctx.ledger", "currencies", &serde_json::json!({}))
+        .ok()
+        .and_then(|v| {
+            v.as_array()?
+                .iter()
+                .find(|c| c["code"] == code)
+                .and_then(|c| c["scale"].as_u64())
+        })
+        .and_then(|s| 10i64.checked_pow(u32::try_from(s).ok()?))
+        .unwrap_or(1)
+}
+
 /// 发布事件（载荷版本 1）；事件类型须在清单 `publishes` 中声明
 pub fn publish(event_type: &str, key: &str, payload: &Value) -> R<String> {
     publish_version(event_type, 1, key, payload)

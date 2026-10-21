@@ -186,10 +186,11 @@ fn purchase(uid: i64, item_id: i64, b: &Value) -> R<Value> {
             SqlValue::Json(target.to_string()),
         ],
     )?;
+    let minor = total.saturating_mul(ctx::currency_unit("bonus"));
     let hold = ctx::call(
         "ctx.ledger",
         "hold",
-        &json!({ "currency": "bonus", "user": uid, "amount": total, "reason": "shop.purchase",
+        &json!({ "currency": "bonus", "user": uid, "amount": minor, "reason": "shop.purchase",
                  "expires_at": time::now() + 15 * 60_000, "idempotency_key": format!("shop:hold:{oid}") }),
     )
     .map_err(|e| if e.code.contains("insufficient") { err("shop.insufficient_funds", "not enough bonus") } else { e })?;
@@ -202,7 +203,7 @@ fn purchase(uid: i64, item_id: i64, b: &Value) -> R<Value> {
     ctx::call(
         "ctx.ledger",
         "capture_hold",
-        &json!({ "hold_id": hold_id, "to_user": null, "amount": total, "reason": "shop.purchase", "memo": format!("order {oid}: {title} x{qty}"),
+        &json!({ "hold_id": hold_id, "to_user": null, "amount": minor, "reason": "shop.purchase", "memo": format!("order {oid}: {title} x{qty}"),
                  "idempotency_key": format!("shop:capture:{oid}") }),
     )?;
     if stock.is_some() {

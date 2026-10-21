@@ -1,8 +1,9 @@
 // recommend 前端：首页主栏“为你推荐 / 近期热门 / 需要做种 / 最新上架”，海报书架横向滚动。
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { formatBytes, registerMessages } from '@pt-studio/terms';
-import { Cover, Panel, SkeletonRows, Tag } from '@pt-studio/ui-kit';
+import { Cover, Panel, SkeletonRows, Tabs, Tag, useMediaQuery } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'recommend.ui.for_you': '为你推荐',
@@ -81,6 +82,8 @@ function CardItem({ item, api }: { item: Item; api: SlotProps['api'] }) {
 }
 
 function Sections({ api }: SlotProps) {
+  const narrow = useMediaQuery('(max-width: 640px)');
+  const [tab, setTab] = useState('');
   const q = useQuery({
     queryKey: ['recommend-home'],
     queryFn: () => api.json<{ sections: Section[] }>('/api/p/recommend/v1/home'),
@@ -97,6 +100,25 @@ function Sections({ api }: SlotProps) {
   }
   const sections = q.data?.sections ?? [];
   if (sections.length === 0) return null;
+  if (narrow) {
+    // 手机：多个书架合成一块，页签切换，卡片缩小，省去提示语
+    const cur = sections.find((s) => s.id === tab) ?? sections[0]!;
+    return (
+      <Panel flush className="rec-m">
+        <Tabs
+          variant="flush"
+          value={cur.id}
+          onChange={setTab}
+          tabs={sections.map((s) => ({ id: s.id, label: api.t(`recommend.ui.${s.id === 'for_you' && !s.personalised ? 'for_you_cold' : s.id}`) }))}
+        />
+        <div className="shelf sm">
+          {cur.items.map((it) => (
+            <CardItem key={it.id} item={it} api={api} />
+          ))}
+        </div>
+      </Panel>
+    );
+  }
   return (
     <>
       {sections.map((s) => {

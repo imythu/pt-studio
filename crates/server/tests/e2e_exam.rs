@@ -97,7 +97,7 @@ async fn newbie_exam_end_to_end() {
     assert_eq!(me(&app, &pass).await["state"], "passed");
     let bonus = call(&app, "GET", "/api/p/ledger/v1/users/me/balances", None, &hv(&pass.headers())).await.body;
     let got = bonus.as_array().or(bonus["items"].as_array()).unwrap().iter().find(|b| b["currency"] == "bonus").unwrap()["balance"].clone();
-    assert_eq!(got, json!(100), "{bonus:?}");
+    assert_eq!(got, json!(1000), "reward 100 bonus = 1000 minor units (scale 1): {bonus:?}");
 
     // 超期未完成 → 禁止下载；补救期内完成最后阶段目标 → 自动恢复
     sqlx::query("UPDATE newbie_exam.assignments SET stage_deadline = now() - interval '1 minute' WHERE state = 'active'")

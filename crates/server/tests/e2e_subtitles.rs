@@ -59,7 +59,7 @@ async fn db() -> PgConnection {
 
 async fn bonus(app: &axum::Router, u: &common::User) -> Value {
     let b = call(app, "GET", "/api/p/ledger/v1/users/me/balances", None, &hv(&u.headers())).await.body;
-    b.as_array().or(b["items"].as_array()).unwrap().iter().find(|x| x["currency"] == "bonus").map_or(json!(0), |x| x["balance"].clone())
+    b.as_array().or(b["items"].as_array()).unwrap().iter().find(|x| x["currency"] == "bonus").map_or(json!(0), |x| json!(x["balance"].as_i64().unwrap() / 10_i64.pow(x["scale"].as_u64().unwrap() as u32)))
 }
 
 #[tokio::test]

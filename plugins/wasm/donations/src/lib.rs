@@ -171,7 +171,7 @@ fn record(staff: i64, b: &Value) -> R<Value> {
         && let Err(e) = ctx::call(
             "ctx.ledger",
             "transfer",
-            &json!({ "currency": "bonus", "from_user": null, "to_user": uid, "amount": bonus, "reason": "donations.reward",
+            &json!({ "currency": "bonus", "from_user": null, "to_user": uid, "amount": bonus.saturating_mul(ctx::currency_unit("bonus")), "reason": "donations.reward",
                      "memo": format!("donation {id}"), "idempotency_key": format!("donations:bonus:{id}") }),
         )
     {

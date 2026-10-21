@@ -56,6 +56,14 @@ export function Wordmark({ small }: { small?: boolean }) {
 
 // ---------------- 我的数据 ----------------
 
+/** 各项数据点进去看详情的页面 */
+function useStatLinks() {
+  const s = useSession();
+  const ratioPolicy = useInstalled('ratio-policy');
+  const me = `/users/${s.me?.id ?? ''}`;
+  return { traffic: me, ratio: ratioPolicy ? '/p/ratio-policy/' : me, bonus: '/p/bonus/', seeding: `${me}?tab=seeding`, leeching: `${me}?tab=leeching`, hnr: '/p/hnr/' };
+}
+
 function MyCard() {
   const t = useT();
   const s = useSession();
@@ -64,6 +72,7 @@ function MyCard() {
   const hnr = useMyHnr();
   const lv = useMyLevel();
   const unread = useUnread();
+  const to = useStatLinks();
   if (!s.me) return null;
   const cls = levelName(t, lv?.class);
   return (
@@ -76,32 +85,40 @@ function MyCard() {
         </span>
       </Link>
       {st && (
-        <dl className="ledger">
-          <dt>{t('ui.profile.uploaded')}</dt>
-          <dd className="num up">{formatBytes(st.uploaded)}</dd>
-          <dt>{t('ui.profile.downloaded')}</dt>
-          <dd className="num down">{formatBytes(st.downloaded)}</dd>
-          <dt>{t('ui.profile.ratio')}</dt>
-          <dd className="num">{fmtRatio(st.ratio)}</dd>
+        <div className="ledger links">
+          <Link to={to.traffic}>
+            <span>{t('ui.profile.uploaded')}</span>
+            <b className="num up">{formatBytes(st.uploaded)}</b>
+          </Link>
+          <Link to={to.traffic}>
+            <span>{t('ui.profile.downloaded')}</span>
+            <b className="num down">{formatBytes(st.downloaded)}</b>
+          </Link>
+          <Link to={to.ratio}>
+            <span>{t('ui.profile.ratio')}</span>
+            <b className="num">{fmtRatio(st.ratio)}</b>
+          </Link>
           {bonus && (
-            <>
-              <dt>{t('term:bonus.currency')}</dt>
-              <dd className="num gold">{fromUnits(bonus.available, bonus.scale).toLocaleString('en-US', { maximumFractionDigits: 1 })}</dd>
-            </>
+            <Link to={to.bonus}>
+              <span>{t('term:bonus.currency')}</span>
+              <b className="num gold">{fromUnits(bonus.available, bonus.scale).toLocaleString('en-US', { maximumFractionDigits: 1 })}</b>
+            </Link>
           )}
-          <dt>{t('ui.me.seed_leech')}</dt>
-          <dd className="num">
-            <span className="up">{st.seeding_count ?? 0}</span> / <span className="down">{st.leeching_count ?? 0}</span>
-          </dd>
+          <Link to={to.seeding}>
+            <span>{t('ui.me.seed_leech')}</span>
+            <b className="num">
+              <span className="up">{st.seeding_count ?? 0}</span> / <span className="down">{st.leeching_count ?? 0}</span>
+            </b>
+          </Link>
           {hnr && (
-            <>
-              <dt>H&amp;R</dt>
-              <dd className={cx('num', hnr.failed > 0 && 'down')}>
+            <Link to={to.hnr}>
+              <span>H&amp;R</span>
+              <b className={cx('num', hnr.failed > 0 && 'down')}>
                 {hnr.failed} / {hnr.max}
-              </dd>
-            </>
+              </b>
+            </Link>
           )}
-        </dl>
+        </div>
       )}
       <div className="me-foot">
         {unread.messagesOn && (
@@ -126,32 +143,33 @@ function StatStrip() {
   const s = useSession();
   const st = useMyStats();
   const bonus = useMyBonus();
+  const to = useStatLinks();
   if (!s.me || !st) return null;
   return (
-    <Link to={`/users/${s.me.id}`} className="mstats" aria-label={t('ui.me.card')}>
-      <span>
+    <nav className="mstats" aria-label={t('ui.me.card')}>
+      <Link to={to.traffic}>
         <i>{t('ui.profile.uploaded')}</i>
         <b className="up">{shortBytes(st.uploaded)}</b>
-      </span>
-      <span>
+      </Link>
+      <Link to={to.traffic}>
         <i>{t('ui.profile.downloaded')}</i>
         <b className="down">{shortBytes(st.downloaded)}</b>
-      </span>
-      <span>
+      </Link>
+      <Link to={to.ratio}>
         <i>{t('ui.profile.ratio')}</i>
         <b>{fmtRatio(st.ratio)}</b>
-      </span>
+      </Link>
       {bonus && (
-        <span>
+        <Link to={to.bonus}>
           <i>{t('term:bonus.currency')}</i>
           <b className="gold">{shortNum(fromUnits(bonus.available, bonus.scale))}</b>
-        </span>
+        </Link>
       )}
-      <span>
+      <Link to={to.seeding}>
         <i>{t('ui.me.seeding')}</i>
         <b>{st.seeding_count ?? 0}</b>
-      </span>
-    </Link>
+      </Link>
+    </nav>
   );
 }
 
@@ -602,6 +620,7 @@ export function MePage() {
   const st = useMyStats();
   const bonus = useMyBonus();
   const lv = useMyLevel();
+  const to = useStatLinks();
   const ref = useRef<HTMLDivElement>(null);
   if (!s.me) return null;
   const cls = levelName(t, lv?.class);
@@ -616,23 +635,23 @@ export function MePage() {
         <span className="muted">›</span>
       </Link>
       {st && (
-        <div className="kpis" style={{ ['--n' as string]: 4 }}>
-          <div>
+        <div className="kpis links" style={{ ['--n' as string]: 4 }}>
+          <Link to={to.traffic}>
             <span>{t('ui.profile.uploaded')}</span>
             <b className="up">{formatBytes(st.uploaded)}</b>
-          </div>
-          <div>
+          </Link>
+          <Link to={to.traffic}>
             <span>{t('ui.profile.downloaded')}</span>
             <b className="down">{formatBytes(st.downloaded)}</b>
-          </div>
-          <div>
+          </Link>
+          <Link to={to.ratio}>
             <span>{t('ui.profile.ratio')}</span>
             <b>{fmtRatio(st.ratio)}</b>
-          </div>
-          <div>
+          </Link>
+          <Link to={to.bonus}>
             <span>{t('term:bonus.currency')}</span>
             <b className="gold">{bonus ? shortNum(fromUnits(bonus.available, bonus.scale)) : '-'}</b>
-          </div>
+          </Link>
         </div>
       )}
       <section className="panel">

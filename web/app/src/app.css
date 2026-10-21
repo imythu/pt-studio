@@ -183,6 +183,11 @@
 .shelf > a { display: grid; gap: 6px; scroll-snap-align: start; align-content: start; }
 .shelf .nm { font-size: 13px; font-weight: 600; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .shelf .mt { font-size: 11.5px; color: var(--muted); }
+.shelf.sm { grid-auto-columns: 96px; gap: 10px; padding: 12px 14px 14px; }
+.shelf.sm .nm { font-size: 12px; -webkit-line-clamp: 1; }
+.shelf.sm .mt { font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.shelf.sm .mt + .mt { display: none; }
+.rec-m .subnav { padding: 0 8px; overflow-x: auto; scrollbar-width: none; }
 
 /* ================= 种子详情 / 作品 ================= */
 .dt-hero { position: relative; border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); isolation: isolate; padding: 28px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 28px; background: var(--surface); }
@@ -503,8 +508,8 @@ button.mcard:hover { border-color: var(--line-2); }
   .menu-btn, .top > .mark { display: inline-flex; }
   .top { flex-wrap: wrap; }
   .mstats { display: flex; flex-basis: 100%; order: 5; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--line); }
-  .mstats > span { display: grid; text-align: center; flex: 1; }
-  .mstats > span + span { border-left: 1px solid var(--line); }
+  .mstats > a { display: grid; text-align: center; flex: 1; color: inherit; text-decoration: none; }
+  .mstats > a + a { border-left: 1px solid var(--line); }
   .mstats i { font-style: normal; font-size: 10.5px; color: var(--muted); letter-spacing: .08em; }
   .mstats b { font: 500 13px/1.3 var(--f-mono); }
   .board { grid-template-columns: minmax(0, 1fr) 70px 70px; }

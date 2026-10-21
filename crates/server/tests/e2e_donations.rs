@@ -103,7 +103,7 @@ async fn donations_end_to_end() {
 
     // 魔力值流水：捐赠奖励
     let e = call(&app, "GET", "/api/p/ledger/v1/users/me/entries?currency=bonus", None, &hv(&alice.headers())).await.body;
-    assert!(e["items"].as_array().unwrap().iter().any(|x| x["reason"] == "donations.reward" && x["amount"] == 300), "{e:?}");
+    assert!(e["items"].as_array().unwrap().iter().any(|x| x["reason"] == "donations.reward" && x["amount"] == 3000), "{e:?}");
     let notified: i64 = sqlx::query_scalar("SELECT count(*) FROM notify.notifications WHERE user_id = $1 AND template_key = 'donations.thanks'")
         .bind(i64::try_from(alice.id).unwrap())
         .fetch_one(&mut db().await)
@@ -125,7 +125,7 @@ async fn donations_end_to_end() {
         &app,
         "POST",
         "/api/p/ledger/v1/admin/adjustments",
-        Some(json!({ "user_id": bob.id, "currency": "bonus", "amount": 1000, "reason_note": "donations test" })),
+        Some(json!({ "user_id": bob.id, "currency": "bonus", "amount": 10_000, "reason_note": "donations test" })),
         &hv(&[admin.headers(), vec![("idempotency-key", "dn-fund-1".to_owned())]].concat()),
     )
     .await;

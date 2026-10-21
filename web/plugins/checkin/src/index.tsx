@@ -214,6 +214,7 @@ function Page({ api }: { api: PluginApi }) {
       });
       setMsg(resultText(api, r));
       void api.queryClient.invalidateQueries({ queryKey: ["checkin-me"] });
+      void api.queryClient.invalidateQueries({ queryKey: ["bonus-summary"] });
       api.toast(resultText(api, r), "success");
       await load();
     } catch (e) {

@@ -98,7 +98,7 @@ fn ledger(from: Option<i64>, to: Option<i64>, amount: i64, reason: &str, memo: &
     services::call(
         "ctx.ledger",
         "transfer",
-        &json!({ "currency": currency(), "from_user": from, "to_user": to, "amount": amount, "reason": reason, "memo": memo, "idempotency_key": key }).to_string(),
+        &json!({ "currency": currency(), "from_user": from, "to_user": to, "amount": amount.saturating_mul(pt_plugin_sdk::ctx::currency_unit(&currency())), "reason": reason, "memo": memo, "idempotency_key": key }).to_string(),
     )?;
     Ok(())
 }

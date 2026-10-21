@@ -129,7 +129,7 @@ fn upload(uid: i64, tid: i64, a: &UploadArgs<'_>, body: &[u8]) -> R<Value> {
         let _ = services::call(
             "ctx.ledger",
             "transfer",
-            &json!({ "currency": "bonus", "from_user": null, "to_user": uid, "amount": s.reward, "reason": "subtitles.upload_reward",
+            &json!({ "currency": "bonus", "from_user": null, "to_user": uid, "amount": s.reward.saturating_mul(pt_plugin_sdk::ctx::currency_unit("bonus")), "reason": "subtitles.upload_reward",
                      "memo": format!("subtitle:{id}"), "idempotency_key": format!("subtitles:reward:{id}") })
             .to_string(),
         );

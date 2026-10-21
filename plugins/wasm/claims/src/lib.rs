@@ -289,7 +289,7 @@ fn settle_user(uid: i64, period: &str, s: &Settings) -> R<()> {
         ctx::call(
             "ctx.ledger",
             "transfer",
-            &json!({ "currency": "bonus", "from_user": null, "to_user": uid, "amount": reward, "reason": "claims.monthly_reward",
+            &json!({ "currency": "bonus", "from_user": null, "to_user": uid, "amount": reward.saturating_mul(ctx::currency_unit("bonus")), "reason": "claims.monthly_reward",
                      "memo": period, "idempotency_key": format!("claims:{period}:{uid}") }),
         )?;
     }

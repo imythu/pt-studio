@@ -34,7 +34,7 @@ async fn balance(app: &axum::Router, u: &User) -> i64 {
         .into_iter()
         .flatten()
         .find(|b| b["currency"] == "bonus")
-        .and_then(|b| b["balance"].as_i64())
+        .and_then(|b| Some(b["balance"].as_i64()? / 10_i64.pow(b["scale"].as_u64()? as u32)))
         .unwrap_or(0)
 }
 

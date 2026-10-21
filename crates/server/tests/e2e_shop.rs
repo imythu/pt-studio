@@ -20,7 +20,7 @@ async fn db() -> PgConnection {
 
 async fn balance(app: &axum::Router, u: &User) -> i64 {
     let r = call(app, "GET", "/api/p/bonus/v1/users/me/summary", None, &hv(&u.headers())).await;
-    r.body["balances"].as_array().into_iter().flatten().find(|b| b["currency"] == "bonus").and_then(|b| b["balance"].as_i64()).unwrap_or(0)
+    r.body["balances"].as_array().into_iter().flatten().find(|b| b["currency"] == "bonus").and_then(|b| Some(b["balance"].as_i64()? / 10_i64.pow(b["scale"].as_u64()? as u32))).unwrap_or(0)
 }
 
 async fn item_id(app: &axum::Router, admin: &User, kind: &str) -> i64 {
@@ -83,7 +83,7 @@ async fn shop_end_to_end() {
         &app,
         "POST",
         "/api/p/ledger/v1/admin/adjustments",
-        Some(json!({ "user_id": alice.id, "currency": "bonus", "amount": 50_000, "reason_note": "shop test" })),
+        Some(json!({ "user_id": alice.id, "currency": "bonus", "amount": 500_000, "reason_note": "shop test" })),
         &hv(&[admin.headers(), vec![("idempotency-key", "shop-fund-1".to_owned())]].concat()),
     )
     .await;

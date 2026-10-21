@@ -780,6 +780,8 @@ interface ledger {
 
 以上仅为格式示例，`ctx.ledger` 的正式签名由 ledger 插件的详细设计给出。
 
+**金额单位**：账本只认最小单位（`bonus` 小数位为 1，10 = 1.0 魔力值）。插件设置、商品价格、奖励等面向管理员和用户的金额一律按显示单位填写，调用 `ctx.ledger` 前乘以 `pt_plugin_sdk::ctx::currency_unit(code)`（10^scale），读回余额时除以它；前端显示余额同样按 `scale` 换算。
+
 ### 2.4 调用语义
 
 | 项 | 约定 |

@@ -87,7 +87,7 @@ fn transfer(from: Option<i64>, to: Option<i64>, amount: i64, reason: &str, memo:
     ctx::call(
         "ctx.ledger",
         "transfer",
-        &json!({ "currency": "bonus", "from_user": from, "to_user": to, "amount": amount, "reason": reason, "memo": memo, "idempotency_key": key }),
+        &json!({ "currency": "bonus", "from_user": from, "to_user": to, "amount": amount.saturating_mul(ctx::currency_unit("bonus")), "reason": reason, "memo": memo, "idempotency_key": key }),
     )?;
     Ok(())
 }

@@ -1,8 +1,8 @@
 // 个人页（identity + accounting）：封面、头像与等级、数据带（插件 user.profile.stats 并入）、动态页签（做种中 / 下载中 / 已完成 + 插件页签）、
 // 侧栏（简介、插件 header / badges）；窄屏侧栏排在动态之后（P3）。
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { Suspense, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Suspense, useEffect, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { api } from '@pt-studio/sdk';
 import { Slot, SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-studio/slots';
 import { formatBytes, formatDuration, useT } from '@pt-studio/terms';
@@ -101,7 +101,12 @@ function ActivityTabs({ profile, stats }: { profile: Profile; stats?: Stats }) {
     { id: 'completed', label: t('ui.profile.completed'), count: stats?.completed_count },
   ];
   const tabs = [...(hasAccounting ? own : []), ...entries.map((e) => ({ id: `p:${e.plugin}`, label: title(e) }))];
-  const [tab, setTab] = useState(tabs[0]?.id ?? '');
+  // ?tab=seeding 等：从「我的数据」点进来直接打开对应页签
+  const want = useSearchParams()[0].get('tab');
+  const [tab, setTab] = useState(want ?? tabs[0]?.id ?? '');
+  useEffect(() => {
+    if (want) setTab(want);
+  }, [want]);
   if (tabs.length === 0) return null;
   const cur = entries.find((e) => `p:${e.plugin}` === tab);
   return (

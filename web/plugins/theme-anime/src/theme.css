@@ -163,7 +163,7 @@ body { background: var(--a-sky) var(--bg); background-attachment: fixed; }
   background: var(--a-glass);
   border-color: color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--r); box-shadow: var(--shadow);
 }
-.kpis > div, .keyfacts > div { border-left-color: var(--line); }
+.kpis > :is(div, a), .keyfacts > div { border-left-color: var(--line); }
 .kpis b, .stat b { background: var(--a-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .dt th { background: color-mix(in srgb, var(--sunk) 80%, transparent); }
 .dt tbody tr:hover td, .trow:hover { background: color-mix(in srgb, var(--gold-soft) 45%, transparent); }

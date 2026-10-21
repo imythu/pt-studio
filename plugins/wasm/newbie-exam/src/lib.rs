@@ -163,7 +163,8 @@ fn snapshot(uid: i64) -> R<Metrics> {
         .and_then(|v| serde_json::from_str::<Value>(&v).ok())
         .and_then(|v| v.as_f64().or_else(|| v["available"].as_f64()).or_else(|| v["balance"].as_f64()))
         .unwrap_or(0.0);
-    m.insert("bonus".into(), bonus);
+    #[allow(clippy::cast_precision_loss)]
+    m.insert("bonus".into(), bonus / ctx::currency_unit("bonus") as f64);
     Ok(m)
 }
 
@@ -411,7 +412,7 @@ fn reward(a: &Assignment) -> R<()> {
     ctx::call(
         "ctx.ledger",
         "transfer",
-        &json!({ "currency": "bonus", "from_user": null, "to_user": a.uid, "amount": a.def.reward_bonus,
+        &json!({ "currency": "bonus", "from_user": null, "to_user": a.uid, "amount": a.def.reward_bonus.saturating_mul(ctx::currency_unit("bonus")),
                  "reason": "newbie-exam.reward", "idempotency_key": format!("exam:c:{}", a.id) }),
     )?;
     sql::execute("UPDATE assignments SET reward_given = true WHERE id = $1", &[SqlValue::Int(a.id)])?;

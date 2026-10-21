@@ -41,7 +41,7 @@ fn pay(uid: i64, currency: &str, amount: i64, reason: &str, day: &str) -> R<()> 
     ctx::call(
         "ctx.ledger",
         "transfer",
-        &json!({ "currency": currency, "from_user": null, "to_user": uid, "amount": amount, "reason": reason, "memo": day,
+        &json!({ "currency": currency, "from_user": null, "to_user": uid, "amount": amount.saturating_mul(ctx::currency_unit(currency)), "reason": reason, "memo": day,
                  "idempotency_key": format!("{reason}:{uid}:{day}") }),
     )?;
     Ok(())
