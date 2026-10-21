@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "pt-markup"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "pulldown-cmark",
 ]
@@ -201,11 +201,11 @@ dependencies = [
 
 [[package]]
 name = "pt-release-parser"
-version = "0.5.3"
+version = "0.5.4"
 
 [[package]]
 name = "pt-type-kit"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "pt-release-parser",
  "serde_json",
@@ -466,13 +466,6 @@ dependencies = [
 
 [[package]]
 name = "pt-wasm-seeding-bonus"
-version = "0.1.0"
-dependencies = [
- "pt-plugin-sdk",
-]
-
-[[package]]
-name = "pt-wasm-server-load"
 version = "0.1.0"
 dependencies = [
  "pt-plugin-sdk",

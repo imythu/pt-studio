@@ -28,6 +28,8 @@ pub fn native_plugins() -> Vec<NativePlugin> {
     v.push(pt_plugin_tracker_bridge::plugin());
     #[cfg(feature = "recommend")]
     v.push(pt_plugin_recommend::plugin());
+    #[cfg(feature = "server-load")]
+    v.push(pt_plugin_server_load::plugin());
     v
 }
 

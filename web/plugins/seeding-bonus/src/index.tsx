@@ -8,7 +8,7 @@ import { Field, Input, NavItem, Note, PageHead, Panel, RuleItem, SkeletonRows } 
 registerMessages('zh-CN', {
   'seeding-bonus.ui.menu': '做种魔力规则',
   'seeding-bonus.ui.title': '做种魔力怎么算',
-  'seeding-bonus.ui.lede': '每小时结算一次，按你这一小时里正在做种的种子计算。',
+  'seeding-bonus.ui.lede': '每小时结算一次，按你这一小时里正在做种的种子计算，同时发放魔力值和做种积分。',
   'seeding-bonus.ui.calc': '估算器',
   'seeding-bonus.ui.calc_hint': '输入一个典型种子的情况和你在做的种子数，估算每小时能拿多少（假设所有种子都和它一样、整小时在做种）。',
   'seeding-bonus.ui.size': '单个种子体积（GiB）',
@@ -26,6 +26,8 @@ registerMessages('zh-CN', {
   'seeding-bonus.ui.rule_official': '官种另有 ×{f} 加成。',
   'seeding-bonus.ui.rule_vip': 'VIP 基础部分 ×{f}。',
   'seeding-bonus.ui.rule_link': '完整公式与估算器',
+  'seeding-bonus.ui.rule_points': '同时累计做种积分（不含 VIP 加成与官种奖励）。',
+  'seeding-bonus.ui.points_per_hour': '做种积分约 {n} / 小时',
 });
 registerMessages('en', {
   'seeding-bonus.ui.menu': 'Seeding bonus rules',
@@ -48,6 +50,8 @@ registerMessages('en', {
   'seeding-bonus.ui.rule_official': 'Official releases earn an extra ×{f}.',
   'seeding-bonus.ui.rule_vip': 'VIP base ×{f}.',
   'seeding-bonus.ui.rule_link': 'Full formula and estimator',
+  'seeding-bonus.ui.rule_points': 'Seeding points accrue alongside (without the VIP multiplier or official reward).',
+  'seeding-bonus.ui.points_per_hour': 'seeding points ≈ {n} / hour',
 });
 
 interface Params {
@@ -73,11 +77,17 @@ function torrentScore(p: Params, gib: number, weeks: number, seeders: number): n
   return age * gib * rare;
 }
 
+const curve = (p: Params, x: number) => ((p.b0 * 2) / Math.PI) * Math.atan(x / p.l);
+
 /** 每小时魔力（非 VIP） */
 function hourly(p: Params, a: number, count: number, officialA: number): number {
-  const curve = (x: number) => ((p.b0 * 2) / Math.PI) * Math.atan(x / p.l);
-  const official = p.official_enabled ? curve(officialA) * p.official_factor : 0;
-  return Math.min(curve(a) + p.p * Math.min(count, p.max_count) + official, p.hourly_cap);
+  const official = p.official_enabled ? curve(p, officialA) * p.official_factor : 0;
+  return Math.min(curve(p, a) + p.p * Math.min(count, p.max_count) + official, p.hourly_cap);
+}
+
+/** 每小时做种积分：只有基础部分，不含 VIP 加成与官种奖励 */
+function hourlyPoints(p: Params, a: number, count: number): number {
+  return Math.min(curve(p, a) + p.p * Math.min(count, p.max_count), p.hourly_cap);
 }
 
 const fmt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -107,6 +117,7 @@ function Calc({ api, p }: { api: PluginApi; p: Params }) {
         <b>{api.t('seeding-bonus.ui.per_hour', { n: fmt(h) })}</b>
         <span className="muted"> · {api.t('seeding-bonus.ui.per_day', { n: fmt(h * 24) })}</span>
       </p>
+      <p className="small">{api.t('seeding-bonus.ui.points_per_hour', { n: fmt(hourlyPoints(p, per * count, count)) })}</p>
       <p className="small muted">
         A = {fmt(per)} × {count} = {fmt(per * count)}
       </p>
@@ -133,6 +144,7 @@ function Explain({ ctx, api }: SlotProps<{ section: string }>) {
       {api.t('seeding-bonus.ui.rule_body', { p: fmt(p.p), max: fmt(p.max_count) })}
       {p.official_enabled && ` ${api.t('seeding-bonus.ui.rule_official', { f: fmt(p.official_factor) })}`}
       {p.donor_factor !== 1 && ` ${api.t('seeding-bonus.ui.rule_vip', { f: fmt(p.donor_factor) })}`}
+      {` ${api.t('seeding-bonus.ui.rule_points')}`}
     </RuleItem>
   );
 }
@@ -168,6 +180,9 @@ function Page({ api }: { api: PluginApi }) {
                 <b>VIP</b> 的基础部分 ×{fmt(p.donor_factor)}；一小时内做种不足 {fmt(p.min_seed_minutes)} 分钟的种子不计入
                 {p.min_size_mib > 0 && <>，小于 {fmt(p.min_size_mib)} MiB 的种子不计入</>}；只做了部分时间按比例折算；每小时最多 {fmt(p.hourly_cap)}。
               </li>
+              <li>
+                <b>做种积分</b>：和魔力同时结算，只取上面第 2、3 步的基础部分——不乘 VIP 倍率、不含官种奖励，所以同样做种的人拿到的做种积分相同。做种积分只增不减，不能消费或转账，用来衡量做种贡献。
+              </li>
             </ol>
           </Panel>
           <Calc api={api} p={p} />
@@ -177,7 +192,9 @@ function Page({ api }: { api: PluginApi }) {
 总做种分    A  = Σ Aᵢ          官种做种分 OA = Σ 官种 Aᵢ
 每小时魔力     = ${fmt(p.b0)} × 2/π × arctan(A / ${fmt(p.l)}) + ${fmt(p.p)} × min(种子数, ${fmt(p.max_count)})${
                 p.official_enabled ? `\n               + ${fmt(p.b0)} × 2/π × arctan(OA / ${fmt(p.l)}) × ${fmt(p.official_factor)}` : ''
-              }`}
+              }
+              （VIP 的前两项 ×${fmt(p.donor_factor)}）
+每小时做种积分 = ${fmt(p.b0)} × 2/π × arctan(A / ${fmt(p.l)}) + ${fmt(p.p)} × min(种子数, ${fmt(p.max_count)})`}
             </pre>
             <Note tone="info">公式来自 NexusPHP 的做种魔力算法，参数由管理员在后台“做种魔力”插件设置中调整。</Note>
           </Panel>

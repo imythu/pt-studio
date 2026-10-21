@@ -1,6 +1,0 @@
-package pt:server-load-plugin@0.1.0;
-
-world server-load {
-  include pt:plugin/host@1.0.0;
-  export pt:plugin/http-handler@1.0.0;
-}

@@ -18,6 +18,12 @@ registerMessages('zh-CN', {
   'bonus.ui.last_hour': '上一小时做种',
   'bonus.ui.last_hour_hint': '{n} 个种子 · {t}',
   'bonus.ui.last_hour_none': '最近没有做种结算',
+  'bonus.ui.last_hour_sp': '做种积分 +{n}',
+  'bonus.ui.sp_title': '魔力值和做种积分有什么不同',
+  'bonus.ui.sp_bonus': '用来花的：商城兑换、抽奖、悬赏、转账都扣它。做种之外，签到、发布、捐赠等也能获得；VIP 的做种收益有加成，官种另有奖励。',
+  'bonus.ui.sp_points': '记录你的做种贡献：只随做种增长，不能消费、不能转账，也不会因为花魔力而减少。每小时和做种魔力一起结算，数值等于做种魔力的基础部分（不含 VIP 加成和官种奖励），所以同样做种的人做种积分相同。',
+  'bonus.ui.sp_current': '当前 {n}',
+  'bonus.ui.sp_kpi': '做种贡献，不能消费',
   'bonus.ui.per_times': '+{n} / 次',
   'bonus.ui.daily_limit': '每天最多计 {n} 次。',
   'bonus.ui.transfer_rule': '把魔力值转给其他用户，用于感谢、互助等。',
@@ -54,6 +60,12 @@ registerMessages('en', {
   'bonus.ui.menu': 'Bonus',
   'bonus.ui.history': 'Bonus history',
   'bonus.ui.title': 'Bonus',
+  'bonus.ui.last_hour_sp': 'seeding points +{n}',
+  'bonus.ui.sp_title': 'Bonus vs. seeding points',
+  'bonus.ui.sp_bonus': 'The spendable one: shop, prize wheel, bounties and transfers all use it. Besides seeding you also earn it from check-ins, uploads and donations; VIPs get a seeding multiplier and official releases pay extra.',
+  'bonus.ui.sp_points': 'A record of your seeding contribution: it only grows with seeding and cannot be spent or transferred. Settled hourly together with seeding bonus, it equals the base part of seeding bonus (without the VIP multiplier or official-release reward), so equal seeding earns equal points.',
+  'bonus.ui.sp_current': 'now {n}',
+  'bonus.ui.sp_kpi': 'seeding record, not spendable',
   'bonus.ui.lede': 'Earn bonus by seeding, checking in and uploading; spend it in the shop, on the prize wheel, on request bounties or send it to other users.',
   'bonus.ui.tab_rules': 'Earning & spending',
   'bonus.ui.tab_history': 'History',
@@ -177,7 +189,7 @@ function writeQuery(tab: string, page: number) {
   window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
 }
 
-function Rules({ api, ex }: { api: PluginApi; ex: Explain | null }) {
+function Rules({ api, ex, s }: { api: PluginApi; ex: Explain | null; s: Summary | null }) {
   const user = api.user();
   const scaleOf = (c: string) => ex?.currencies.find((x) => x.currency === c)?.scale ?? 0;
   const nameOf = (c: string) => {
@@ -205,6 +217,20 @@ function Rules({ api, ex }: { api: PluginApi; ex: Explain | null }) {
           </RuleItem>
         </div>
       </Panel>
+      {ex?.currencies.some((c) => c.currency === 'seed_points') && (
+        <Panel title={api.t('bonus.ui.sp_title')} flush>
+          <div className="rule-list">
+            {(['bonus', 'seed_points'] as const).map((c) => {
+              const b = s?.balances.find((x) => x.currency === c);
+              return (
+                <RuleItem key={c} title={nameOf(c)} value={b ? api.t('bonus.ui.sp_current', { n: fmt(b.balance, b.scale) }) : undefined}>
+                  {api.t(c === 'bonus' ? 'bonus.ui.sp_bonus' : 'bonus.ui.sp_points')}
+                </RuleItem>
+              );
+            })}
+          </div>
+        </Panel>
+      )}
     </>
   );
 }
@@ -296,6 +322,8 @@ function BonusPage({ api }: { api: PluginApi }) {
   }, [api]);
   const last = ex?.last_hour;
   const lastAmount = last?.amounts?.bonus;
+  const lastPoints = last?.amounts?.seed_points;
+  const scaleOf = (c: string) => s?.balances.find((b) => b.currency === c)?.scale ?? 0;
   return (
     <div className="stack">
       <PageHead
@@ -310,12 +338,17 @@ function BonusPage({ api }: { api: PluginApi }) {
       {s && (
         <Kpis
           items={[
-            ...s.balances.map((b) => ({ label: api.t(`term:${b.name_term}`), value: fmt(b.balance, b.scale), hint: api.t('bonus.ui.available', { n: fmt(b.available, b.scale) }), tone: 'gold' as const })),
+            ...s.balances.map((b) => ({ label: api.t(`term:${b.name_term}`), value: fmt(b.balance, b.scale), hint: b.currency === 'seed_points' ? api.t('bonus.ui.sp_kpi') : api.t('bonus.ui.available', { n: fmt(b.available, b.scale) }), tone: 'gold' as const })),
             {
               label: api.t('bonus.ui.last_hour'),
-              value: lastAmount !== undefined ? `+${fmt(lastAmount, s.balances.find((b) => b.currency === 'bonus')?.scale ?? 0)}` : '—',
+              value: lastAmount !== undefined ? `+${fmt(lastAmount, scaleOf('bonus'))}` : '—',
               hint: last
-                ? api.t('bonus.ui.last_hour_hint', { n: last.torrent_count, t: new Date(last.period_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })
+                ? [
+                    api.t('bonus.ui.last_hour_hint', { n: last.torrent_count, t: new Date(last.period_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }),
+                    lastPoints !== undefined ? api.t('bonus.ui.last_hour_sp', { n: fmt(lastPoints, scaleOf('seed_points')) }) : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
                 : api.t('bonus.ui.last_hour_none'),
             },
           ]}
@@ -333,7 +366,7 @@ function BonusPage({ api }: { api: PluginApi }) {
           { id: 'history', label: api.t('bonus.ui.tab_history') },
         ]}
       />
-      {tab === 'history' ? <History api={api} s={s} /> : <Rules api={api} ex={ex} />}
+      {tab === 'history' ? <History api={api} s={s} /> : <Rules api={api} ex={ex} s={s} />}
     </div>
   );
 }

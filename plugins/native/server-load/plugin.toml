@@ -1,12 +1,12 @@
 id = "server-load"
 name = "服务器负载"
-version = "0.1.0"
-kind = "wasm"
+version = "0.2.0"
+kind = "native"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "首页侧栏的服务器负载：注册用户数与全站用户上限（默认取注册策略的上限）、今日新注册、近一小时活跃用户与连接数；可限定能看到的用户等级或角色（满足其一即可）"
-summary = "在首页显示用户数 / 用户上限等站点负载，可限定谁能看"
+description = "首页侧栏的服务器负载：注册用户数与全站用户上限（默认取注册策略的上限）、今日新注册、活跃用户与连接数，以及每个 CPU 核心的使用率、内存 / 交换区、各磁盘读写吞吐与繁忙度、负载均值；可限定能看到的用户等级或角色（满足其一即可）"
+summary = "在首页显示用户数 / 用户上限、CPU 各核心、内存与磁盘 IO，可限定谁能看"
 category = "system"
 
 requires = ["ctx.rbac@^0.1"]
@@ -24,10 +24,6 @@ path = "/v1/status"
 auth = "user"
 rate_limit = "user:60/m"
 
-[wasm]
-memory_mb = 32
-default_timeout_ms = 1000
-
 [frontend]
 entry = "index.js"
 slots = ["home.widgets"]
@@ -35,7 +31,7 @@ settings_ui = "custom"
 
 [settings_schema]
 type = "object"
-x-pt-order = ["user_limit", "visible_classes", "visible_roles"]
+x-pt-order = ["user_limit", "show_system", "visible_classes", "visible_roles"]
 
 [settings_schema.properties.user_limit]
 type = "integer"
@@ -44,6 +40,12 @@ description = "0 = 使用注册策略里的「全站用户上限」"
 minimum = 0
 maximum = 100000000
 default = 0
+
+[settings_schema.properties.show_system]
+type = "boolean"
+title = "显示主机负载"
+description = "CPU 各核心、内存、磁盘 IO 与负载均值（读 /proc，容器内为宿主机的值）"
+default = true
 
 [settings_schema.properties.visible_classes]
 type = "array"
