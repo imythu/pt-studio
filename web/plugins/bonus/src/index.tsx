@@ -254,6 +254,8 @@ function History({ api, s }: { api: PluginApi; s: Summary | null }) {
     };
   }, [api, cur, page]);
   const scaleOf = (c: string) => s?.balances.find((b) => b.currency === c)?.scale ?? 0;
+  // 「全部」页签混排多个币种，需标出每条记录的币种
+  const nameTerm = (c: string) => (s && s.balances.length > 1 ? s.balances.find((b) => b.currency === c)?.name_term : undefined);
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   return (
     <Panel flush primary>
@@ -282,7 +284,8 @@ function History({ api, s }: { api: PluginApi; s: Summary | null }) {
               header: api.t('bonus.ui.event'),
               render: (r) => (
                 <>
-                  {reasonText(api, r.reason)} {r.reversed && <Status tone="mute">{api.t('bonus.ui.reversed')}</Status>}
+                  {reasonText(api, r.reason)} {!cur && nameTerm(r.currency) && <Status tone="mute">{api.t(`term:${nameTerm(r.currency)}`)}</Status>}{' '}
+                  {r.reversed && <Status tone="mute">{api.t('bonus.ui.reversed')}</Status>}
                   {r.memo && <div className="tiny muted">{r.memo}</div>}
                 </>
               ),
