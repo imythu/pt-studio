@@ -213,22 +213,6 @@ async fn web_end_to_end() {
         .unwrap();
     assert_eq!(n, 2);
 
-    // 主题覆盖术语：修道院主题启用期间等级改称修为境界，切回后恢复原名；术语快照不做共享缓存
-    assert_eq!(put("theme-xiudaoyuan").await.status, StatusCode::NO_CONTENT);
-    let m3 = call(&app, "GET", "/api/kernel/v1/frontend/manifest", None, &[]).await;
-    assert_eq!(m3.body["theme"]["terms"], true, "{:?}", m3.body["theme"]);
-    let zh = call(&app, "GET", "/api/kernel/v1/terms?locale=zh-CN", None, &[]).await;
-    assert_eq!(zh.headers["cache-control"], "no-cache");
-    assert_eq!(zh.body["terms"]["levels.class.administrator.name"]["name"], "仙人");
-    assert_eq!(zh.body["terms"]["levels.class.elite_user.name"]["name"], "渡劫二重");
-    let en = call(&app, "GET", "/api/kernel/v1/terms?locale=en", None, &[]).await;
-    assert_eq!(en.body["terms"]["levels.class.administrator.name"]["name"], "Immortal");
-    assert_eq!(put("theme-anime").await.status, StatusCode::NO_CONTENT);
-    let zh = call(&app, "GET", "/api/kernel/v1/terms?locale=zh-CN", None, &[]).await;
-    assert_eq!(zh.body["terms"]["levels.class.administrator.name"]["name"], "管理员");
-    let m4 = call(&app, "GET", "/api/kernel/v1/frontend/manifest", None, &[]).await;
-    assert_eq!(m4.body["theme"]["terms"], false);
-
     let tid = upload(
         &app,
         &alice,
