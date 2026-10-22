@@ -283,10 +283,16 @@ export function SlotEntryView({ entry, ctx }: { entry: ResolvedEntry; ctx: unkno
   return <Rendered e={entry} ctx={ctx} />;
 }
 
+/** 插槽条目标题键：先查界面文案，查不到再当术语键（如清单 [terms] 里的 `<插件>.name`） */
+function entryLabel(tr: { t(key: string): string }, key: string): string {
+  const s = tr.t(key);
+  return s === key ? tr.t(`term:${key}`) : s;
+}
+
 /** 插槽条目的显示名（tabs 插槽的 title_term、columns 插槽的 header_term） */
 export function useSlotEntryTitle(): (e: ResolvedEntry) => string {
   const reg = useRegistry();
-  return (e) => reg.host.translator.t(e.entry.title_term ?? e.entry.header_term ?? e.plugin);
+  return (e) => entryLabel(reg.host.translator, e.entry.title_term ?? e.entry.header_term ?? e.plugin);
 }
 
 function SlotInner({ name, ctx, className, empty }: { name: SlotName; ctx: unknown; className?: string; empty?: ReactNode }) {
@@ -303,7 +309,7 @@ function SlotInner({ name, ctx, className, empty }: { name: SlotName; ctx: unkno
         <div role="tablist" className="tabs">
           {entries.map((e, i) => (
             <button key={e.plugin} role="tab" aria-selected={i === tab} tabIndex={i === tab ? 0 : -1} onClick={() => setTab(i)} type="button">
-              {reg.host.translator.t(e.entry.title_term ?? e.plugin)}
+              {entryLabel(reg.host.translator, e.entry.title_term ?? e.plugin)}
             </button>
           ))}
         </div>
@@ -337,7 +343,7 @@ export function useSlotColumns(name: SlotName): { key: string; header: string; r
   const reg = useRegistry();
   return entries.map((e) => ({
     key: e.plugin,
-    header: reg.host.translator.t(e.entry.header_term ?? e.plugin),
+    header: entryLabel(reg.host.translator, e.entry.header_term ?? e.plugin),
     render: (ctx: unknown) => <Rendered e={e} ctx={ctx} />,
   }));
 }
