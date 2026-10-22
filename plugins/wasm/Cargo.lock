@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "pt-markup"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "pulldown-cmark",
 ]
@@ -201,11 +201,11 @@ dependencies = [
 
 [[package]]
 name = "pt-release-parser"
-version = "0.5.4"
+version = "0.5.5"
 
 [[package]]
 name = "pt-type-kit"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "pt-release-parser",
  "serde_json",

@@ -5,12 +5,14 @@ kind = "native"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "站点货币的复式记账：发行、回收、转账、冻结、锁定、冲正（ctx.ledger）"
+description = "站点货币的复式记账：发行、回收、转账、冻结、锁定、冲正（ctx.ledger）；后台批量发放并以站内信通知"
 summary = "魔力值等站内货币的记账底层，保证每一笔收支可追溯"
 category = "play"
 
 provides = ["ctx.ledger@0.1.0"]
 requires = ["ctx.users@^0.1"]
+# 批量发放后逐人发系统站内信（未安装时跳过通知）
+optional_requires = ["ctx.messages@^0.1"]
 publishes = ["ledger.currency_registered", "ledger.entry_posted", "ledger.entry_reversed"]
 
 [capabilities]
@@ -19,6 +21,9 @@ sql = true
 # 转账收款方按用户名查找
 views = ["identity.v_user_public"]
 
+[capabilities.scopes]
+"ctx.messages" = ["send"]
+
 [[hook_points]]
 name = "ledger.before_transfer"
 input_schema = "schemas/hooks/ledger.before_transfer.json"
@@ -26,6 +31,11 @@ input_schema = "schemas/hooks/ledger.before_transfer.json"
 [[jobs]]
 name = "expire_hold"
 timeout_secs = 60
+
+# 批量发放：每次执行一块（发放 ≤ 500 人或通知 ≤ 100 人），有剩余时排队下一块
+[[jobs]]
+name = "grant_batch"
+timeout_secs = 300
 
 [[http.routes]]
 id = "currencies"
@@ -96,6 +106,45 @@ method = "GET"
 path = "/v1/admin/users/{id}/entries"
 auth = "admin"
 permission = "ledger.balance.read"
+
+[[http.routes]]
+id = "admin_grants"
+method = "GET"
+path = "/v1/admin/grants"
+auth = "admin"
+permission = "ledger.balance.adjust"
+
+[[http.routes]]
+id = "admin_grant_create"
+method = "POST"
+path = "/v1/admin/grants"
+auth = "admin"
+permission = "ledger.balance.adjust"
+rate_limit = "user:10/m"
+idempotent = true
+
+[[http.routes]]
+id = "admin_grant_preview"
+method = "POST"
+path = "/v1/admin/grants/preview"
+auth = "admin"
+permission = "ledger.balance.adjust"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_grant"
+method = "GET"
+path = "/v1/admin/grants/{id}"
+auth = "admin"
+permission = "ledger.balance.adjust"
+
+[[http.routes]]
+id = "admin_grant_resume"
+method = "POST"
+path = "/v1/admin/grants/{id}/resume"
+auth = "admin"
+permission = "ledger.balance.adjust"
+rate_limit = "user:10/m"
 
 [[permissions]]
 name = "ledger.balance.read"

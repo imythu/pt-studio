@@ -1,10 +1,11 @@
 // ledger 前端：用户转账页（/p/ledger/transfer）；后台用户详情页“余额”标签 —— 各货币余额（含冻结）、手动调整（正数发放、负数扣除，
-// 需填写原因）、流水与冲正；后台货币设置（/admin/p/ledger/：可否转账、手续费、最小额、每日上限、停用）。
+// 需填写原因）、流水与冲正；后台（/admin/p/ledger/）：批量发放 / 扣除（按状态 / 等级或用户名单，预览后确认，后台分块记账，
+// 扣除时余额不足可跳过或扣到 0，可逐人发站内信）与货币设置（可否转账、手续费、最小额、每日上限、停用）。
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Button, Checkbox, Field, Input, KeyFacts, Kpis, LoadMore, Note, PageHead, Panel, Select, Sheet, SkeletonRows, Status, Table, Tag } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, Kpis, LoadMore, Note, PageHead, Panel, Progress, Segmented, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, Textarea } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'ledger.ui.tab': '余额',
@@ -64,6 +65,84 @@ registerMessages('zh-CN', {
   'ledger.ui.no': '不可转账',
   'ledger.ui.transfer_lede': '把魔力值等站内货币转给其他用户。转账即时到账、不可撤回，请核对收款人。',
   'ledger.ui.check': '核对转账',
+  'ledger.ui.admin': '账本',
+  'ledger.ui.grants': '批量发放 / 扣除',
+  'ledger.ui.grant_new': '批量发放 / 扣除',
+  'ledger.ui.grant_lede': '给一批用户各发或各扣同一数量的货币。确认前会先算出人数和总额；提交后在后台分批记账，可同时给每人发一封站内信。',
+  'ledger.ui.grant_direction': '操作',
+  'ledger.ui.dir.grant': '发放',
+  'ledger.ui.dir.deduct': '扣除',
+  'ledger.ui.grant_shortfall': '余额不足时',
+  'ledger.ui.shortfall.skip': '跳过此人',
+  'ledger.ui.shortfall.partial': '有多少扣多少',
+  'ledger.ui.grant_shortfall_hint': '可用余额 = 余额 − 冻结；不会扣成负数',
+  'ledger.ui.grant_insufficient_skip': '{n} 人可用余额不足，会被跳过（不扣、不通知）',
+  'ledger.ui.grant_insufficient_partial': '{n} 人可用余额不足，会扣到 0 为止',
+  'ledger.ui.grant_total_est': '预计总额',
+  'ledger.ui.grant_moved': '合计 {n}',
+  'ledger.ui.grant_partial': '只扣了 {n}',
+  'ledger.ui.deduct_confirm': '确认扣除',
+  'ledger.ui.deduct_started': '已提交，正在后台扣除',
+  'ledger.ui.deduct_state.granting': '扣除中',
+  'ledger.ui.deduct_state.notifying': '通知中',
+  'ledger.ui.deduct_state.done': '已完成',
+  'ledger.ui.deduct_detail': '扣除 #{id}',
+  'ledger.ui.deduct_granted': '已扣除',
+  'ledger.ui.deduct_failed': '未扣除',
+  'ledger.ui.grant_amount': '每人数量',
+  'ledger.ui.grant_target': '发放对象',
+  'ledger.ui.grant_by_filter': '按条件',
+  'ledger.ui.grant_by_users': '指定用户',
+  'ledger.ui.grant_statuses': '用户状态',
+  'ledger.ui.grant_statuses_hint': '封禁和已删除的用户不会收到',
+  'ledger.ui.status.active': '正常',
+  'ledger.ui.status.leech_disabled': '禁止下载',
+  'ledger.ui.status.pending': '待验证',
+  'ledger.ui.grant_classes': '等级',
+  'ledger.ui.grant_classes_hint': '不勾选 = 所有等级',
+  'ledger.ui.grant_usernames': '用户名',
+  'ledger.ui.grant_usernames_hint': '每行一个，也可用逗号或空格分隔；不区分大小写；最多 5000 个',
+  'ledger.ui.grant_memo': '原因（必填，用户在流水里能看到）',
+  'ledger.ui.grant_amount_hint': '扣除时为每人最多扣的数量',
+  'ledger.ui.grant_notify': '给每个人发站内信通知',
+  'ledger.ui.grant_notify_off': '站内信插件未启用，无法通知',
+  'ledger.ui.grant_subject': '站内信标题',
+  'ledger.ui.grant_body': '站内信正文（Markdown）',
+  'ledger.ui.grant_vars': '可用变量：{username} 用户名、{amount} 数量、{currency} 货币名、{balance} 记账后余额、{memo} 原因',
+  'ledger.ui.grant_next': '计算人数',
+  'ledger.ui.grant_back': '返回修改',
+  'ledger.ui.grant_confirm': '确认发放',
+  'ledger.ui.grant_count': '人数',
+  'ledger.ui.grant_total': '总额',
+  'ledger.ui.grant_missing': '以下用户名不存在或已封禁，会被跳过：{names}',
+  'ledger.ui.grant_none': '没有符合条件的用户',
+  'ledger.ui.grant_too_many': '人数超过上限 {max}，请缩小范围',
+  'ledger.ui.grant_started': '已提交，正在后台发放',
+  'ledger.ui.grant_empty': '还没有批量发放记录',
+  'ledger.ui.grant_progress': '进度',
+  'ledger.ui.grant_notified': '已通知 {n}',
+  'ledger.ui.grant_by': '发起人',
+  'ledger.ui.grant_state.granting': '发放中',
+  'ledger.ui.grant_state.notifying': '通知中',
+  'ledger.ui.grant_state.done': '已完成',
+  'ledger.ui.grant_target_all': '{statuses}',
+  'ledger.ui.grant_target_classes': '{statuses} · {n} 个等级',
+  'ledger.ui.grant_target_users': '{n} 个指定用户',
+  'ledger.ui.grant_detail': '发放 #{id}',
+  'ledger.ui.grant_granted': '已发放',
+  'ledger.ui.grant_failed': '发放失败',
+  'ledger.ui.grant_notify_failed': '通知失败',
+  'ledger.ui.grant_notify_col': '已通知',
+  'ledger.ui.grant_failures': '异常名单',
+  'ledger.ui.grant_error': '错误',
+  'ledger.ui.grant_last_error': '最近错误：{e}',
+  'ledger.ui.grant_resume': '继续执行',
+  'ledger.ui.grant_resumed': '已重新排队',
+  'ledger.ui.grant_no_notify': '不通知',
+  'ledger.grant_no_recipients': '没有符合条件的用户',
+  'ledger.grant_too_many': '人数超过上限',
+  'ledger.grant_finished': '这批已经完成',
+  'ledger.amount_out_of_range': '数量超出范围',
 });
 registerMessages('en', {
   'ledger.ui.tab': 'Balances',
@@ -123,6 +202,84 @@ registerMessages('en', {
   'ledger.ui.no': 'Not transferable',
   'ledger.ui.transfer_lede': 'Send site currency to another user. Transfers are instant and final — double-check the recipient.',
   'ledger.ui.check': 'Review transfer',
+  'ledger.ui.admin': 'Ledger',
+  'ledger.ui.grants': 'Bulk grant / deduct',
+  'ledger.ui.grant_new': 'Bulk grant / deduct',
+  'ledger.ui.grant_lede': 'Give or take the same amount for a group of users. You see the head count and total before confirming; entries are posted in the background, optionally with a site message to each person.',
+  'ledger.ui.grant_direction': 'Operation',
+  'ledger.ui.dir.grant': 'Grant',
+  'ledger.ui.dir.deduct': 'Deduct',
+  'ledger.ui.grant_shortfall': 'If the balance is too low',
+  'ledger.ui.shortfall.skip': 'Skip the user',
+  'ledger.ui.shortfall.partial': 'Take what is there',
+  'ledger.ui.grant_shortfall_hint': 'Available = balance − held; balances never go negative',
+  'ledger.ui.grant_insufficient_skip': '{n} users do not have enough and will be skipped (no deduction, no message)',
+  'ledger.ui.grant_insufficient_partial': '{n} users do not have enough and will be taken down to 0',
+  'ledger.ui.grant_total_est': 'Estimated total',
+  'ledger.ui.grant_moved': 'Total {n}',
+  'ledger.ui.grant_partial': 'Only {n} taken',
+  'ledger.ui.deduct_confirm': 'Deduct now',
+  'ledger.ui.deduct_started': 'Submitted; deducting in the background',
+  'ledger.ui.deduct_state.granting': 'Deducting',
+  'ledger.ui.deduct_state.notifying': 'Notifying',
+  'ledger.ui.deduct_state.done': 'Done',
+  'ledger.ui.deduct_detail': 'Deduction #{id}',
+  'ledger.ui.deduct_granted': 'Deducted',
+  'ledger.ui.deduct_failed': 'Not deducted',
+  'ledger.ui.grant_amount': 'Amount per user',
+  'ledger.ui.grant_target': 'Recipients',
+  'ledger.ui.grant_by_filter': 'By filter',
+  'ledger.ui.grant_by_users': 'By username',
+  'ledger.ui.grant_statuses': 'User status',
+  'ledger.ui.grant_statuses_hint': 'Banned and deleted users never receive grants',
+  'ledger.ui.status.active': 'Active',
+  'ledger.ui.status.leech_disabled': 'Download disabled',
+  'ledger.ui.status.pending': 'Pending',
+  'ledger.ui.grant_classes': 'Classes',
+  'ledger.ui.grant_classes_hint': 'None checked = all classes',
+  'ledger.ui.grant_usernames': 'Usernames',
+  'ledger.ui.grant_usernames_hint': 'One per line, or separated by commas or spaces; case-insensitive; up to 5000',
+  'ledger.ui.grant_memo': 'Reason (required, shown in the user\'s history)',
+  'ledger.ui.grant_amount_hint': 'For deductions: the most taken from each user',
+  'ledger.ui.grant_notify': 'Send each user a site message',
+  'ledger.ui.grant_notify_off': 'The messages plugin is not enabled; no notification can be sent',
+  'ledger.ui.grant_subject': 'Message subject',
+  'ledger.ui.grant_body': 'Message body (Markdown)',
+  'ledger.ui.grant_vars': 'Variables: {username}, {amount}, {currency}, {balance} (after posting), {memo}',
+  'ledger.ui.grant_next': 'Count recipients',
+  'ledger.ui.grant_back': 'Back',
+  'ledger.ui.grant_confirm': 'Grant now',
+  'ledger.ui.grant_count': 'Recipients',
+  'ledger.ui.grant_total': 'Total',
+  'ledger.ui.grant_missing': 'These usernames do not exist or are banned and will be skipped: {names}',
+  'ledger.ui.grant_none': 'No user matches',
+  'ledger.ui.grant_too_many': 'More than {max} recipients; narrow the selection',
+  'ledger.ui.grant_started': 'Submitted; granting in the background',
+  'ledger.ui.grant_empty': 'No bulk grants yet',
+  'ledger.ui.grant_progress': 'Progress',
+  'ledger.ui.grant_notified': '{n} notified',
+  'ledger.ui.grant_by': 'By',
+  'ledger.ui.grant_state.granting': 'Granting',
+  'ledger.ui.grant_state.notifying': 'Notifying',
+  'ledger.ui.grant_state.done': 'Done',
+  'ledger.ui.grant_target_all': '{statuses}',
+  'ledger.ui.grant_target_classes': '{statuses} · {n} classes',
+  'ledger.ui.grant_target_users': '{n} named users',
+  'ledger.ui.grant_detail': 'Grant #{id}',
+  'ledger.ui.grant_granted': 'Granted',
+  'ledger.ui.grant_failed': 'Grant failed',
+  'ledger.ui.grant_notify_failed': 'Notify failed',
+  'ledger.ui.grant_notify_col': 'Notified',
+  'ledger.ui.grant_failures': 'Exceptions',
+  'ledger.ui.grant_error': 'Error',
+  'ledger.ui.grant_last_error': 'Last error: {e}',
+  'ledger.ui.grant_resume': 'Resume',
+  'ledger.ui.grant_resumed': 'Queued again',
+  'ledger.ui.grant_no_notify': 'No message',
+  'ledger.grant_no_recipients': 'No user matches',
+  'ledger.grant_too_many': 'Too many recipients',
+  'ledger.grant_finished': 'This batch has already finished',
+  'ledger.amount_out_of_range': 'Amount out of range',
 });
 
 interface Bal {
@@ -447,7 +604,7 @@ function Transfer({ api }: { api: PluginApi }) {
           >
             <div className="stack">
               <p>{api.t('ledger.ui.confirm', { to: f.to.trim(), amount: f.amount, cur: curName(api, cur) })}</p>
-              <KeyFacts
+              <Kpis
                 items={[
                   { label: api.t('ledger.ui.to'), value: f.to.trim() },
                   { label: api.t('ledger.ui.amount_plain'), value: f.amount, tone: 'gold' },
@@ -471,8 +628,7 @@ function Currencies({ api }: { api: PluginApi }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, []);
   return (
-    <div className="stack">
-      <PageHead title={api.t('ledger.ui.currencies')} />
+    <>
       <Panel flush primary>
         {rows === null ? (
           <SkeletonRows n={3} />
@@ -515,7 +671,7 @@ function Currencies({ api }: { api: PluginApi }) {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -572,12 +728,506 @@ function CurrencySheet({ api, c, onClose, onSaved }: { api: PluginApi; c: Curren
   );
 }
 
+// ---------------- 批量发放（/admin/p/ledger/） ----------------
+
+type Target = { kind: 'filter'; statuses: string[]; class_ids: number[] } | { kind: 'users'; usernames: string[] };
+type Direction = 'grant' | 'deduct';
+interface Grant {
+  id: number;
+  currency: string;
+  amount: number;
+  direction: Direction;
+  shortfall: 'skip' | 'partial';
+  moved: number;
+  memo: string;
+  target: Target;
+  notify: boolean;
+  state: 'granting' | 'notifying' | 'done';
+  total: number;
+  granted: number;
+  failed: number;
+  notified: number;
+  notify_failed: number;
+  last_error: string | null;
+  created_by_name: string | null;
+  created_at: number;
+  scale: number;
+  failures?: { user_id: number; username: string | null; error: string | null; notify_error: string | null; amount: number | null }[];
+}
+interface Preview {
+  count: number;
+  insufficient: number;
+  total_amount: number | null;
+  scale: number;
+  missing: string[];
+  max_recipients: number;
+  notify_available: boolean;
+  default_subject: string;
+  default_body: string;
+}
+interface LevelClass {
+  id: number;
+  key: string;
+  rank: number;
+  name?: string | null;
+  name_key: string;
+}
+
+const STATUSES = ['active', 'leech_disabled', 'pending'];
+const GRANTS = '/api/p/ledger/v1/admin/grants';
+
+const levelName = (api: PluginApi, c: LevelClass) => {
+  if (c.name) return c.name;
+  const t = api.t(`term:${c.name_key}`);
+  return t && t !== c.name_key && t !== `term:${c.name_key}` ? t : c.key;
+};
+
+const targetText = (api: PluginApi, t: Target) => {
+  if (t.kind === 'users') return api.t('ledger.ui.grant_target_users', { n: t.usernames.length });
+  const statuses = t.statuses.map((x) => api.t(`ledger.ui.status.${x}`)).join(' / ');
+  return t.class_ids.length ? api.t('ledger.ui.grant_target_classes', { statuses, n: t.class_ids.length }) : api.t('ledger.ui.grant_target_all', { statuses });
+};
+
+const stateTone = (s: Grant['state']) => (s === 'done' ? 'ok' : 'info');
+/** 扣除批次用 `ledger.ui.deduct_*` 文案 */
+const dt = (api: PluginApi, d: Direction, key: string, args?: Record<string, unknown>) => api.t(d === 'deduct' ? `ledger.ui.deduct_${key}` : `ledger.ui.grant_${key}`, args);
+const signed = (g: Pick<Grant, 'direction' | 'amount' | 'scale'>) => `${g.direction === 'deduct' ? '−' : '+'}${fmt(g.amount, g.scale)}`;
+
+function Admin({ api }: { api: PluginApi }) {
+  const [tab, setTab] = useState('grants');
+  const [creating, setCreating] = useState(false);
+  return (
+    <div className="stack">
+      <PageHead
+        title={api.t('ledger.ui.admin')}
+        actions={
+          tab === 'grants' && (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              {api.t('ledger.ui.grant_new')}
+            </Button>
+          )
+        }
+      />
+      <Tabs
+        variant="sub"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'grants', label: api.t('ledger.ui.grants') },
+          { id: 'currencies', label: api.t('ledger.ui.currencies') },
+        ]}
+      />
+      {tab === 'grants' ? <Grants api={api} creating={creating} setCreating={setCreating} /> : <Currencies api={api} />}
+    </div>
+  );
+}
+
+/** 发放记录：未完成时每 2 秒刷新；点行看详情 */
+function Grants({ api, creating, setCreating }: { api: PluginApi; creating: boolean; setCreating(v: boolean): void }) {
+  const [rows, setRows] = useState<Grant[] | null>(null);
+  const [next, setNext] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  const load = useCallback(async () => {
+    const r = await api.json<{ items: Grant[]; next_before: number | null }>(`${GRANTS}?limit=20`);
+    setRows(r.items);
+    setNext(r.next_before);
+  }, [api]);
+  useEffect(() => {
+    void load().catch(() => setRows([]));
+  }, [load]);
+  const running = rows?.some((g) => g.state !== 'done') ?? false;
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => void load().catch(() => undefined), 2000);
+    return () => clearInterval(t);
+  }, [running, load]);
+  const more = async () => {
+    if (next === null) return;
+    const r = await api.json<{ items: Grant[]; next_before: number | null }>(`${GRANTS}?limit=20&before=${next}`);
+    setRows((old) => [...(old ?? []), ...r.items]);
+    setNext(r.next_before);
+  };
+  return (
+    <>
+      <Panel flush primary>
+        {rows === null ? (
+          <SkeletonRows n={4} />
+        ) : (
+          <Table
+            rows={rows}
+            rowKey={(g) => g.id}
+            empty={api.t('ledger.ui.grant_empty')}
+            minWidth={640}
+            onRowClick={(g) => setOpen(g.id)}
+            columns={[
+              // 窄屏横向滚动时先看到“发给谁、进行到哪”：对象与进度在前，数量与发起人在后
+              {
+                key: 'w',
+                header: api.t('ledger.ui.grant_target'),
+                render: (g) => (
+                  <>
+                    <div className="small">
+                      <Tag tone={g.direction === 'deduct' ? 'x' : 'k'}>{api.t(`ledger.ui.dir.${g.direction}`)}</Tag> {targetText(api, g.target)}
+                    </div>
+                    <div className="tiny muted">{g.memo}</div>
+                    <div className="tiny muted num nowrap">{new Date(g.created_at).toLocaleString()}</div>
+                  </>
+                ),
+              },
+              {
+                key: 'p',
+                header: api.t('ledger.ui.grant_progress'),
+                render: (g) => (
+                  <div style={{ minWidth: 140 }}>
+                    <div className="row">
+                      <Status tone={stateTone(g.state)}>{dt(api, g.direction, `state.${g.state}`)}</Status>
+                      <span className="tiny muted num">
+                        {g.granted + g.failed} / {g.total}
+                      </span>
+                    </div>
+                    <Progress value={g.granted + g.failed} max={g.total} tone={g.failed ? 'bad' : g.state === 'done' ? 'ok' : 'info'} label={api.t('ledger.ui.grant_progress')} />
+                    <div className="tiny muted">{g.notify ? api.t('ledger.ui.grant_notified', { n: g.notified }) : api.t('ledger.ui.grant_no_notify')}</div>
+                  </div>
+                ),
+              },
+              {
+                key: 'a',
+                header: api.t('ledger.ui.grant_amount'),
+                right: true,
+                render: (g) => (
+                  <span className="nowrap">
+                    <span className={g.direction === 'deduct' ? 'num down' : 'num up'}>{signed(g)}</span> <span className="pt-mono tiny muted">{g.currency}</span>
+                  </span>
+                ),
+              },
+              { key: 'u', header: api.t('ledger.ui.grant_by'), render: (g) => <span className="small">{g.created_by_name ?? '—'}</span> },
+            ]}
+          />
+        )}
+      </Panel>
+      {next !== null && <LoadMore onClick={() => void more()} label={api.t('ledger.ui.more')} />}
+      {open !== null && <GrantSheet key={open} api={api} id={open} onClose={() => setOpen(null)} onChange={() => void load()} />}
+      {creating && (
+        <NewGrant
+          api={api}
+          onClose={() => setCreating(false)}
+          onCreated={(id) => {
+            setCreating(false);
+            void load();
+            setOpen(id);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function GrantSheet({ api, id, onClose, onChange }: { api: PluginApi; id: number; onClose(): void; onChange(): void }) {
+  const [g, setG] = useState<Grant | null>(null);
+  const load = useCallback(() => api.json<Grant>(`${GRANTS}/${id}`).then(setG), [api, id]);
+  useEffect(() => {
+    void load().catch((e: unknown) => api.toast(errText(api, e), 'error'));
+  }, [api, load]);
+  const running = g !== null && g.state !== 'done';
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => void load().catch(() => undefined), 2000);
+    return () => clearInterval(t);
+  }, [running, load]);
+  const resume = async () => {
+    try {
+      setG(await api.json<Grant>(`${GRANTS}/${id}/resume`, { method: 'POST' }));
+      api.toast(api.t('ledger.ui.grant_resumed'), 'success');
+      onChange();
+    } catch (e) {
+      api.toast(errText(api, e), 'error');
+    }
+  };
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title={g ? dt(api, g.direction, 'detail', { id }) : api.t('ledger.ui.grant_detail', { id })}
+      footer={
+        g &&
+        g.state !== 'done' &&
+        g.last_error && (
+          <Button variant="primary" onClick={() => void resume()}>
+            {api.t('ledger.ui.grant_resume')}
+          </Button>
+        )
+      }
+    >
+      {!g ? (
+        <SkeletonRows n={4} />
+      ) : (
+        <div className="stack">
+          <div className="row">
+            <Status tone={stateTone(g.state)}>{dt(api, g.direction, `state.${g.state}`)}</Status>
+            <span className="small muted">{targetText(api, g.target)}</span>
+          </div>
+          <Progress value={g.granted + g.failed} max={g.total} tone={g.failed ? 'bad' : g.state === 'done' ? 'ok' : 'info'} label={api.t('ledger.ui.grant_progress')} />
+          <Kpis
+            items={[
+              { label: api.t('ledger.ui.grant_amount'), value: signed(g), hint: `${g.currency} · ${api.t('ledger.ui.grant_moved', { n: fmt(g.moved, g.scale) })}`, tone: g.direction === 'deduct' ? 'down' : 'gold' },
+              { label: dt(api, g.direction, 'granted'), value: `${g.granted} / ${g.total}`, hint: g.failed ? `${dt(api, g.direction, 'failed')} ${g.failed}` : undefined },
+              {
+                label: api.t('ledger.ui.grant_notify_col'),
+                value: g.notify ? `${g.notified} / ${g.granted}` : '—',
+                hint: g.notify_failed ? `${api.t('ledger.ui.grant_notify_failed')} ${g.notify_failed}` : undefined,
+              },
+            ]}
+          />
+          <p className="small">{g.memo}</p>
+          {g.last_error && <Note tone="warn">{api.t('ledger.ui.grant_last_error', { e: api.t(g.last_error) })}</Note>}
+          {(g.failures?.length ?? 0) > 0 && (
+            <Panel title={api.t('ledger.ui.grant_failures')} flush>
+              <Table
+                rows={g.failures ?? []}
+                rowKey={(f) => f.user_id}
+                columns={[
+                  { key: 'u', header: api.t('ledger.ui.grant_by_users'), render: (f) => <span className="small">{f.username ?? `#${f.user_id}`}</span> },
+                  {
+                    key: 'e',
+                    header: api.t('ledger.ui.grant_error'),
+                    render: (f) => (
+                      <span className="small">
+                        {[
+                          f.error && api.t(f.error),
+                          !f.error && f.amount !== null && f.amount !== g.amount && api.t('ledger.ui.grant_partial', { n: fmt(f.amount, g.scale) }),
+                          f.notify_error && `${api.t('ledger.ui.grant_notify_failed')}: ${f.notify_error}`,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+            </Panel>
+          )}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/** 新建：先填表并计算人数（preview），在同一抽屉里核对后确认 */
+function NewGrant({ api, onClose, onCreated }: { api: PluginApi; onClose(): void; onCreated(id: number): void }) {
+  const [curs, setCurs] = useState<Currency[]>([]);
+  const [classes, setClasses] = useState<LevelClass[] | null>(null);
+  const [f, setF] = useState({ direction: 'grant' as Direction, shortfall: 'skip' as 'skip' | 'partial', currency: 'bonus', amount: '', memo: '', mode: 'filter' as 'filter' | 'users', statuses: ['active'], class_ids: [] as number[], usernames: '', notify: true, subject: '', body: '' });
+  const [pv, setPv] = useState<Preview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [key] = useState(() => `grant-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  useEffect(() => {
+    void api.json<{ items: Currency[] }>('/api/p/ledger/v1/currencies').then((r) => setCurs(r.items.filter((c) => !c.disabled)));
+    api
+      .json<{ items: LevelClass[] }>('/api/p/levels/v1/classes')
+      .then((r) => setClasses([...r.items].sort((a, b) => a.rank - b.rank)))
+      .catch(() => setClasses([]));
+  }, [api]);
+  const cur = curs.find((c) => c.code === f.currency);
+  const scale = cur?.scale ?? 0;
+  const units = Math.round(Number(f.amount) * 10 ** scale);
+  const names = f.usernames
+    .split(/[\s,，]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const target: Target = f.mode === 'users' ? { kind: 'users', usernames: names } : { kind: 'filter', statuses: f.statuses, class_ids: f.class_ids };
+  const valid = units > 0 && f.memo.trim() !== '' && (f.mode === 'users' ? names.length > 0 : f.statuses.length > 0);
+  const toggle = <T,>(list: T[], v: T, on: boolean) => (on ? [...list.filter((x) => x !== v), v] : list.filter((x) => x !== v));
+  const set = (patch: Partial<typeof f>) => {
+    // 换方向时清空模板，让预览带回对应方向的默认模板
+    setF({ ...f, ...patch, ...(patch.direction && patch.direction !== f.direction ? { subject: '', body: '' } : {}) });
+    setPv(null);
+  };
+  const preview = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await api.json<Preview>(`${GRANTS}/preview`, { method: 'POST', json: { currency: f.currency, amount: units, target, direction: f.direction, shortfall: f.shortfall } });
+      setPv(r);
+      if (!f.subject && !f.body) setF((x) => ({ ...x, subject: r.default_subject, body: r.default_body }));
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const create = async () => {
+    if (!pv) return;
+    setBusy(true);
+    try {
+      const notify = f.notify && pv.notify_available ? { subject: f.subject, body: f.body } : null;
+      const r = await api.json<Grant>(GRANTS, { method: 'POST', json: { currency: f.currency, amount: units, memo: f.memo.trim(), target, notify, direction: f.direction, shortfall: f.shortfall }, idempotent: key });
+      api.toast(dt(api, f.direction, 'started'), 'success');
+      onCreated(r.id);
+    } catch (err) {
+      api.toast(errText(api, err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const blocked = pv !== null && (pv.count === 0 || pv.count > pv.max_recipients || pv.total_amount === null);
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      width={560}
+      title={api.t('ledger.ui.grant_new')}
+      footer={
+        <>
+          <Button variant="ghost" onClick={pv ? () => setPv(null) : onClose}>
+            {pv ? api.t('ledger.ui.grant_back') : api.t('ledger.ui.cancel')}
+          </Button>
+          {pv ? (
+            <Button variant="danger" disabled={busy || blocked} onClick={() => void create()}>
+              {dt(api, f.direction, 'confirm')}
+            </Button>
+          ) : (
+            <Button type="submit" form="ledger-grant" variant="primary" disabled={busy || !valid}>
+              {api.t('ledger.ui.grant_next')}
+            </Button>
+          )}
+        </>
+      }
+    >
+      {pv ? (
+        <div className="stack">
+          <Kpis
+            items={[
+              { label: api.t('ledger.ui.grant_count'), value: pv.count.toLocaleString() },
+              { label: api.t('ledger.ui.grant_amount'), value: `${f.direction === 'deduct' ? '−' : '+'}${f.amount}`, hint: cur ? curName(api, cur) : f.currency },
+              {
+                label: api.t(f.direction === 'deduct' ? 'ledger.ui.grant_total_est' : 'ledger.ui.grant_total'),
+                value: pv.total_amount === null ? '—' : fmt(pv.total_amount, scale),
+                tone: f.direction === 'deduct' ? 'down' : 'gold',
+              },
+            ]}
+          />
+          <p className="small">
+            {api.t(`ledger.ui.dir.${f.direction}`)} · {targetText(api, target)} · {f.memo}
+          </p>
+          {f.direction === 'deduct' && pv.insufficient > 0 && <Note tone="warn">{api.t(`ledger.ui.grant_insufficient_${f.shortfall}`, { n: pv.insufficient })}</Note>}
+          {pv.count === 0 && <Note tone="bad">{api.t('ledger.ui.grant_none')}</Note>}
+          {pv.count > pv.max_recipients && <Note tone="bad">{api.t('ledger.ui.grant_too_many', { max: pv.max_recipients })}</Note>}
+          {pv.missing.length > 0 && <Note tone="warn">{api.t('ledger.ui.grant_missing', { names: pv.missing.join(', ') })}</Note>}
+          {pv.notify_available ? (
+            <div className="form">
+              <Checkbox name="grant_notify" label={api.t('ledger.ui.grant_notify')} checked={f.notify} onChange={(v) => setF({ ...f, notify: v })} />
+              {f.notify && (
+                <>
+                  <Field label={api.t('ledger.ui.grant_subject')}>
+                    <Input name="grant_subject" maxLength={120} value={f.subject} onChange={(e) => setF({ ...f, subject: e.target.value })} />
+                  </Field>
+                  <Field label={api.t('ledger.ui.grant_body')} hint={api.t('ledger.ui.grant_vars')}>
+                    <Textarea name="grant_body" rows={6} maxLength={5000} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />
+                  </Field>
+                </>
+              )}
+            </div>
+          ) : (
+            <Note>{api.t('ledger.ui.grant_notify_off')}</Note>
+          )}
+        </div>
+      ) : (
+        <form id="ledger-grant" className="form" onSubmit={(e) => void preview(e)}>
+          <p className="small muted">{api.t('ledger.ui.grant_lede')}</p>
+          <div className="fl">
+            <span className="fl-label">{api.t('ledger.ui.grant_direction')}</span>
+            <Segmented
+              label={api.t('ledger.ui.grant_direction')}
+              value={f.direction}
+              onChange={(v) => set({ direction: v })}
+              options={[
+                { value: 'grant', label: api.t('ledger.ui.dir.grant') },
+                { value: 'deduct', label: api.t('ledger.ui.dir.deduct') },
+              ]}
+            />
+          </div>
+          <div className="form-2">
+            <Field label={api.t('ledger.ui.currency')}>
+              <Select name="grant_currency" value={f.currency} onChange={(e) => set({ currency: e.target.value })} options={curs.map((c) => ({ value: c.code, label: curName(api, c) }))} />
+            </Field>
+            <Field label={api.t('ledger.ui.grant_amount')} hint={f.direction === 'deduct' ? api.t('ledger.ui.grant_amount_hint') : undefined}>
+              <Input name="grant_amount" type="number" min={0} step="any" required value={f.amount} onChange={(e) => set({ amount: e.target.value })} />
+            </Field>
+          </div>
+          {f.direction === 'deduct' && (
+            <div className="fl">
+              <span className="fl-label">{api.t('ledger.ui.grant_shortfall')}</span>
+              <Segmented
+                label={api.t('ledger.ui.grant_shortfall')}
+                value={f.shortfall}
+                onChange={(v) => set({ shortfall: v })}
+                options={[
+                  { value: 'skip', label: api.t('ledger.ui.shortfall.skip') },
+                  { value: 'partial', label: api.t('ledger.ui.shortfall.partial') },
+                ]}
+              />
+              <span className="hint">{api.t('ledger.ui.grant_shortfall_hint')}</span>
+            </div>
+          )}
+          <div className="fl">
+            <span className="fl-label">{api.t('ledger.ui.grant_target')}</span>
+            <Segmented
+              label={api.t('ledger.ui.grant_target')}
+              value={f.mode}
+              onChange={(v) => set({ mode: v })}
+              options={[
+                { value: 'filter', label: api.t('ledger.ui.grant_by_filter') },
+                { value: 'users', label: api.t('ledger.ui.grant_by_users') },
+              ]}
+            />
+          </div>
+          {f.mode === 'filter' ? (
+            <>
+              <div className="fl">
+                <span className="fl-label">{api.t('ledger.ui.grant_statuses')}</span>
+                <div className="pt-checks">
+                  {STATUSES.map((st) => (
+                    <Checkbox key={st} name={`grant_status_${st}`} label={api.t(`ledger.ui.status.${st}`)} checked={f.statuses.includes(st)} onChange={(on) => set({ statuses: toggle(f.statuses, st, on) })} />
+                  ))}
+                </div>
+                <span className="hint">{api.t('ledger.ui.grant_statuses_hint')}</span>
+              </div>
+              {classes === null ? (
+                <SkeletonRows n={1} />
+              ) : (
+                classes.length > 0 && (
+                  <div className="fl">
+                    <span className="fl-label">{api.t('ledger.ui.grant_classes')}</span>
+                    <div className="pt-checks">
+                      {classes.map((c) => (
+                        <Checkbox key={c.id} name={`grant_class_${c.id}`} label={levelName(api, c)} checked={f.class_ids.includes(c.id)} onChange={(on) => set({ class_ids: toggle(f.class_ids, c.id, on) })} />
+                      ))}
+                    </div>
+                    <span className="hint">{api.t('ledger.ui.grant_classes_hint')}</span>
+                  </div>
+                )
+              )}
+            </>
+          ) : (
+            <Field label={api.t('ledger.ui.grant_usernames')} hint={api.t('ledger.ui.grant_usernames_hint')}>
+              <Textarea name="grant_usernames" rows={6} value={f.usernames} onChange={(e) => set({ usernames: e.target.value })} />
+            </Field>
+          )}
+          <Field label={api.t('ledger.ui.grant_memo')}>
+            <Input name="grant_memo" required maxLength={200} value={f.memo} onChange={(e) => set({ memo: e.target.value })} />
+          </Field>
+        </form>
+      )}
+    </Sheet>
+  );
+}
+
 export default {
   slots: {
     'admin.user.tabs': { component: UserTab, order: 11, title_term: 'ledger.ui.tab' },
   },
   routes: [
     { path: '/p/ledger/*', component: Transfer },
-    { path: '/admin/p/ledger/*', component: Currencies },
+    { path: '/admin/p/ledger/*', component: Admin },
   ],
 } satisfies PluginFrontend;

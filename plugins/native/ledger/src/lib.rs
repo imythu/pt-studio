@@ -1,11 +1,12 @@
 //! ledger 插件（docs/plugins/ledger/）：站点货币的复式记账（`ctx.ledger`）。
 //!
 //! 本版本实现：币种注册、发行 / 回收 / 转账（手续费、每日限额、钩子）、批量发行、幂等、冻结与到期释放、
-//! 账户锁定、冲正、余额与流水查询、供给统计、用户转账与管理员调整的 HTTP 接口。
+//! 账户锁定、冲正、余额与流水查询、供给统计、用户转账与管理员调整的 HTTP 接口、批量发放（grants）。
 //! 日对账、月结余快照、归档、用户删除处理在后续迭代实现（03 §1.8～§1.10）。
 
 pub mod api;
 pub mod core;
+pub mod grants;
 
 use std::sync::Arc;
 
@@ -33,7 +34,11 @@ use crate::{
 };
 
 pub const MANIFEST: &str = include_str!("../plugin.toml");
-pub const MIGRATIONS: &[(&str, &str)] = &[("0001_init.sql", include_str!("../migrations/0001_init.sql"))];
+pub const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    ("0002_grants.sql", include_str!("../migrations/0002_grants.sql")),
+    ("0003_grant_deduct.sql", include_str!("../migrations/0003_grant_deduct.sql")),
+];
 
 fn u2i(u: u64) -> PResult<i64> {
     i64::try_from(u).map_err(|_| PluginError::bad_request("user id out of range"))
@@ -335,6 +340,12 @@ impl OnCron for Ledger {
                     .ok_or_else(|| PluginError::validation("hold_id"))?;
                 core::release_hold(ctx, id, &format!("expire:{id}"), "expired").await
             }
+            grants::JOB => {
+                let id = job.payload["batch_id"]
+                    .as_i64()
+                    .ok_or_else(|| PluginError::validation("batch_id"))?;
+                grants::run(ctx, id).await
+            }
             other => Err(PluginError::internal(format!("unknown job `{other}`"))),
         }
     }
@@ -346,7 +357,7 @@ fn me(ctx: &Ctx) -> PResult<i64> {
     u2i(ctx.require_user()?)
 }
 
-fn idem_header(h: &HeaderMap, ctx: &Ctx) -> PResult<String> {
+pub(crate) fn idem_header(h: &HeaderMap, ctx: &Ctx) -> PResult<String> {
     let k = h
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
@@ -646,6 +657,10 @@ impl pt_plugin_api::HttpRoutes for Routes {
             .route("/v1/admin/currencies/{code}", patch(http_settings))
             .route("/v1/admin/users/{id}/balances", get(http_admin_balances))
             .route("/v1/admin/users/{id}/entries", get(http_admin_entries))
+            .route("/v1/admin/grants", get(grants::http_list).post(grants::http_create))
+            .route("/v1/admin/grants/preview", post(grants::http_preview))
+            .route("/v1/admin/grants/{id}", get(grants::http_get))
+            .route("/v1/admin/grants/{id}/resume", post(grants::http_resume))
     }
 }
 
