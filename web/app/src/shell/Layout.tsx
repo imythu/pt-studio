@@ -7,7 +7,7 @@ import { api } from '@pt-studio/sdk';
 import { Slot } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
 import { Avatar, BackToTop, Button, Note, Portal, SkipLink, cx } from '@pt-studio/ui-kit';
-import { fmtRatio, fromUnits, levelName, shortBytes, shortNum, useMyBonus, useMyHnr, useMyLevel, useMyStats, useUnread } from '../lib';
+import { fmtRatio, fromUnits, levelName, levelUntil, shortBytes, shortNum, useMyBonus, useMyHnr, useMyLevel, useMyStats, useUnread } from '../lib';
 import { useInstalled, useManifest } from '../manifest';
 import { useSession } from '../session';
 import { SuggestInput } from '../suggest';
@@ -76,6 +76,7 @@ function MyCard() {
   const to = useStatLinks();
   if (!s.me) return null;
   const cls = levelName(t, lv?.class);
+  const until = levelUntil(t, lv?.class);
   return (
     <section className="me-card" aria-label={t('ui.me.card')}>
       <Link to={`/users/${s.me.id}`} className="me-head">
@@ -83,6 +84,7 @@ function MyCard() {
         <span className="me-name">
           <b>{s.me.username}</b>
           {cls && <span className="cls" data-level={lv?.class?.key}>{cls}</span>}
+          {until && <small className="tiny muted">{until}</small>}
         </span>
       </Link>
       {st && (
@@ -645,12 +647,14 @@ export function MePage() {
   const ref = useRef<HTMLDivElement>(null);
   if (!s.me) return null;
   const cls = levelName(t, lv?.class);
+  const until = levelUntil(t, lv?.class);
   return (
     <div className="me-page stack" data-primary>
       <Link to={`/users/${s.me.id}`} className="panel me-hero">
         <Avatar src={(s.me as { avatar_url?: string | null }).avatar_url} name={s.me.username} size={56} ring />
         <span>
           <b>{s.me.username}</b> {cls && <span className="cls" data-level={lv?.class?.key}>{cls}</span>}
+          {until && <span className="small muted">{until}</span>}
           <span className="small muted">{t('ui.me.view_profile')}</span>
         </span>
         <span className="muted">›</span>

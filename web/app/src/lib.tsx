@@ -179,6 +179,8 @@ export interface LevelClass {
   name_key?: string;
   /** 简写（如 PU、EU），空为没有 */
   abbr?: string;
+  /** 当前等级来自覆盖（VIP、手动锁定）时的到期时间，null 为永久；不是覆盖时没有该字段（只在 /me 中） */
+  until?: number | null;
   color: string | null;
   type?: string;
   progress?: { metric: string; op: string; current: string; target: string; met: boolean }[];
@@ -206,6 +208,12 @@ export function levelName(t: (k: string) => string, c?: LevelClass | null): stri
     if (v !== c.name_key) name = v;
   }
   return withAbbr(name, c.abbr);
+}
+
+/** VIP 等覆盖等级的期限：“至 2026/10/23” / “永久有效”；不是覆盖时为 null */
+export function levelUntil(t: (k: string, a?: Record<string, unknown>) => string, c?: LevelClass | null): string | null {
+  if (!c || c.until === undefined) return null;
+  return c.until === null ? t('ui.level.forever') : t('ui.level.until', { t: new Date(c.until).toLocaleDateString() });
 }
 
 /** 全部等级（levels 未安装时为空） */

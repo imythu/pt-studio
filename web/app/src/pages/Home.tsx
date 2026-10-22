@@ -7,7 +7,7 @@ import { Slot } from '@pt-studio/slots';
 import { formatBytes, useT } from '@pt-studio/terms';
 import { Button, Panel, SkeletonRows, useToast } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
-import { fmtRatio, fmtSeed, levelName, num, useMyLevel, useMyStats } from '../lib';
+import { fmtRatio, fmtSeed, levelName, levelUntil, num, useMyLevel, useMyStats } from '../lib';
 import { useInstalled, useManifest } from '../manifest';
 import { useSession } from '../session';
 import { GuestBar } from '../shell/Layout';
@@ -116,7 +116,9 @@ function Prologue() {
   const date = now.toLocaleDateString(document.documentElement.lang || 'zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
   const seed = st ? fmtSeed(st.seed_secs) : null;
   const next = lv?.next ? levelName(t, lv.next) : null;
-  const upMet = lv?.next?.progress?.find((p) => p.metric === 'uploaded_gib' && !p.met);
+  // 升级还差的流量（预设按下载量；自定义等级也可能按上传量）
+  const upMet = lv?.next?.progress?.find((p) => (p.metric === 'downloaded_gib' || p.metric === 'uploaded_gib') && !p.met);
+  const until = levelUntil(t, lv?.class);
   const toNext = upMet ? `${Math.max(0, num(upMet.target) - num(upMet.current)).toFixed(1)} GiB` : null;
   return (
     <section className="prologue" data-primary>
@@ -141,6 +143,7 @@ function Prologue() {
             {st.today && st.today.uploaded > 0 ? ` ${t('ui.home.today_up', { v: formatBytes(st.today.uploaded) })}` : ''}
           </p>
         )}
+        {until && <p>{t('ui.home.class_until', { name: levelName(t, lv?.class), until })}</p>}
         <CheckIn />
       </div>
       {st && <Dial ratio={st.ratio} caption={t('ui.profile.ratio')} sub={next && toNext ? t('ui.home.to_next', { name: next, v: toNext }) : undefined} />}
