@@ -57,7 +57,8 @@ interface Brief {
 }
 
 interface Me {
-  class: Brief & { source: string };
+  /** until：当前等级来自覆盖（VIP、手动锁定）时的到期时间，null 为永久；不是覆盖时没有该字段 */
+  class: Brief & { source: string; until?: number | null };
   next:
     | (Brief & {
         progress: {
@@ -251,7 +252,18 @@ const condLine = (api: PluginApi, c: Cond) =>
 const condText = (api: PluginApi, cs: Cond[]) =>
   cs.map((c) => condLine(api, c)).join("；");
 
+/** 覆盖等级（VIP 等）的期限：“至 …” / “永久” */
+function untilText(api: PluginApi, me: Me): string | null {
+  const u = me.class.until;
+  if (u === undefined) return null;
+  return u === null
+    ? api.t("levels.ui.forever")
+    : api.t("levels.ui.until", { t: new Date(u).toLocaleDateString() });
+}
+
 function NextHint({ api, me }: { api: PluginApi; me: Me }) {
+  const until = untilText(api, me);
+  if (until) return <span>{until}</span>;
   if (me.warning)
     return (
       <span className="down">
@@ -388,6 +400,12 @@ function Page({ api }: { api: PluginApi }) {
                   <dt>{api.t("levels.ui.my")}</dt>
                   <dd>
                     <ClassName api={api} c={me.class} />
+                    {untilText(api, me) && (
+                      <span className="muted small">
+                        {" "}
+                        · {untilText(api, me)}
+                      </span>
+                    )}
                   </dd>
                   <dt>{api.t("levels.ui.next")}</dt>
                   <dd>

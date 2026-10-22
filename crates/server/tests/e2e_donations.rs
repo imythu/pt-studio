@@ -93,6 +93,9 @@ async fn donations_end_to_end() {
     // 第二笔：显式指定 10 天、不给魔力值、不公开 → 在已有 VIP 之后顺延
     let r = post(&admin, "/api/p/donations/v1/admin/donations".into(), json!({ "user_id": alice.id, "amount": 1000, "vip_days": 10, "bonus": 0 })).await;
     assert_eq!(r.body["vip_until"].as_i64(), Some(until1 + 10 * DAY), "{:?}", r.body);
+    // 等级接口带上 VIP 到期时间（个人页、等级说明页显示）
+    let me = call(&app, "GET", "/api/p/levels/v1/me", None, &hv(&alice.headers())).await.body;
+    assert_eq!(me["class"]["until"].as_i64(), Some(until1 + 10 * DAY), "{me:?}");
     let d2 = r.body["id"].as_i64().unwrap();
 
     // 说明页：本月进度、公开名单、我的记录、VIP 到期时间

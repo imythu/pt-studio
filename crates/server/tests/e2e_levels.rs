@@ -277,6 +277,9 @@ async fn levels_end_to_end() {
         "{d:?}"
     );
     assert_eq!(call(&app, "GET", &format!("/api/p/levels/v1/admin/users/{}", user.id), None, &hv(&user.headers())).await.status, StatusCode::FORBIDDEN);
+    // 永久锁定：等级的 until 为 null（显示“永久”）；未被覆盖时没有 until
+    let me = call(&app, "GET", "/api/p/levels/v1/me", None, &hv(&user.headers())).await.body;
+    assert!(me["class"].get("until").is_some_and(Value::is_null), "{me:?}");
     kernel
         .run_job_now("levels", "daily_evaluate", json!({}))
         .await
@@ -298,6 +301,8 @@ async fn levels_end_to_end() {
     let r = call(&app, "DELETE", &path, None, &hv(&h)).await;
     assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
     assert_eq!(class_of(&mut db, user.id).await, (20, 20));
+    let me = call(&app, "GET", "/api/p/levels/v1/me", None, &hv(&user.headers())).await.body;
+    assert!(me["class"].get("until").is_none(), "{me:?}");
 
     // 增量评估：流量结算后只升级
     set_traffic(&mut db, user.id, 60 * GIB, 0).await;
