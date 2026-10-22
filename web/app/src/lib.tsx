@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { MouseEvent, ReactNode } from 'react';
 import { Link } from 'react-router';
 import { api } from '@pt-studio/sdk';
+import { withAbbr } from '@pt-studio/ui-kit';
 import { useInstalled } from './manifest';
 import { useSession } from './session';
 
@@ -176,6 +177,8 @@ export interface LevelClass {
   key: string;
   name: string;
   name_key?: string;
+  /** 简写（如 PU、EU），空为没有 */
+  abbr?: string;
   color: string | null;
   type?: string;
   progress?: { metric: string; op: string; current: string; target: string; met: boolean }[];
@@ -197,12 +200,30 @@ export function useMyLevel() {
 /** 等级显示名：自定义名称优先，否则按术语键 */
 export function levelName(t: (k: string) => string, c?: LevelClass | null): string {
   if (!c) return '';
-  if (c.name) return c.name;
-  if (c.name_key) {
+  let name = c.name || c.key;
+  if (!c.name && c.name_key) {
     const v = t(`term:${c.name_key}`);
-    if (v !== c.name_key) return v;
+    if (v !== c.name_key) name = v;
   }
-  return c.key;
+  return withAbbr(name, c.abbr);
+}
+
+/** 全部等级（levels 未安装时为空） */
+export function useLevelClasses(): LevelClass[] {
+  const on = useInstalled('levels') && !!useSession().me;
+  return (
+    useQuery({ queryKey: ['level-classes'], queryFn: () => api<{ items: LevelClass[] }>('/api/p/levels/v1/classes'), enabled: on, staleTime: 600_000, retry: false }).data?.items ?? []
+  );
+}
+
+/** 带等级颜色的等级名 */
+export function LevelName({ t, c }: { t: (k: string) => string; c?: LevelClass | null }) {
+  if (!c) return <span className="muted">—</span>;
+  return (
+    <span className="cls-name" style={c.color ? { color: c.color } : undefined}>
+      {levelName(t, c)}
+    </span>
+  );
 }
 
 /** 未读数：通知与站内信 */

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Button, Checkbox, Field, Input, Kpis, LoadMore, Note, PageHead, Panel, Progress, Segmented, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, Textarea } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, Kpis, LoadMore, Note, PageHead, Panel, Progress, Segmented, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, Textarea, withAbbr } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'ledger.ui.tab': '余额',
@@ -773,15 +773,16 @@ interface LevelClass {
   rank: number;
   name?: string | null;
   name_key: string;
+  abbr?: string;
 }
 
 const STATUSES = ['active', 'leech_disabled', 'pending'];
 const GRANTS = '/api/p/ledger/v1/admin/grants';
 
 const levelName = (api: PluginApi, c: LevelClass) => {
-  if (c.name) return c.name;
+  if (c.name) return withAbbr(c.name, c.abbr);
   const t = api.t(`term:${c.name_key}`);
-  return t && t !== c.name_key && t !== `term:${c.name_key}` ? t : c.key;
+  return withAbbr(t && t !== c.name_key && t !== `term:${c.name_key}` ? t : c.key, c.abbr);
 };
 
 const targetText = (api: PluginApi, t: Target) => {

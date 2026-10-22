@@ -27,6 +27,12 @@ export function cx(...xs: (string | false | null | undefined)[]): string {
 }
 
 /** 媒体查询（窄屏行为只用于组件内部，页面不直接判断宽度） */
+/** 等级名后附简写：高级用户（PU） / Power User (PU)；没有简写或与名称相同时只显示名称 */
+export function withAbbr(name: string, abbr?: string | null): string {
+  if (!abbr || abbr === name) return name;
+  return /[^\x00-\x7f]/.test(name) ? `${name}（${abbr}）` : `${name} (${abbr})`;
+}
+
 export function useMediaQuery(q: string): boolean {
   const get = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(q).matches;
   const [v, setV] = useState(get);

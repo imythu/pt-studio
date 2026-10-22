@@ -8,7 +8,7 @@ import { Slot, SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-stud
 import { formatBytes, formatDuration, useT } from '@pt-studio/terms';
 import { Avatar, Panel, SkeletonRows, Stat, Status, Table, Tabs } from '@pt-studio/ui-kit';
 import { ErrorText } from '../errors';
-import { fmtRatio, fmtSeed, levelName, type LevelClass } from '../lib';
+import { fmtRatio, fmtSeed, levelName, useLevelClasses } from '../lib';
 import { useInstalled } from '../manifest';
 import { useSession } from '../session';
 import { statusName } from './AdminUsers';
@@ -135,25 +135,18 @@ export function ProfilePage() {
   const s = useSession();
   const hasAccounting = useInstalled('accounting');
   const hasMessages = useInstalled('messages');
-  const hasLevels = useInstalled('levels');
   const hasRatioPolicy = useInstalled('ratio-policy');
   const nav = useNavigate();
   const p = useQuery({ queryKey: ['user', id], queryFn: () => api<Profile>(`/api/p/identity/v1/users/${id}`) });
   const stats = useQuery({ queryKey: ['user-stats', id], queryFn: () => api<Stats>(`/api/p/accounting/v1/users/${id}/stats`), enabled: hasAccounting, retry: false });
-  const cls = useQuery({
-    queryKey: ['level-classes'],
-    queryFn: () => api<{ items: LevelClass[] }>('/api/p/levels/v1/classes'),
-    enabled: hasLevels,
-    staleTime: 600_000,
-    retry: false,
-  });
+  const classes = useLevelClasses();
   if (p.isLoading) return <SkeletonRows n={5} />;
   if (p.error) return <ErrorText error={p.error} />;
   const profile = p.data as Profile;
   const ctx = { profile };
   const st = stats.data;
   const seed = st ? fmtSeed(st.seed_secs) : null;
-  const level = cls.data?.items.find((c) => c.id === profile.class_id);
+  const level = classes.find((c) => c.id === profile.class_id);
   const mine = s.me?.id === profile.id;
   const days = Math.max(1, Math.ceil((Date.now() - profile.created_at) / 86_400_000));
   // ?tab= 只替换查询串，不新增历史记录

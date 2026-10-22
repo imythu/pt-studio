@@ -137,6 +137,8 @@ async fn levels_end_to_end() {
     assert_eq!(items[2]["key"], "power_user");
     assert_eq!(items[2]["id"], 30);
     assert_eq!(items[2]["name_key"], "levels.class.power_user.name");
+    // 常用简写：预设等级 PU / EU …，没有简写的为空
+    assert_eq!((items[2]["abbr"].as_str(), items[3]["abbr"].as_str(), items[1]["abbr"].as_str()), (Some("PU"), Some("EU"), Some("")));
     assert_eq!(items[16]["key"], "staff_leader");
     assert_eq!(r.body["items"][1]["is_default"], true);
 
@@ -343,7 +345,7 @@ async fn levels_end_to_end() {
         { "key": "peasant", "type": "normal", "keep": [] },
         { "key": "user", "type": "normal", "is_default": true,
           "promote": [{ "metric": "ratio", "op": "gte", "value": 0.6 }], "keep": [{ "metric": "ratio", "op": "gte", "value": 0.5 }] },
-        { "key": "power_user", "name": "大佬", "description": "自定义说明", "type": "normal",
+        { "key": "power_user", "name": "大佬", "abbr": "DL", "description": "自定义说明", "type": "normal",
           "promote": [{ "metric": "uploaded_gib", "op": "gte", "value": 50 }], "keep": [] },
         { "key": "elite_user", "type": "normal", "color": "#00ff00",
           "promote": [{ "metric": "uploaded_gib", "op": "gte", "value": 1 }], "keep": [] },
@@ -375,6 +377,8 @@ async fn levels_end_to_end() {
         (json!(30), json!("大佬"))
     );
     assert_eq!(items[3]["color"], "#00ff00");
+    // 设置里的简写优先，留空时仍用常用简写
+    assert_eq!((items[2]["abbr"].as_str(), items[3]["abbr"].as_str()), (Some("DL"), Some("EU")));
     let legend = items[4]["id"].as_i64().unwrap();
     assert!(legend > 999, "{legend}");
     let inactive: i64 = sqlx::query_scalar("SELECT count(*) FROM levels.classes WHERE NOT active")

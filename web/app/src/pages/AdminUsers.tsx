@@ -7,6 +7,7 @@ import { SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-studio/slo
 import { useT, type Translator } from '@pt-studio/terms';
 import { Avatar, Button, Field, Input, Kpis, LoadMore, Note, PageHead, Panel, Select, Sheet, SkeletonRows, Status, Table, Tabs, Tag, useToast, type Tone } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
+import { LevelName, useLevelClasses } from '../lib';
 import { useSession } from '../session';
 
 interface Row {
@@ -115,6 +116,7 @@ export function AdminUsers() {
   });
   const rows = q.data?.pages.flatMap((p) => p.items) ?? [];
   const sensitive = useSession().can('identity.users.read_sensitive');
+  const classes = useLevelClasses();
   return (
     <div className="stack">
       <PageHead
@@ -155,6 +157,7 @@ export function AdminUsers() {
             columns={[
               { key: 'id', header: 'ID', render: (r) => <span className="mono">{r.id}</span> },
               { key: 'u', header: t('ui.login.username'), render: (r) => <Link className="u" to={`/admin/users/${r.id}`}>{r.username}</Link> },
+              ...(classes.length ? [{ key: 'lv', header: t('ui.admin.class'), render: (r: Row) => <LevelName t={t} c={classes.find((c) => c.id === r.class_id)} /> }] : []),
               { key: 's', header: t('ui.admin.status'), render: (r) => <Status tone={statusTone(r.status)}>{statusName(t, r.status)}</Status> },
               { key: 'r', header: t('ui.admin.roles'), render: (r) => <span className="row" style={{ gap: 4 }}>{r.roles.filter((x) => !x.startsWith('levels:') && x !== 'user' && x !== 'guest').map((x) => <Tag key={x}>{roleName(t, x)}</Tag>)}</span> },
               { key: 'c', header: t('ui.profile.joined'), render: (r) => <span className="small nowrap">{new Date(r.created_at).toLocaleDateString()}</span> },
@@ -402,9 +405,11 @@ export function AdminUser() {
   const { id } = useParams();
   const key = ['admin-user', id];
   const q = useQuery({ queryKey: key, queryFn: () => api<Detail>(`/api/p/identity/v1/admin/users/${id}`) });
+  const classes = useLevelClasses();
   if (q.isLoading) return <SkeletonRows n={6} />;
   if (q.error) return <ErrorText error={q.error} />;
   const d = q.data as Detail;
+  const level = classes.find((c) => c.id === d.class_id);
   return (
     <div className="stack">
       <PageHead
@@ -430,6 +435,7 @@ export function AdminUser() {
       <Kpis
         items={[
           { label: 'ID', value: d.id },
+          ...(classes.length ? [{ label: t('ui.admin.class'), value: <LevelName t={t} c={level} /> }] : []),
           { label: t('ui.admin.roles'), value: d.roles.filter((x) => !x.startsWith('levels:') && x !== 'guest').length },
           { label: t('ui.settings.sessions'), value: d.sessions },
           { label: t('ui.profile.joined'), value: new Date(d.created_at).toLocaleDateString() },

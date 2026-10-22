@@ -171,7 +171,7 @@ description = "从低到高排列。普通等级按条件自动升降；VIP / �
 type = "object"
 required = ["key", "type"]
 additionalProperties = false
-x-pt-order = ["key", "name", "description", "type", "is_default", "promote", "keep", "can_invite", "protected", "color"]
+x-pt-order = ["key", "name", "abbr", "description", "type", "is_default", "promote", "keep", "can_invite", "protected", "color"]
 
 [settings_schema.properties.classes.items.properties.key]
 type = "string"
@@ -184,6 +184,12 @@ type = "string"
 title = "名称"
 description = "留空使用内置名称（随界面语言变化）"
 maxLength = 32
+
+[settings_schema.properties.classes.items.properties.abbr]
+type = "string"
+title = "简写"
+description = "显示在等级名称后，如 PU、EU；留空使用常用简写（预设等级中高级用户 PU、精英用户 EU 等）"
+maxLength = 8
 
 [settings_schema.properties.classes.items.properties.description]
 type = "string"

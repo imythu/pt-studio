@@ -115,9 +115,24 @@ const OPS: [&str; 4] = ["gte", "gt", "lte", "lt"];
 const TYPES: [&str; 4] = ["normal", "vip", "honor", "staff"];
 const MAX_CLASSES: usize = 64;
 /// 设置规范化规则变化时递增，使已同步的设置重新处理
-const SYNC_VERSION: &str = "3";
+const SYNC_VERSION: &str = "4";
 
 /// 预设等级的固定数字 id：与旧版本数据以及按数字 id 配置的其他规则（限流倍数、魔力加成等）保持兼容
+/// 预设等级的常用简写（NexusPHP 社区惯用；设置中的 abbr 为空时使用）
+fn preset_abbr(key: &str) -> &'static str {
+    match key {
+        "power_user" => "PU",
+        "elite_user" => "EU",
+        "crazy_user" => "CU",
+        "insane_user" => "IU",
+        "veteran_user" => "VU",
+        "extreme_user" => "EXU",
+        "ultimate_user" => "UU",
+        "nexus_master" => "NM",
+        _ => "",
+    }
+}
+
 fn preset_id(key: &str) -> Option<i64> {
     Some(match key {
         "peasant" => 10,
@@ -155,6 +170,7 @@ fn preset_classes() -> Value {
 struct Def {
     key: String,
     name: String,
+    abbr: String,
     description: String,
     kind: String,
     is_default: bool,
@@ -221,9 +237,10 @@ fn validate(raw: &Value) -> Result<Vec<Def>, String> {
             return Err(format!("{at}: unknown type `{kind}`"));
         }
         let name = c["name"].as_str().unwrap_or("").trim().to_owned();
+        let abbr = c["abbr"].as_str().unwrap_or("").trim().to_owned();
         let description = c["description"].as_str().unwrap_or("").trim().to_owned();
-        if name.chars().count() > 32 || description.chars().count() > 1000 {
-            return Err(format!("{at}: name ≤ 32 and description ≤ 1000 characters"));
+        if name.chars().count() > 32 || abbr.chars().count() > 8 || description.chars().count() > 1000 {
+            return Err(format!("{at}: name ≤ 32, abbr ≤ 8 and description ≤ 1000 characters"));
         }
         let color = c["color"].as_str().unwrap_or("").to_owned();
         if !(color.is_empty()
@@ -234,6 +251,7 @@ fn validate(raw: &Value) -> Result<Vec<Def>, String> {
         out.push(Def {
             key,
             name,
+            abbr,
             description,
             is_default: c["is_default"].as_bool().unwrap_or(false),
             promote: conditions(&c["promote"], &format!("{at}.promote"))?,
@@ -307,12 +325,12 @@ fn sync_classes() -> R<()> {
         };
         let rank = i64::try_from(i + 1).unwrap_or(0) * 10;
         sql::execute(
-            "INSERT INTO classes (id, slug, rank, type, promote, keep, can_invite, protected, is_default, name, description, color, active, preset)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, nullif($12, ''), true, 'settings')
+            "INSERT INTO classes (id, slug, rank, type, promote, keep, can_invite, protected, is_default, name, description, color, active, preset, abbr)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, nullif($12, ''), true, 'settings', $13)
              ON CONFLICT (id) DO UPDATE SET slug = EXCLUDED.slug, rank = EXCLUDED.rank, type = EXCLUDED.type,
                     promote = EXCLUDED.promote, keep = EXCLUDED.keep, can_invite = EXCLUDED.can_invite,
                     protected = EXCLUDED.protected, is_default = EXCLUDED.is_default, name = EXCLUDED.name,
-                    description = EXCLUDED.description, color = EXCLUDED.color, active = true,
+                    description = EXCLUDED.description, color = EXCLUDED.color, abbr = EXCLUDED.abbr, active = true,
                     revision = classes.revision + 1, updated_at = now()",
             &[
                 SqlValue::Int(id),
@@ -327,6 +345,7 @@ fn sync_classes() -> R<()> {
                 SqlValue::Text(d.name.clone()),
                 SqlValue::Text(d.description.clone()),
                 SqlValue::Text(d.color.clone()),
+                SqlValue::Text(d.abbr.clone()),
             ],
         )?;
         keys.push(d.key.clone());
@@ -379,15 +398,21 @@ struct Class {
     protected: bool,
     is_default: bool,
     name: String,
+    /// 设置中的简写，空时用 [`preset_abbr`]
+    abbr: String,
     description: String,
     color: String,
 }
 
 impl Class {
-    /// 对外表示：name / description 为空时前端用 name_key / desc_key 的内置术语
+    fn abbr(&self) -> &str {
+        if self.abbr.is_empty() { preset_abbr(&self.key) } else { &self.abbr }
+    }
+
+    /// 对外表示：name / description 为空时前端用 name_key / desc_key 的内置术语；abbr 为空表示没有简写
     fn public(&self) -> Value {
         json!({ "id": self.id, "key": self.key, "rank": self.rank, "type": self.kind,
-                "name": self.name, "name_key": format!("levels.class.{}.name", self.key),
+                "name": self.name, "name_key": format!("levels.class.{}.name", self.key), "abbr": self.abbr(),
                 "description": self.description, "desc_key": format!("levels.class.{}.desc", self.key),
                 "color": (!self.color.is_empty()).then_some(&self.color),
                 "promote": self.promote, "keep": self.keep, "can_invite": self.can_invite,
@@ -396,14 +421,14 @@ impl Class {
 
     fn brief(&self) -> Value {
         json!({ "id": self.id, "key": self.key, "type": self.kind, "name": self.name,
-                "name_key": format!("levels.class.{}.name", self.key),
+                "name_key": format!("levels.class.{}.name", self.key), "abbr": self.abbr(),
                 "color": (!self.color.is_empty()).then_some(&self.color) })
     }
 }
 
 fn classes() -> R<Vec<Class>> {
     let r = sql::query(
-        "SELECT id, slug, rank, type, promote::text, keep::text, can_invite, protected, is_default, name, description, coalesce(color, '')
+        "SELECT id, slug, rank, type, promote::text, keep::text, can_invite, protected, is_default, name, description, coalesce(color, ''), abbr
            FROM classes WHERE active ORDER BY rank, id",
         &[],
     )?;
@@ -428,6 +453,7 @@ fn classes() -> R<Vec<Class>> {
             name: text(&row[9]),
             description: text(&row[10]),
             color: text(&row[11]),
+            abbr: text(&row[12]),
         })
         .collect())
 }

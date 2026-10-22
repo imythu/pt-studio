@@ -24,6 +24,7 @@ import {
   Status,
   Table,
   Tag,
+  withAbbr,
 } from "@pt-studio/ui-kit";
 
 interface Cond {
@@ -53,6 +54,7 @@ interface Brief {
   key?: string;
   name?: string;
   name_key?: string;
+  abbr?: string;
   color?: string | null;
 }
 
@@ -235,8 +237,11 @@ function useClasses(api: PluginApi): ClassInfo[] | null {
 }
 
 function className(api: PluginApi, c: Brief): string {
-  if (c.name) return c.name;
-  return c.name_key ? api.t(`term:${c.name_key}`) : `#${c.id}`;
+  if (c.name) return withAbbr(c.name, c.abbr);
+  return withAbbr(
+    c.name_key ? api.t(`term:${c.name_key}`) : `#${c.id}`,
+    c.abbr,
+  );
 }
 
 function ClassName({ api, c }: { api: PluginApi; c: Brief }) {

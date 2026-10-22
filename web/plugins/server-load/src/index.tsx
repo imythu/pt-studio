@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiError } from '@pt-studio/sdk';
 import type { PluginApi, PluginFrontend, SlotProps } from '@pt-studio/slots';
 import { registerMessages } from '@pt-studio/terms';
-import { Button, Checkbox, Field, Input, Note, Panel, Progress, SkeletonRows } from '@pt-studio/ui-kit';
+import { Button, Checkbox, Field, Input, Note, Panel, Progress, SkeletonRows, withAbbr } from '@pt-studio/ui-kit';
 
 registerMessages('zh-CN', {
   'server-load.ui.title': '服务器负载',
@@ -312,6 +312,7 @@ interface LevelClass {
   key: string;
   name: string;
   name_key: string;
+  abbr?: string;
   rank: number;
 }
 
@@ -320,9 +321,9 @@ const ROLES = ['user', 'uploader', 'moderator', 'admin', 'sysop'];
 
 /** 等级显示名：自定义名 > 术语 > key（与宿主 levelName 一致） */
 function className(api: PluginApi, c: LevelClass): string {
-  if (c.name) return c.name;
+  if (c.name) return withAbbr(c.name, c.abbr);
   const t = api.t(`term:${c.name_key}`);
-  return t && t !== c.name_key && t !== `term:${c.name_key}` ? t : c.key;
+  return withAbbr(t && t !== c.name_key && t !== `term:${c.name_key}` ? t : c.key, c.abbr);
 }
 
 function Settings({ api }: { api: PluginApi }) {
