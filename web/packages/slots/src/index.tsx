@@ -36,6 +36,8 @@ export interface PluginApi {
   isStaff(): boolean;
   /** 同一微任务内的请求合并为一次（每批 ≤ 100 个键） */
   batch<K, V>(key: string, loader: (keys: K[]) => Promise<Map<K, V>>): (k: K) => Promise<V | undefined>;
+  /** 当前用户的魔力值、流量、等级等发生变化后调用：刷新顶栏与个人卡片 */
+  refreshMe(): void;
   queryClient: QueryClient;
 }
 
@@ -69,6 +71,9 @@ export interface PluginFrontend {
 }
 
 // ---------------- 宿主 ----------------
+
+/** 宿主里与当前用户账户相关的查询键（web/app/src/lib.tsx 的 useMyBonus / useMyStats / useMyLevel / useMyHnr） */
+export const ME_QUERY_KEYS = ['bonus-summary', 'my-stats', 'levels-me', 'hnr-me'] as const;
 
 export interface HostServices {
   manifest: FrontendManifest;
@@ -153,6 +158,9 @@ export function SlotsProvider({ host, children }: { host: HostServices; children
               batchers.set(full, b);
             }
             return b as (k: K) => Promise<V | undefined>;
+          },
+          refreshMe: () => {
+            for (const k of ME_QUERY_KEYS) void host.queryClient.invalidateQueries({ queryKey: [k] });
           },
           queryClient: host.queryClient,
         };

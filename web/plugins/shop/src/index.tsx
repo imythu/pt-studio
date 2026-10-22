@@ -209,6 +209,7 @@ function BuySheet({ api, it, balance, onClose, done }: { api: PluginApi; it: Ite
     try {
       await api.json(`/api/p/shop/v1/items/${it.id}/purchase`, { json: { quantity: single ? 1 : qty, ...(record ? { record_id: Number(record) } : {}) } });
       api.toast(api.t('shop.ui.bought'), 'success');
+      api.refreshMe();
       onClose();
       done();
     } catch (e) {

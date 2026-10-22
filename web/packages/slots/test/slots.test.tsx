@@ -67,6 +67,21 @@ describe('slots', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'crash: kaboom');
   });
 
+  it('refreshMe invalidates the host account queries', async () => {
+    const h = host({ x: { slots: { 'user.profile.stats': { component: ({ api }: SlotProps) => <button onClick={() => api.refreshMe()}>go</button> } } } });
+    for (const k of ['bonus-summary', 'my-stats', 'other']) h.queryClient.setQueryData([k], 1);
+    await act(async () => {
+      render(
+        <SlotsProvider host={h}>
+          <Slot name="user.profile.stats" ctx={{}} />
+        </SlotsProvider>,
+      );
+    });
+    (await screen.findByText('go')).click();
+    const stale = (k: string) => h.queryClient.getQueryState([k])?.isInvalidated;
+    expect([stale('bonus-summary'), stale('my-stats'), stale('other')]).toEqual([true, true, false]);
+  });
+
   it('renders plugin routes', async () => {
     const h = host({ invite: { routes: [{ path: '/p/invite/*', component: ({ path }) => <h1>page {path}</h1> }] } });
     await act(async () => {

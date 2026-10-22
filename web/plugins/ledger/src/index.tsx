@@ -312,6 +312,7 @@ function UserTab({ ctx, api }: SlotProps<{ profile: { id: number } }>) {
         idempotent: true,
       });
       api.toast(api.t('ledger.ui.done'), 'success');
+      if (uid === api.user()?.id) api.refreshMe();
       setF({ ...f, amount: '', note: '' });
       setOpen(false);
       load();
@@ -531,6 +532,7 @@ function Transfer({ api }: { api: PluginApi }) {
         idempotent: true,
       });
       api.toast(api.t('ledger.ui.sent', { fee: fmt(r.fee, cur.scale), after: fmt(r.balance_after, cur.scale) }), 'success');
+      api.refreshMe();
       setF({ ...f, amount: '', memo: '' });
       setConfirming(false);
       load();

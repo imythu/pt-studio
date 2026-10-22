@@ -113,6 +113,7 @@ function UploadSheet({ api, tid, langs, open, onClose, done }: { api: PluginApi;
       const q = new URLSearchParams({ filename: file.name, lang, title, ...(anon ? { anonymous: '1' } : {}) });
       await api.json(`/api/p/subtitles/v1/torrents/${tid}/subtitles?${q.toString()}`, { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' } });
       api.toast(api.t('subtitles.ui.uploaded'), 'success');
+      api.refreshMe();
       setFile(null);
       setTitle('');
       onClose();

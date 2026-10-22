@@ -2,9 +2,9 @@
 //!
 //! - 奖品（管理员维护）：魔力值（`ctx.ledger` 系统发行）、上传量（`ctx.accounting.adjust`）、VIP 天数与永久 VIP
 //!   （`ctx.levels.grant_vip`）。每个奖品有中奖概率（百万分之一）与可选库存；启用奖品的概率之和 ≤ 100%，剩余为“谢谢参与”。
-//! - 抽奖：开关、每次消耗的魔力值、每日次数（UTC 日）、注册天数门槛在插件设置里。扣费（幂等键 `lot:s:<抽奖 ID>`）→
-//!   用宿主随机数抽取 → 发奖（幂等键 `lot:w:<抽奖 ID>`）。发奖失败时退回本次消耗（`lot:rf:<抽奖 ID>`）并报错，
-//!   本次抽奖不留记录、不扣库存。
+//! - 抽奖：开关、每次消耗的魔力值、每日次数（UTC 日）、注册天数门槛在插件设置里。支持一次连抽最多 10 次。
+//!   一次扣清全部消耗（幂等键 `lot:s:<首个抽奖 ID>`）→ 逐次用宿主随机数抽取 → 发奖（幂等键 `lot:w:<抽奖 ID>`）。
+//!   发奖失败时退回该次消耗（`lot:rf:<抽奖 ID>`），该次不留记录、不扣库存；单抽报错，连抽中标记为失败、其余照常。
 //! - 服务调用各自提交：若进程在扣费后、写入记录前中断，用户损失一次消耗（概率极低，可由管理员按账本记录补偿）。
 
 pt_plugin_sdk::world!("lottery", http);
@@ -17,6 +17,8 @@ struct Lottery;
 pub const KINDS: &[&str] = &["bonus", "upload", "vip_days", "vip_permanent"];
 pub const PPM: i64 = 1_000_000;
 const MAX_PRIZES: usize = 16;
+/// 连抽一次最多几次
+const MAX_BATCH: i64 = 10;
 
 struct Settings {
     enabled: bool,
@@ -183,10 +185,15 @@ fn grant(uid: i64, kind: &str, amount: i64, sid: i64) -> R<()> {
     }
 }
 
-fn spin(uid: i64) -> R<Value> {
+/// 一次抽 `count` 次（1–10）：先检查剩余次数并一次扣清全部消耗，再逐次抽取、发奖。
+/// 单抽发奖失败时退款并报错（与以前一致）；连抽中某次发奖失败只退回这一次的消耗并记为失败，已发出的奖品照常记录。
+fn spin(uid: i64, count: i64) -> R<Value> {
     let s = settings();
     if !s.enabled {
         return Err(err("lottery.disabled", "the prize wheel is not open on this site"));
+    }
+    if !(1..=MAX_BATCH).contains(&count) {
+        return Err(invalid(&format!("count must be 1..{MAX_BATCH}")));
     }
     if account_age_days(uid)? < s.min_account_days {
         return Err(err("lottery.not_eligible", &format!("accounts younger than {} days cannot spin", s.min_account_days)));
@@ -196,50 +203,80 @@ fn spin(uid: i64) -> R<Value> {
         "INSERT INTO spin_locks (user_id) VALUES ($1) ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id",
         &[SqlValue::Int(uid)],
     )?;
-    if s.daily_limit > 0 && spins_today(uid)? >= s.daily_limit {
+    if s.daily_limit > 0 && spins_today(uid)? + count > s.daily_limit {
         return Err(err("lottery.limit_reached", &format!("at most {} spins per day", s.daily_limit)));
     }
     let prizes = live_prizes(true)?;
-    let sid = one("SELECT nextval(pg_get_serial_sequence('spins', 'id'))", &[])?;
+    let sids = sql::query("SELECT nextval(pg_get_serial_sequence('spins', 'id')) FROM generate_series(1, $1)", &[SqlValue::Int(count)])?
+        .rows
+        .iter()
+        .filter_map(|r| r.int(0))
+        .collect::<Vec<_>>();
+    let first = sids.first().copied().unwrap_or(0);
     if s.spin_cost > 0 {
-        transfer(Some(uid), None, s.spin_cost, "lottery.spin", &format!("wheel spin {sid}"), &format!("lot:s:{sid}"))
+        let memo = if count == 1 { format!("wheel spin {first}") } else { format!("wheel spins {first}.. x{count}") };
+        transfer(Some(uid), None, s.spin_cost * count, "lottery.spin", &memo, &format!("lot:s:{first}"))
             .map_err(|e| if e.code.contains("insufficient") { err("lottery.insufficient_funds", "not enough bonus") } else { e })?;
     }
-    let chances: Vec<(i64, i64)> = prizes.iter().map(|p| (p.int(0).unwrap_or(0), p.int(4).unwrap_or(0))).collect();
-    let won = pick(&chances, roll()).and_then(|id| prizes.iter().find(|p| p.int(0) == Some(id)));
-    let (kind, amount) = won.map_or((None, 0), |p| (p.text(1), p.int(2).unwrap_or(0)));
-    if let Some(kind) = &kind
-        && let Err(e) = grant(uid, kind, amount, sid)
-    {
-        logging::warn("lottery grant failed", &[("spin", &sid.to_string()), ("code", &e.code), ("message", &e.message)]);
-        if s.spin_cost > 0 {
-            transfer(None, Some(uid), s.spin_cost, "lottery.refund", &format!("wheel spin {sid} failed"), &format!("lot:rf:{sid}"))?;
+    // 本批次内库存用完的奖品不再抽中（概率并入“谢谢参与”）
+    let mut chances: Vec<(i64, i64)> = prizes.iter().map(|p| (p.int(0).unwrap_or(0), p.int(4).unwrap_or(0))).collect();
+    let mut stock: Vec<Option<i64>> = prizes.iter().map(|p| p.int(5)).collect();
+    let mut results = Vec::new();
+    let mut charged = s.spin_cost * count;
+    for &sid in &sids {
+        let won = pick(&chances, roll()).and_then(|id| prizes.iter().position(|p| p.int(0) == Some(id)));
+        let (kind, amount) = won.map_or((None, 0), |i| (prizes[i].text(1), prizes[i].int(2).unwrap_or(0)));
+        if let Some(kind) = &kind
+            && let Err(e) = grant(uid, kind, amount, sid)
+        {
+            logging::warn("lottery grant failed", &[("spin", &sid.to_string()), ("code", &e.code), ("message", &e.message)]);
+            if s.spin_cost > 0 {
+                transfer(None, Some(uid), s.spin_cost, "lottery.refund", &format!("wheel spin {sid} failed"), &format!("lot:rf:{sid}"))?;
+                charged -= s.spin_cost;
+            }
+            if count == 1 {
+                return Err(err("lottery.grant_failed", "the prize could not be granted; your bonus was refunded"));
+            }
+            results.push(json!({ "spin_id": sid, "prize_id": null, "kind": null, "amount": 0, "failed": true }));
+            continue;
         }
-        return Err(err("lottery.grant_failed", "the prize could not be granted; your bonus was refunded"));
+        let prize_id = won.and_then(|i| prizes[i].int(0));
+        if let Some(i) = won
+            && let Some(left) = stock[i]
+        {
+            sql::execute("UPDATE wheel_prizes SET stock = stock - 1, updated_at = now() WHERE id = $1", &[SqlValue::Int(prize_id.unwrap_or(0))])?;
+            stock[i] = Some(left - 1);
+            if left <= 1 {
+                chances[i].1 = 0;
+            }
+        }
+        sql::execute(
+            "INSERT INTO spins (id, user_id, cost, prize_id, kind, amount) VALUES ($1, $2, $3, $4, $5, $6)",
+            &[
+                SqlValue::Int(sid),
+                SqlValue::Int(uid),
+                SqlValue::Int(s.spin_cost),
+                prize_id.map_or(SqlValue::Null, SqlValue::Int),
+                kind.clone().map_or(SqlValue::Null, SqlValue::Text),
+                SqlValue::Int(amount),
+            ],
+        )?;
+        ctx::publish(
+            "lottery.spun",
+            &format!("user:{uid}"),
+            &json!({ "spin_id": sid, "user_id": uid, "cost": s.spin_cost, "currency": "bonus", "prize_id": prize_id, "kind": kind, "amount": amount }),
+        )?;
+        results.push(json!({ "spin_id": sid, "prize_id": prize_id, "kind": kind, "amount": amount }));
     }
-    let prize_id = won.and_then(|p| p.int(0));
-    if let Some(p) = won
-        && p.int(5).is_some()
+    let mut out = json!({ "cost": charged, "spins_today": spins_today(uid)? });
+    // 单抽：结果字段也放在顶层（兼容旧客户端）
+    if count == 1
+        && let (Some(o), Some(Value::Object(r))) = (out.as_object_mut(), results.first())
     {
-        sql::execute("UPDATE wheel_prizes SET stock = stock - 1, updated_at = now() WHERE id = $1", &[SqlValue::Int(prize_id.unwrap_or(0))])?;
+        o.extend(r.clone());
     }
-    sql::execute(
-        "INSERT INTO spins (id, user_id, cost, prize_id, kind, amount) VALUES ($1, $2, $3, $4, $5, $6)",
-        &[
-            SqlValue::Int(sid),
-            SqlValue::Int(uid),
-            SqlValue::Int(s.spin_cost),
-            prize_id.map_or(SqlValue::Null, SqlValue::Int),
-            kind.clone().map_or(SqlValue::Null, SqlValue::Text),
-            SqlValue::Int(amount),
-        ],
-    )?;
-    ctx::publish(
-        "lottery.spun",
-        &format!("user:{uid}"),
-        &json!({ "spin_id": sid, "user_id": uid, "cost": s.spin_cost, "currency": "bonus", "prize_id": prize_id, "kind": kind, "amount": amount }),
-    )?;
-    Ok(json!({ "spin_id": sid, "cost": s.spin_cost, "prize_id": prize_id, "kind": kind, "amount": amount, "spins_today": spins_today(uid)? }))
+    out["results"] = json!(results);
+    Ok(out)
 }
 
 // ---------------- 管理 ----------------
@@ -353,7 +390,7 @@ impl http_handler::Guest for Lottery {
         let uid = ctx::current_user()?;
         let reply = match req.route() {
             "wheel" => http::Reply::ok(&wheel(Some(uid))?),
-            "spin" => http::Reply::created(&spin(uid)?),
+            "spin" => http::Reply::created(&spin(uid, req.body_value()["count"].as_i64().unwrap_or(1))?),
             "me" => http::Reply::ok(&json!({ "items": my_spins(uid, 50)? })),
             "admin_wheel" => http::Reply::ok(&admin_wheel()?),
             "admin_prizes" => http::Reply::ok(&save_prizes(&req.body_value())?),

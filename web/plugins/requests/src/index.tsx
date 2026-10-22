@@ -259,6 +259,7 @@ function New({ api }: { api: PluginApi }) {
     }
     try {
       const r = await api.json<{ id: number }>('/api/p/requests/v1/requests', { method: 'POST', json: { type_id: tid, title, description, bounty, requirements }, idempotent: true });
+      api.refreshMe();
       api.navigate(`/p/requests/${r.id}`);
     } catch (e) {
       setErr(errText(api, e));
@@ -352,6 +353,8 @@ function DetailPage({ api, id }: { api: PluginApi; id: number }) {
     setErr(null);
     try {
       await api.json(path, { method: 'POST', json: body });
+      // 追加悬赏、撤回退款、确认应求发放悬赏都会改动余额
+      api.refreshMe();
       setSheet(null);
       await load();
       return true;

@@ -1,5 +1,5 @@
 //! 端到端：幸运转盘（lottery，WASM）—— 默认关闭、注册天数限制、奖品与概率校验、各类奖品发放（魔力值、上传量、
-//! VIP 天数、永久 VIP）、库存、每日次数、魔力值不足、未中奖、删除奖品。
+//! VIP 天数、永久 VIP）、库存、每日次数、魔力值不足、未中奖、删除奖品、十连抽。
 //!
 //! 运行：`cargo test -p pt-server --test e2e_lottery -- --test-threads=1`
 
@@ -171,4 +171,26 @@ async fn lottery_end_to_end() {
         .await
         .unwrap();
     assert!(audit >= 5, "{audit}");
+
+    // 十连抽：一次扣清 10 次消耗；库存 3 的奖品抽完后其余为“谢谢参与”；剩余次数不足 10 次时整批拒绝
+    put_settings(&app, &admin, json!({ "enabled": true, "spin_cost": 50, "daily_limit": 20, "min_account_days": 0 })).await;
+    save(&admin, json!([{ "kind": "bonus", "amount": 300, "chance_ppm": 1_000_000, "stock": 3 }])).await;
+    let ten = || {
+        let app = app.clone();
+        let h = alice.headers();
+        async move { call(&app, "POST", "/api/p/lottery/v1/wheel/spin", Some(json!({ "count": 10 })), &hv(&h)).await }
+    };
+    let b2 = balance(&app, &alice).await;
+    let r = ten().await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let results = r.body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 10);
+    assert_eq!(results.iter().filter(|x| x["kind"] == "bonus").count(), 3, "{results:?}");
+    assert!(results[3..].iter().all(|x| x["prize_id"].is_null()));
+    assert_eq!((r.body["cost"].as_i64(), r.body["spins_today"].as_i64()), (Some(500), Some(15)));
+    assert!(r.body.get("spin_id").is_none(), "batch results are only in `results`");
+    assert_eq!(balance(&app, &alice).await, b2 - 500 + 900);
+    assert_eq!(ten().await.body["code"], "lottery.limit_reached");
+    let bad = call(&app, "POST", "/api/p/lottery/v1/wheel/spin", Some(json!({ "count": 11 })), &hv(&alice.headers())).await;
+    assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
 }

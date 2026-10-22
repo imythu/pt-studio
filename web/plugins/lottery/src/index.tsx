@@ -18,6 +18,10 @@ registerMessages('zh-CN', {
   'lottery.ui.result': '结果',
   'lottery.ui.spent': '消耗',
   'lottery.ui.again': '再抽一次',
+  'lottery.ui.ten': '十连抽',
+  'lottery.ui.ten_won': '十连抽结果：中奖 {n} 次',
+  'lottery.ui.ten_lost': '十连抽结果：一个也没中，再接再厉！',
+  'lottery.ui.failed': '发放失败，已退回',
   'lottery.ui.won_by': '{user} 抽中 {prize}',
   'lottery.ui.title': '幸运转盘',
   'lottery.ui.subtitle': '转动转盘，赢取魔力值、上传量与 VIP',
@@ -94,6 +98,10 @@ registerMessages('en', {
   'lottery.ui.result': 'Result',
   'lottery.ui.spent': 'Cost',
   'lottery.ui.again': 'Spin again',
+  'lottery.ui.ten': '10 spins',
+  'lottery.ui.ten_won': '10 spins: {n} won',
+  'lottery.ui.ten_lost': '10 spins: no prize this time. Good luck next time!',
+  'lottery.ui.failed': 'Not granted, refunded',
   'lottery.ui.won_by': '{user} won {prize}',
   'lottery.ui.title': 'Prize wheel',
   'lottery.ui.subtitle': 'Spin to win bonus, upload credit and VIP',
@@ -194,6 +202,18 @@ interface Wheel {
   eligible: boolean;
   mine: MySpin[];
 }
+
+interface SpinResult {
+  spin_id: number;
+  prize_id: number | null;
+  kind: Kind | null;
+  amount: number;
+  /** 连抽中发奖失败、已退款 */
+  failed?: boolean;
+}
+
+/** 十连抽 */
+const TEN = 10;
 
 const errText = (api: PluginApi, e: unknown) => (e instanceof ApiError && api.t(e.code) !== e.code ? api.t(e.code) : e instanceof Error ? e.message : String(e));
 const pct = (ppm: number) => `${Number((ppm / 10_000).toFixed(4))}%`;
@@ -296,7 +316,7 @@ function WheelPage({ api }: { api: PluginApi }) {
   const [w, setW] = useState<Wheel | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [spinning, setSpinning] = useState(false);
-  const [result, setResult] = useState<{ win: boolean; text: string } | null>(null);
+  const [result, setResult] = useState<{ win: boolean; text: string; items?: SpinResult[] } | null>(null);
   const cv = useRef<HTMLCanvasElement | null>(null);
   const rot = useRef(0);
   const raf = useRef(0);
@@ -327,17 +347,20 @@ function WheelPage({ api }: { api: PluginApi }) {
   }, [sig, spinning]);
   if (err && !w) return <Note tone="bad">{err}</Note>;
   if (!w) return <SkeletonRows n={6} />;
-  const limited = w.daily_limit > 0 && w.spins_today >= w.daily_limit;
-  const canSpin = w.enabled && w.eligible && !limited && !spinning;
-  const spin = async () => {
-    if (!canSpin) return;
+  const left = w.daily_limit > 0 ? Math.max(w.daily_limit - w.spins_today, 0) : Infinity;
+  const canSpin = w.enabled && w.eligible && left > 0 && !spinning;
+  const spin = async (count: number) => {
+    if (!canSpin || left < count) return;
     setSpinning(true);
     setResult(null);
     try {
-      const r = await api.json<{ prize_id: number | null; kind: Kind | null; amount: number }>('/api/p/lottery/v1/wheel/spin', { json: {} });
+      const r = await api.json<{ results: SpinResult[] }>('/api/p/lottery/v1/wheel/spin', { json: { count } });
+      const items = r.results;
+      // 连抽时转盘停在第一个中奖的奖品上（都没中则停在“谢谢参与”）
+      const shown = items.find((x) => x.prize_id !== null) ?? items[0];
       const n = slices.length;
       const idx = Math.max(
-        slices.findIndex((s) => s.prizeId === r.prize_id),
+        slices.findIndex((s) => s.prizeId === (shown?.prize_id ?? null)),
         0,
       );
       const seg = (Math.PI * 2) / n;
@@ -354,7 +377,10 @@ function WheelPage({ api }: { api: PluginApi }) {
         if (k < 1) raf.current = requestAnimationFrame(step);
         else {
           setSpinning(false);
-          setResult(r.prize_id === null ? { win: false, text: api.t('lottery.ui.lost') } : { win: true, text: api.t('lottery.ui.won', { prize: label }) });
+          const wins = items.filter((x) => x.prize_id !== null).length;
+          if (count > 1) setResult({ win: wins > 0, text: wins > 0 ? api.t('lottery.ui.ten_won', { n: wins }) : api.t('lottery.ui.ten_lost'), items });
+          else setResult(wins === 0 ? { win: false, text: api.t('lottery.ui.lost') } : { win: true, text: api.t('lottery.ui.won', { prize: label }) });
+          api.refreshMe();
           void load();
         }
       };
@@ -362,6 +388,7 @@ function WheelPage({ api }: { api: PluginApi }) {
     } catch (e) {
       setSpinning(false);
       api.toast(errText(api, e), 'error');
+      api.refreshMe();
       void load();
     }
   };
@@ -430,13 +457,25 @@ function WheelPage({ api }: { api: PluginApi }) {
           <span className="wheel-pin" />
           <canvas ref={cv} width={SIZE} height={SIZE} aria-label={api.t('lottery.ui.title')} />
           <div className="row">
-            <Button variant="gold" size="lg" disabled={!canSpin} onClick={() => void spin()}>
+            <Button variant="gold" size="lg" disabled={!canSpin} onClick={() => void spin(1)}>
               {spinning ? api.t('lottery.ui.spinning') : `${result ? api.t('lottery.ui.again') : api.t('lottery.ui.spin')}${w.spin_cost > 0 ? ` · ${w.spin_cost}` : ''}`}
+            </Button>
+            <Button size="lg" disabled={!canSpin || left < TEN} onClick={() => void spin(TEN)}>
+              {`${api.t('lottery.ui.ten')}${w.spin_cost > 0 ? ` · ${w.spin_cost * TEN}` : ''}`}
             </Button>
           </div>
           <span className={result?.win ? 'small gold' : 'small'} role="status" aria-live="polite">
             {result?.text ?? ''}
           </span>
+          {result?.items && (
+            <ol className="lw-ten">
+              {result.items.map((x) => (
+                <li key={x.spin_id} className={x.prize_id !== null ? 'gold' : x.failed ? 'down' : 'muted'}>
+                  {x.failed ? api.t('lottery.ui.failed') : prizeName(api, x.kind, x.amount, w.prizes.find((p) => p.id === x.prize_id)?.label)}
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
       </SideLayout>
     </div>

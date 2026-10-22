@@ -1,5 +1,6 @@
 // checkin 前端：用户菜单的签到入口（未签到时一键签到并显示奖励）、首页小部件、签到页（/p/checkin/：连续天数、本月日历、排行）。
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@pt-studio/sdk";
 import type { PluginApi, PluginFrontend, SlotProps } from "@pt-studio/slots";
 import { registerMessages } from "@pt-studio/terms";
@@ -107,18 +108,13 @@ function errText(api: PluginApi, e: unknown): string {
   return String(e);
 }
 
-/** 签到状态：与宿主首页共用查询缓存（菜单、首页组件同时挂载时只发一次请求） */
-const myStatus = (api: PluginApi) =>
-  api.queryClient.fetchQuery({ queryKey: ["checkin-me"], queryFn: () => api.json<Status>("/api/p/checkin/v1/me"), staleTime: 30_000 });
+/** 签到状态：与宿主首页共用查询缓存（菜单、首页组件同时挂载时只发一次请求；签到后失效即一起刷新） */
+const useMyStatus = (api: PluginApi, enabled = true) =>
+  useQuery({ queryKey: ["checkin-me"], queryFn: () => api.json<Status>("/api/p/checkin/v1/me"), staleTime: 30_000, enabled, retry: false }).data;
 
 /** 魔力值页「如何获得」里的签到条目 */
 function Explain({ ctx, api }: SlotProps<{ section: string }>) {
-  const [st, setSt] = useState<Status | null>(null);
-  useEffect(() => {
-    void myStatus(api)
-      .then(setSt)
-      .catch(() => undefined);
-  }, [api]);
+  const st = useMyStatus(api);
   const r = st?.rules;
   if (ctx.section !== "earn" || !r) return null;
   return (
@@ -130,12 +126,7 @@ function Explain({ ctx, api }: SlotProps<{ section: string }>) {
 }
 
 function MenuItem({ api }: SlotProps) {
-  const [st, setSt] = useState<Status | null>(null);
-  useEffect(() => {
-    void myStatus(api)
-      .then(setSt)
-      .catch(() => undefined);
-  }, [api]);
+  const st = useMyStatus(api);
   if (!st) return null;
   return (
     <NavItem
@@ -186,13 +177,7 @@ function Calendar({ st }: { st: Status }) {
 
 /** 首页侧栏：本月签到日历（签到按钮在首页卷首） */
 function Widget({ api }: SlotProps) {
-  const [st, setSt] = useState<Status | null>(null);
-  useEffect(() => {
-    if (api.user())
-      void myStatus(api)
-        .then(setSt)
-        .catch(() => undefined);
-  }, [api]);
+  const st = useMyStatus(api, !!api.user());
   if (!api.user() || !st) return null;
   return (
     <Panel
@@ -244,7 +229,7 @@ function Page({ api }: { api: PluginApi }) {
       });
       setMsg(resultText(api, r));
       void api.queryClient.invalidateQueries({ queryKey: ["checkin-me"] });
-      void api.queryClient.invalidateQueries({ queryKey: ["bonus-summary"] });
+      api.refreshMe();
       api.toast(resultText(api, r), "success");
       await load();
     } catch (e) {
