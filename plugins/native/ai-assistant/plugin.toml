@@ -134,7 +134,7 @@ x-pt-order = ["site_name", "fallback_contact", "profile", "daily_questions_per_u
 [settings_schema.properties.site_name]
 type = "string"
 maxLength = 60
-title = "站点名称（系统提示中使用）"
+title = "站点名称（系统提示中使用；留空则用站点信息里的站名）"
 
 [settings_schema.properties.fallback_contact]
 type = "string"

@@ -119,7 +119,7 @@ export interface ActiveTheme {
 }
 
 export interface FrontendManifest {
-  site: { name: string; default_locale: string; locales: string[]; themes: string[] };
+  site: { name: string; /** 字标：主字 + 副字（副字可空） */ mark?: [string, string]; default_locale: string; locales: string[]; themes: string[] };
   plugins: FrontendPlugin[];
   /** null：使用框架自带样式（经典） */
   theme?: ActiveTheme | null;

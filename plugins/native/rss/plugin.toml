@@ -115,8 +115,7 @@ x-pt-order = ["site_name", "site_url", "items_per_feed", "max_feeds_per_user", "
 [settings_schema.properties.site_name]
 type = "string"
 maxLength = 60
-title = "站点名称（订阅标题与 Torznab caps 中使用）"
-default = "PT Studio"
+title = "站点名称（订阅标题与 Torznab caps 中使用；留空则用站点信息里的站名）"
 
 [settings_schema.properties.site_url]
 type = "string"

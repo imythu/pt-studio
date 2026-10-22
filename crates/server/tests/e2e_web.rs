@@ -229,6 +229,33 @@ async fn web_end_to_end() {
     let m4 = call(&app, "GET", "/api/kernel/v1/frontend/manifest", None, &[]).await;
     assert_eq!(m4.body["theme"]["terms"], false);
 
+    // 站点信息：默认来自 site.toml；管理员可改站名与字标，清单立即生效；非管理员不能改；空名、超长被拒
+    assert_eq!(m4.body["site"]["name"], "test");
+    assert_eq!(m4.body["site"]["mark"], json!(["test", ""]));
+    let site = "/api/kernel/v1/admin/site";
+    assert_eq!(
+        call(&app, "PUT", site, Some(json!({ "name": "x" })), &hv(&alice.headers())).await.status,
+        StatusCode::FORBIDDEN
+    );
+    let r = call(&app, "GET", site, None, &hv(&admin.headers())).await;
+    assert_eq!(r.body["default"]["name"], "test", "{:?}", r.body);
+    for bad in [json!({ "name": "  " }), json!({ "name": "长".repeat(41) }), json!({ "name": "仙门", "mark": ["", "x"] })] {
+        let r = call(&app, "PUT", site, Some(bad.clone()), &hv(&admin.headers())).await;
+        assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+    let r = call(&app, "PUT", site, Some(json!({ "name": " 仙门 PT ", "mark": ["仙门", "PT"] })), &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let m5 = call(&app, "GET", "/api/kernel/v1/frontend/manifest", None, &[]).await;
+    assert_eq!(m5.body["site"]["name"], "仙门 PT");
+    assert_eq!(m5.body["site"]["mark"], json!(["仙门", "PT"]));
+    let r = call(&app, "PUT", site, Some(json!({ "name": "test" })), &hv(&admin.headers())).await;
+    assert_eq!(r.body["site"]["mark"], json!(["test", ""]));
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM kernel.audit_log WHERE action = 'kernel.site_update'")
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+
     let tid = upload(
         &app,
         &alice,

@@ -9,7 +9,7 @@ use crate::{PResult, TimestampMs};
 
 #[async_trait]
 pub trait Config: Send + Sync {
-    /// site.toml `[plugin.<id>]`，另含内核注入的只读 `_site`（name、base_url、timezone、default_locale）
+    /// site.toml `[plugin.<id>]`，另含内核注入的只读 `_site`（name、base_url、timezone、default_locale；name 为后台可改的当前站名）
     fn get_static(&self) -> Json;
     /// 后台可改的设置（缓存，最多滞后数秒）
     async fn get_settings(&self) -> Json;

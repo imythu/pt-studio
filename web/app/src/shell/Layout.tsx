@@ -45,8 +45,8 @@ function ThemeButton() {
 
 export function Wordmark({ small }: { small?: boolean }) {
   const m = useManifest();
-  // 站点改名时显示站名；默认站名拆成「PT Studio」两段排版
-  const [a, b] = m.site.name === 'PT Studio' ? ['PT', 'Studio'] : [m.site.name, ''];
+  // 字标拆成主字 + 副字两段排版（后台「外观 → 站点信息」可改）
+  const [a, b] = m.site.mark ?? [m.site.name, ''];
   return (
     <Link to="/" className={cx('mark', small && 'mark-sm')} aria-label={m.site.name}>
       <b>{a}</b>

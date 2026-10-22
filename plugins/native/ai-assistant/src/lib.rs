@@ -137,7 +137,8 @@ pub async fn ask(ctx: &Ctx, question: &str, history: Vec<Value>, idem: &str) -> 
     let hits = kb::rank(question, &chunks, TOP_K);
     let allowed: Vec<String> = hits.iter().map(|h| h.0.id.clone()).collect();
     let site = opt("site_name")
-        .and_then(|v| v.as_str().map(str::to_owned))
+        .and_then(|v| v.as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned))
+        .or_else(|| st["_site"]["name"].as_str().map(str::to_owned))
         .unwrap_or_else(|| "本站".into());
     let contact = opt("fallback_contact")
         .and_then(|v| v.as_str().map(str::to_owned))

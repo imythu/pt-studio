@@ -485,11 +485,13 @@ impl Kernel {
             error_codes,
             mcp_tools,
             csp_extra,
+            site: crate::frontend::SiteCache::new(&cfg.site.name),
             node_id,
             events_cfg,
             me: me.clone(),
         });
 
+        crate::frontend::SiteCache::refresh(&shared).await;
         record_registry(&shared, &ordered).await?;
         maintain_partitions(&shared).await;
         maintain_plugin_partitions(&shared).await;
@@ -522,6 +524,7 @@ impl Kernel {
 
         let (stop, stop_rx) = watch::channel(false);
         let mut tasks = events::spawn_background(shared.clone(), stop_rx.clone());
+        tasks.push(crate::frontend::SiteCache::spawn_refresh(shared.clone(), stop_rx.clone()));
         tasks.extend(crate::scheduler::spawn(shared.clone(), stop_rx));
         tracing::info!(plugins = ?shared.order, node = %shared.node_id, "kernel started");
         Ok(Kernel { shared, stop, tasks })

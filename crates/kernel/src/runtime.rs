@@ -100,6 +100,8 @@ pub struct Shared {
     pub mcp_tools: Vec<pt_plugin_api::McpToolDef>,
     /// 插件前端声明的外部 CSP 来源（并入首页的 Content-Security-Policy）
     pub csp_extra: crate::frontend::CspExtra,
+    /// 站点信息（站名、字标），后台可改
+    pub site: crate::frontend::SiteCache,
     pub node_id: String,
     pub events_cfg: Arc<crate::config::EventsSection>,
     pub me: Weak<Shared>,
@@ -211,7 +213,7 @@ impl Shared {
                     rt.schema.clone(),
                     caps,
                     rt.redis.clone(),
-                    rt.static_config.clone(),
+                    with_site_name(&rt.static_config, &self.site.get().name),
                     m.terms.clone(),
                 )
             }
@@ -1069,6 +1071,15 @@ impl HookRunner for PipelineRunner {
 }
 
 // ---------------- 尚未接入的宿主能力与简单实现 ----------------
+
+/// 插件静态配置里的 `_site.name` 换成当前站名（后台可改，不必重启）
+fn with_site_name(v: &Json, name: &str) -> Json {
+    let mut v = v.clone();
+    if let Some(site) = v.get_mut("_site").and_then(Json::as_object_mut) {
+        site.insert("name".into(), Json::String(name.to_owned()));
+    }
+    v
+}
 
 struct StaticConfig {
     plugin: String,

@@ -1,8 +1,9 @@
-// 后台：外观——选择站点使用的前端主题插件（样式表 + 可选的替换页面），或使用框架自带的经典样式。
+// 后台：外观——站点信息（站名、字标）；选择站点使用的前端主题插件（样式表 + 可选的替换页面），或使用框架自带的经典样式。
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type FrontendManifest } from '@pt-studio/sdk';
 import { useT } from '@pt-studio/terms';
-import { Button, Note, PageHead, Panel, SkeletonRows, Status, useToast } from '@pt-studio/ui-kit';
+import { Button, Field, Input, Note, PageHead, Panel, SkeletonRows, Status, useToast } from '@pt-studio/ui-kit';
 import { ErrorText, useErrorText } from '../errors';
 import { applyTheme } from '../theme';
 
@@ -12,6 +13,72 @@ interface Appearance {
 }
 
 const CLASSIC = 'classic';
+
+interface SiteInfo {
+  name: string;
+  mark: [string, string];
+}
+
+/** 站名与字标（主字 + 副字）；保存后重新加载，让标题、字标与各处文案一起更新 */
+function SitePanel() {
+  const t = useT();
+  const toast = useToast();
+  const errText = useErrorText();
+  const q = useQuery({ queryKey: ['admin-site'], queryFn: () => api<{ site: SiteInfo; default: SiteInfo }>('/api/kernel/v1/admin/site') });
+  const [name, setName] = useState('');
+  const [a, setA] = useState('');
+  const [b, setB] = useState('');
+  useEffect(() => {
+    if (!q.data) return;
+    setName(q.data.site.name);
+    setA(q.data.site.mark[0]);
+    setB(q.data.site.mark[1]);
+  }, [q.data]);
+  const save = useMutation({
+    mutationFn: () => api('/api/kernel/v1/admin/site', { method: 'PUT', json: { name, mark: [a.trim() || name.trim(), a.trim() ? b : ''] } }),
+    onSuccess: () => {
+      toast(t('ui.site.saved'), 'success');
+      window.location.reload();
+    },
+    onError: (e) => toast(errText(e), 'error'),
+  });
+  if (q.error) return <ErrorText error={q.error} />;
+  if (!q.data) return <SkeletonRows n={2} />;
+  const main = a.trim() || name.trim();
+  const dirty = name !== q.data.site.name || a !== q.data.site.mark[0] || b !== q.data.site.mark[1];
+  return (
+    <Panel title={t('ui.site.title')} sub={t('ui.site.hint', { name: q.data.default.name })}>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <Field label={t('ui.site.name')} hint={t('ui.site.name_hint')}>
+          <Input value={name} maxLength={40} required onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, alignItems: 'start' }}>
+          <Field label={t('ui.site.mark_main')}>
+            <Input value={a} maxLength={40} placeholder={name} onChange={(e) => setA(e.target.value)} />
+          </Field>
+          <Field label={t('ui.site.mark_sub')} hint={t('ui.site.mark_hint')}>
+            <Input value={b} maxLength={40} onChange={(e) => setB(e.target.value)} />
+          </Field>
+        </div>
+        <div className="row-sb">
+          <span className="mark" aria-label={t('ui.site.preview')}>
+            <b>{main}</b>
+            {b.trim() && <i>{b.trim()}</i>}
+          </span>
+          <Button variant="primary" type="submit" disabled={!dirty || !name.trim() || save.isPending}>
+            {t('ui.site.save')}
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
 
 export function AdminAppearance() {
   const t = useT();
@@ -39,6 +106,7 @@ export function AdminAppearance() {
   return (
     <div className="stack">
       <PageHead title={t('ui.appearance.title')} lede={t('ui.appearance.lede')} />
+      <SitePanel />
       {q.error ? (
         <ErrorText error={q.error} />
       ) : !d ? (

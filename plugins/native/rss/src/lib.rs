@@ -60,7 +60,13 @@ async fn site(ctx: &Ctx, headers: &HeaderMap) -> Site {
         }
     };
     Site {
-        name: s["site_name"].as_str().unwrap_or("PT Studio").to_owned(),
+        name: s["site_name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned)
+            .or_else(|| ctx.config.get_static()["_site"]["name"].as_str().map(str::to_owned))
+            .unwrap_or_else(|| "PT Studio".into()),
         url,
     }
 }

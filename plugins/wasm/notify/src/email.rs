@@ -26,6 +26,7 @@ impl Config {
             from: st("email_from"),
             site_name: Some(st("site_name"))
                 .filter(|n| !n.is_empty())
+                .or_else(|| s["_site"]["name"].as_str().map(str::to_owned))
                 .unwrap_or_else(|| "PT Studio".into()),
             site_url: st("site_url").trim_end_matches('/').to_owned(),
             unsubscribe_secret: st("unsubscribe_secret"),

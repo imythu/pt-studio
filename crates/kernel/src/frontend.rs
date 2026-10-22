@@ -41,6 +41,7 @@ pub fn routes(shared: Arc<Shared>) -> Router {
             "/api/kernel/v1/admin/appearance",
             get(get_appearance).put(put_appearance),
         )
+        .route("/api/kernel/v1/admin/site", get(get_site).put(put_site))
         .route("/api/kernel/v1/admin/audit", get(audit_log))
         .route("/api/kernel/v1/markup/preview", post(markup_preview))
         .with_state(shared)
@@ -169,6 +170,145 @@ async fn put_appearance(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// 站点信息存于 `kernel.plugin_settings` 的保留键；未设置的字段用 site.toml `[site]`
+const SITE_KEY: &str = "kernel:site";
+const SITE_NAME_MAX: usize = 40;
+
+/// 后台可改的站点信息：站名与字标拆分（主字 + 副字，副字可空）
+#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
+pub struct SiteInfo {
+    pub name: String,
+    pub mark: [String; 2],
+}
+
+impl SiteInfo {
+    /// 默认字标：「PT Studio」拆成 PT + Studio，其他站名整个作主字
+    fn from_name(name: &str) -> Self {
+        let mark = match name.split_once(' ') {
+            Some((a, b)) if name == "PT Studio" => [a.to_owned(), b.to_owned()],
+            _ => [name.to_owned(), String::new()],
+        };
+        Self { name: name.to_owned(), mark }
+    }
+
+    fn merge(cfg_name: &str, v: Option<&Json>) -> Self {
+        let name = v
+            .and_then(|v| v["name"].as_str())
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .unwrap_or(cfg_name);
+        let mut info = Self::from_name(name);
+        if let Some(Json::Array(m)) = v.map(|v| &v["mark"])
+            && let [Json::String(a), Json::String(b)] = m.as_slice()
+            && !a.trim().is_empty()
+        {
+            info.mark = [a.trim().to_owned(), b.trim().to_owned()];
+        }
+        info
+    }
+}
+
+/// 站点信息的进程内缓存：启动时读一次，保存时立即更新，后台每 10 秒从数据库刷新（多节点最多滞后 10 秒）
+pub struct SiteCache(std::sync::RwLock<SiteInfo>);
+
+impl SiteCache {
+    pub fn new(cfg_name: &str) -> Self {
+        Self(std::sync::RwLock::new(SiteInfo::from_name(cfg_name)))
+    }
+
+    pub fn get(&self) -> SiteInfo {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set(&self, info: SiteInfo) {
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) = info;
+    }
+
+    pub async fn refresh(sh: &Shared) {
+        let Ok(v) = sqlx::query_scalar::<_, Json>("SELECT settings FROM kernel.plugin_settings WHERE plugin_id = $1")
+            .bind(SITE_KEY)
+            .fetch_optional(&sh.pool)
+            .await
+        else {
+            return;
+        };
+        sh.site.set(SiteInfo::merge(&sh.cfg.site.name, v.as_ref()));
+    }
+
+    pub fn spawn_refresh(sh: Arc<Shared>, mut stop: tokio::sync::watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => Self::refresh(&sh).await,
+                    _ = stop.changed() => break,
+                }
+            }
+        })
+    }
+}
+
+async fn get_site(State(sh): State<Arc<Shared>>, method: Method, headers: HeaderMap) -> PResult<Response> {
+    authorize(&sh, &headers, &method, "kernel.settings.manage").await?;
+    SiteCache::refresh(&sh).await;
+    let d = SiteInfo::from_name(&sh.cfg.site.name);
+    Ok(AxJson(json!({ "site": sh.site.get(), "default": d })).into_response())
+}
+
+#[derive(Deserialize)]
+struct PutSite {
+    name: String,
+    #[serde(default)]
+    mark: Option<[String; 2]>,
+}
+
+async fn put_site(
+    State(sh): State<Arc<Shared>>,
+    method: Method,
+    headers: HeaderMap,
+    AxJson(b): AxJson<PutSite>,
+) -> PResult<Response> {
+    let p = authorize(&sh, &headers, &method, "kernel.settings.manage").await?;
+    let name = b.name.trim();
+    if name.is_empty() || name.chars().count() > SITE_NAME_MAX || name.chars().any(char::is_control) {
+        return Err(PluginError::validation("invalid site name").with_details(json!({ "field": "name", "max": SITE_NAME_MAX })));
+    }
+    let mark = b.mark.map(|[a, c]| [a.trim().to_owned(), c.trim().to_owned()]);
+    if let Some([a, c]) = &mark
+        && (a.is_empty() || a.chars().count() + c.chars().count() > SITE_NAME_MAX || format!("{a}{c}").chars().any(char::is_control))
+    {
+        return Err(PluginError::validation("invalid wordmark").with_details(json!({ "field": "mark", "max": SITE_NAME_MAX })));
+    }
+    let v = match &mark {
+        Some(m) => json!({ "name": name, "mark": m }),
+        None => json!({ "name": name }),
+    };
+    let by = i64::try_from(p.user_id).unwrap_or_default();
+    let mut tx = sh.pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO kernel.plugin_settings (plugin_id, settings, version, updated_by) VALUES ($1, $2, 1, $3)
+         ON CONFLICT (plugin_id) DO UPDATE SET settings = EXCLUDED.settings, version = kernel.plugin_settings.version + 1,
+                updated_by = EXCLUDED.updated_by, updated_at = now()",
+    )
+    .bind(SITE_KEY)
+    .bind(&v)
+    .bind(by)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO kernel.audit_log (actor, plugin_id, action, target, outcome, request_id, details)
+         VALUES ($1, 'kernel', 'kernel.site_update', 'site', 'ok', $2, $3)",
+    )
+    .bind(json!({ "kind": "user", "user_id": p.user_id }))
+    .bind(uuid::Uuid::now_v7().to_string())
+    .bind(&v)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    let info = SiteInfo::merge(&sh.cfg.site.name, Some(&v));
+    sh.site.set(info.clone());
+    Ok(AxJson(json!({ "site": info })).into_response())
+}
+
 async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
     let theme = active_theme(&sh).await.and_then(|id| {
         let rt = sh.plugins.get(&id)?;
@@ -193,12 +333,13 @@ async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
             }))
         })
         .collect();
+    let site = sh.site.get();
     let mut locales = sh.cfg.site.locales.clone();
     if locales.is_empty() {
         locales.push(sh.cfg.site.default_locale.clone());
     }
     let mut resp = AxJson(json!({
-        "site": { "name": sh.cfg.site.name, "default_locale": sh.cfg.site.default_locale, "locales": locales,
+        "site": { "name": site.name, "mark": site.mark, "default_locale": sh.cfg.site.default_locale, "locales": locales,
                   "themes": ["default", "dark"] },
         "plugins": plugins,
         "theme": theme,
