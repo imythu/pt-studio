@@ -258,8 +258,8 @@ const condText = (api: PluginApi, cs: Cond[]) =>
   cs.map((c) => condLine(api, c)).join("；");
 
 /** 覆盖等级（VIP 等）的期限：“至 …” / “永久” */
-function untilText(api: PluginApi, me: Me): string | null {
-  const u = me.class.until;
+function untilText(api: PluginApi, c: Me["class"]): string | null {
+  const u = c.until;
   if (u === undefined) return null;
   return u === null
     ? api.t("levels.ui.forever")
@@ -267,7 +267,7 @@ function untilText(api: PluginApi, me: Me): string | null {
 }
 
 function NextHint({ api, me }: { api: PluginApi; me: Me }) {
-  const until = untilText(api, me);
+  const until = untilText(api, me.class);
   if (until) return <span>{until}</span>;
   if (me.warning)
     return (
@@ -293,13 +293,14 @@ function NextHint({ api, me }: { api: PluginApi; me: Me }) {
   );
 }
 
-/** 个人页：任何人的等级；本人另显示进度 */
+/** 个人页：任何人的等级与 VIP 等的到期时间；本人另显示进度 */
 function LevelStat({
   ctx,
   api,
 }: SlotProps<{ profile: { id: number; class_id: number } }>) {
   const classes = useClasses(api);
   const [me, setMe] = useState<Me | null>(null);
+  const [other, setOther] = useState<Me["class"] | null>(null);
   const self = api.user()?.id === ctx.profile.id;
   useEffect(() => {
     if (self)
@@ -307,17 +308,31 @@ function LevelStat({
         .json<Me>("/api/p/levels/v1/me")
         .then(setMe)
         .catch(() => undefined);
-  }, [api, self]);
+    else
+      void api
+        .json<{ class: Me["class"] }>(
+          `/api/p/levels/v1/users/${ctx.profile.id}/class`,
+        )
+        .then((r) => setOther(r.class))
+        .catch(() => undefined);
+  }, [api, self, ctx.profile.id]);
   const c: Brief | undefined =
-    me?.class ?? classes?.find((x) => x.id === ctx.profile.class_id);
+    me?.class ?? other ?? classes?.find((x) => x.id === ctx.profile.class_id);
   if (!c) return null;
+  const until = other && untilText(api, other);
   return (
     <Stat
       label={api.t("levels.ui.class")}
       to="/p/levels/"
       navigate={api.navigate}
       value={<ClassName api={api} c={c} />}
-      hint={me ? <NextHint api={api} me={me} /> : null}
+      hint={
+        me ? (
+          <NextHint api={api} me={me} />
+        ) : until ? (
+          <span>{until}</span>
+        ) : null
+      }
     />
   );
 }
@@ -405,10 +420,10 @@ function Page({ api }: { api: PluginApi }) {
                   <dt>{api.t("levels.ui.my")}</dt>
                   <dd>
                     <ClassName api={api} c={me.class} />
-                    {untilText(api, me) && (
+                    {untilText(api, me.class) && (
                       <span className="muted small">
                         {" "}
-                        · {untilText(api, me)}
+                        · {untilText(api, me.class)}
                       </span>
                     )}
                   </dd>

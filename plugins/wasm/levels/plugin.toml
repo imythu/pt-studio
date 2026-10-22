@@ -63,6 +63,13 @@ auth = "user"
 rate_limit = "user:60/m"
 
 [[http.routes]]
+id = "user_class"
+method = "GET"
+path = "/v1/users/{user_id}/class"
+auth = "user"
+rate_limit = "user:120/m"
+
+[[http.routes]]
 id = "classes"
 method = "GET"
 path = "/v1/classes"

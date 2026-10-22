@@ -829,6 +829,29 @@ fn end_expired_overrides() -> R<()> {
     sql::commit()
 }
 
+/// 当前等级来自覆盖（VIP、手动锁定等）时带上到期时间 `until`（null 为永久）；不是覆盖时不加该字段
+fn add_until(class: &mut Value, user: i64, class_id: i64) -> R<()> {
+    let o = sql::query(
+        "SELECT (extract(epoch FROM until) * 1000)::bigint FROM overrides
+          WHERE user_id = $1 AND class_id = $2 AND ended_at IS NULL AND (until IS NULL OR until > now())
+          ORDER BY until IS NULL DESC, until DESC LIMIT 1",
+        &[SqlValue::Int(user), SqlValue::Int(class_id)],
+    )?;
+    if let Some(r) = o.rows.first() {
+        class["until"] = match r[0] { SqlValue::Int(t) => json!(t), _ => Value::Null };
+    }
+    Ok(())
+}
+
+/// 任一用户的当前等级与到期时间（个人页显示；不含进度与警告）
+fn user_class(user: i64) -> R<Value> {
+    let r = sql::query("SELECT class_id FROM user_levels WHERE user_id = $1", &[SqlValue::Int(user)])?;
+    let id = r.rows.first().map(|row| int(&row[0])).ok_or_else(|| err("kernel.not_found", "user not found"))?;
+    let mut class = classes()?.iter().find(|c| c.id == id).map_or_else(|| json!({ "id": id }), Class::brief);
+    add_until(&mut class, user, id)?;
+    Ok(json!({ "class": class }))
+}
+
 fn level_info(user: i64) -> R<Value> {
     let cls = classes()?;
     let st = ensure_row(user, &cls)?;
@@ -849,16 +872,7 @@ fn level_info(user: i64) -> R<Value> {
         .find(|c| c.id == st.class_id)
         .map_or_else(|| json!({ "id": st.class_id }), Class::brief);
     class["source"] = json!(src);
-    // 当前等级来自覆盖（VIP、手动锁定等）时带上到期时间（null 为永久）
-    let o = sql::query(
-        "SELECT (extract(epoch FROM until) * 1000)::bigint FROM overrides
-          WHERE user_id = $1 AND class_id = $2 AND ended_at IS NULL AND (until IS NULL OR until > now())
-          ORDER BY until IS NULL DESC, until DESC LIMIT 1",
-        &[SqlValue::Int(user), SqlValue::Int(st.class_id)],
-    )?;
-    if let Some(r) = o.rows.first() {
-        class["until"] = match r[0] { SqlValue::Int(t) => json!(t), _ => Value::Null };
-    }
+    add_until(&mut class, user, st.class_id)?;
     Ok(json!({
         "class": class,
         "next": next.map(|n| { let mut b = n.brief(); b["progress"] = json!(progress(&m, &n.promote)); b }),
@@ -1011,6 +1025,7 @@ impl http_handler::Guest for Levels {
         sync_classes()?;
         let v = match req.route_id.as_str() {
             "me" => level_info(me()?)?,
+            "user_class" => user_class(param(&req, "user_id")?)?,
             "classes" => json!({ "items": classes()?.iter().map(Class::public).collect::<Vec<_>>() }),
             "admin_classes" => {
                 let st = sql::query(
