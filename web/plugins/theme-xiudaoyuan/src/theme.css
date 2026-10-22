@@ -198,11 +198,12 @@
 .bar > i { background: var(--gold); }
 
 /* ---------- 境界标签：同一色系分深浅（站务在等级设置里填的颜色在本主题下不生效） ---------- */
-.cls[data-level], .cls-name[data-level] {
+/* 基础样式用 :where() 压低优先级，让下面按等级写的文字色 / 背景色能覆盖（同为 !important 时比优先级） */
+:where(.cls, .cls-name)[data-level] {
   display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px; border: 0;
   font: 700 12px/1.6 var(--f-body); letter-spacing: .02em; color: #fff !important; background: #66737a;
 }
-.cls[data-level]::before, .cls-name[data-level]::before {
+:where(.cls, .cls-name)[data-level]::before {
   content: ""; display: var(--x-gd, none); width: 11px; height: 11px; background: currentColor;
   -webkit-mask: var(--x-g) center / contain no-repeat; mask: var(--x-g) center / contain no-repeat;
 }
@@ -219,13 +220,13 @@
 [data-level="ultimate_user"], [data-level="nexus_master"] { --x-g: url(./g-zhen.svg); --x-gd: inline-block; color: #6b4a16 !important; box-shadow: inset 0 0 0 1.5px #b8925a; }
 [data-level="ultimate_user"] { background: #f4e9d2 !important; }
 [data-level="nexus_master"] { background: #e9d6ae !important; color: #5a3d0e !important; }
-[data-level="vip"] { background: #fff !important; color: #8a5a12 !important; box-shadow: inset 0 0 0 1.5px #b8925a; }
-[data-level="uploader"] { background: #fff !important; color: #2e7d66 !important; box-shadow: inset 0 0 0 1.5px #2e7d66; }
-[data-level="moderator"] { background: #fff !important; color: #2b6c83 !important; box-shadow: inset 0 0 0 1.5px #2b6c83; }
-[data-level="sysop"] { background: #fff !important; color: #4f6b2a !important; box-shadow: inset 0 0 0 1.5px #4f6b2a; }
-[data-level="administrator"] { background: #fff !important; color: #b0413a !important; box-shadow: inset 0 0 0 1.5px #b0413a; --x-g: url(./g-xian.svg); --x-gd: inline-block; }
-[data-level="staff_leader"] { background: #15232a !important; }
-[data-level="retiree"] { background: #eaf0f0 !important; color: #56666d !important; }
+[data-level="vip"] { background: var(--surface) !important; color: var(--x-jin-ink) !important; box-shadow: inset 0 0 0 1.5px var(--x-jin); }
+[data-level="uploader"] { background: var(--surface) !important; color: var(--emerald) !important; box-shadow: inset 0 0 0 1.5px var(--emerald); }
+[data-level="moderator"] { background: var(--surface) !important; color: var(--gold) !important; box-shadow: inset 0 0 0 1.5px var(--gold); }
+[data-level="sysop"] { --x-sysop: #4f6b2a; background: var(--surface) !important; color: var(--x-sysop) !important; box-shadow: inset 0 0 0 1.5px var(--x-sysop); }
+[data-level="administrator"] { background: var(--surface) !important; color: var(--x-zhu) !important; box-shadow: inset 0 0 0 1.5px var(--x-zhu); --x-g: url(./g-xian.svg); --x-gd: inline-block; }
+[data-level="staff_leader"] { background: var(--x-staff, #15232a) !important; }
+[data-level="retiree"] { background: var(--sunk) !important; color: var(--muted) !important; box-shadow: inset 0 0 0 1px var(--line-2); }
 
 /* 等级说明页的等级名没有 data-level，统一用标题色，不跟站务填的颜色 */
 .cls-name:not([data-level]) { color: var(--x-title) !important; font-weight: 700; }
@@ -266,12 +267,16 @@
   :root:not([data-theme="light"]) .gate-art::after { background: rgb(14 23 28 / .72); }
   :root:not([data-theme="light"]) .pf-cover { background-image: linear-gradient(rgb(14 23 28 / .62), rgb(14 23 28 / .62)), url(./hero.svg); }
   :root:not([data-theme="light"]) .rail::after { opacity: .12; }
+  :root:not([data-theme="light"]) [data-level="sysop"] { --x-sysop: #a9c77d; }
+  :root:not([data-theme="light"]) [data-level="staff_leader"] { --x-staff: #2f4650; }
   :root:not([data-theme="light"]) .pt-backdrop { opacity: .08; }
   :root:not([data-theme="light"]) .prologue::before, :root:not([data-theme="light"]) .guest-hero::before { opacity: .25; }
 }
 :root[data-theme="dark"] .gate-art::after { background: rgb(14 23 28 / .72); }
 :root[data-theme="dark"] .pf-cover { background-image: linear-gradient(rgb(14 23 28 / .62), rgb(14 23 28 / .62)), url(./hero.svg); }
 :root[data-theme="dark"] .rail::after { opacity: .12; }
+:root[data-theme="dark"] [data-level="sysop"] { --x-sysop: #a9c77d; }
+:root[data-theme="dark"] [data-level="staff_leader"] { --x-staff: #2f4650; }
 :root[data-theme="dark"] .pt-backdrop { opacity: .08; }
 :root[data-theme="dark"] .prologue::before, :root[data-theme="dark"] .guest-hero::before { opacity: .25; }
 
