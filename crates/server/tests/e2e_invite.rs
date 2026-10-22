@@ -37,6 +37,23 @@ where
     panic!("timed out waiting for {what}");
 }
 
+/// levels 预设（同 NexusPHP）中“用户”不能发邀：等 user.registered 写入等级行后放到高级用户（30）
+async fn make_power_user(db: &mut PgConnection, uid: u64) {
+    for _ in 0..100 {
+        let n = sqlx::query("UPDATE levels.user_levels SET class_id = 30 WHERE user_id = $1")
+            .bind(uid as i64)
+            .execute(&mut *db)
+            .await
+            .unwrap()
+            .rows_affected();
+        if n == 1 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("levels row for user {uid} was not created");
+}
+
 async fn register(app: &axum::Router, name: &str, code: Option<&str>) -> common::Resp {
     let mut body =
         json!({ "username": name, "email": format!("{name}@example.com"), "password": "correct horse" });
@@ -124,6 +141,7 @@ async fn invite_end_to_end() {
         StatusCode::CREATED
     );
     let alice = login(&app, "inv_alice").await;
+    make_power_user(&mut db, alice.id).await;
 
     // 初始额度（user.registered 订阅）
     wait_for("initial quota", || async { balance(&app, &alice).await == 1 }).await;
@@ -214,6 +232,7 @@ async fn invite_end_to_end() {
     let r = register(&app, "inv_bob", Some(&code1)).await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     let bob = login(&app, "inv_bob").await;
+    make_power_user(&mut db, bob.id).await;
     wait_for("redemption", || async {
         req(&app, &alice, "GET", "/v1/users/me/invitees", None).await.body["items"][0]["user_id"].as_u64()
             == Some(bob.id)
@@ -396,7 +415,7 @@ async fn invite_end_to_end() {
         .unwrap();
     assert_eq!(states, vec!["reversed", "reversed"]);
 
-    // levels 的 invite.before_issue：农民不能发邀
+    // levels 的 invite.before_issue：农民（及用户）不能发邀
     sqlx::query("UPDATE levels.user_levels SET class_id = 10 WHERE user_id = $1")
         .bind(alice.id as i64)
         .execute(&mut db)
@@ -409,7 +428,7 @@ async fn invite_end_to_end() {
         2,
         "a denied issue must not consume quota"
     );
-    sqlx::query("UPDATE levels.user_levels SET class_id = 20 WHERE user_id = $1")
+    sqlx::query("UPDATE levels.user_levels SET class_id = 30 WHERE user_id = $1")
         .bind(alice.id as i64)
         .execute(&mut db)
         .await

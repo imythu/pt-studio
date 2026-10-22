@@ -1183,11 +1183,17 @@ mod tests {
         assert!(defs.iter().all(|d| preset_id(&d.key).is_some()));
         assert_eq!(defs.iter().filter(|d| d.is_default).map(|d| d.key.as_str()).collect::<Vec<_>>(), ["user"]);
         let pu = defs.iter().find(|d| d.key == "power_user").unwrap();
-        let x = m(&[("ratio", f64::INFINITY), ("uploaded_gib", 60.0), ("account_age_days", 30.0)]);
-        // 还需要做种积分（魔力值不参与升级）
+        // 与 NexusPHP 一致：4 周、下载 ≥ 50 GiB、分享率 ≥ 1.05，另需做种积分（魔力值不参与升级）
+        let x = m(&[("ratio", 1.2), ("downloaded_gib", 60.0), ("account_age_days", 30.0)]);
         assert!(!all(&x, &pu.promote));
-        let x = m(&[("ratio", f64::INFINITY), ("uploaded_gib", 60.0), ("account_age_days", 30.0), ("seed_points", 40_000.0)]);
+        let x = m(&[("ratio", 1.2), ("downloaded_gib", 60.0), ("account_age_days", 30.0), ("seed_points", 40_000.0)]);
         assert!(all(&x, &pu.promote));
+        // 只上传不下载达不到下载量条件
+        let x = m(&[("ratio", f64::INFINITY), ("uploaded_gib", 60.0), ("account_age_days", 30.0), ("seed_points", 40_000.0)]);
+        assert!(!all(&x, &pu.promote));
+        // 资深用户及以上同样按保级条件降级；用户不能发邀请
+        assert!(defs.iter().filter(|d| d.kind == "normal").all(|d| !d.protected));
+        assert!(!defs.iter().find(|d| d.key == "user").unwrap().can_invite);
         assert!(!all(&m(&[("ratio", 0.9)]), &pu.keep));
     }
 

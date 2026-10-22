@@ -341,6 +341,10 @@ pub struct FrontendDecl {
     /// 主题插件的 `entry` 模块还可以通过 `pages` 替换框架页面
     #[serde(default)]
     pub theme: Option<String>,
+    /// 主题插件：作为站点主题启用期间覆盖其他插件的术语（如等级名称 `levels.class.<key>.name`），
+    /// 写法同 `[terms]`；只覆盖已存在的术语，对象值按字段合并（未写的 short / unit 保留原值）
+    #[serde(default)]
+    pub term_overrides: BTreeMap<String, Json>,
     /// 前端需要的外部来源（并入站点 CSP），如验证码服务的脚本与 iframe
     #[serde(default)]
     pub csp: Option<CspDecl>,
@@ -541,6 +545,18 @@ impl Manifest {
                     "frontend theme `{t}` must be a relative .css path"
                 )));
             }
+            if !f.term_overrides.is_empty() && f.theme.is_none() {
+                return Err(PluginError::validation(
+                    "frontend term_overrides requires a theme",
+                ));
+            }
+            for (k, v) in &f.term_overrides {
+                if !v.as_object().is_some_and(|o| !o.is_empty()) {
+                    return Err(PluginError::validation(format!(
+                        "term override `{k}` must be a non-empty locale map"
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -554,6 +570,18 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn term_overrides_need_theme() {
+        let base = "id = \"theme-x\"\nname = \"x\"\nversion = \"0.1.0\"\nkind = \"wasm\"\napi = \"pt:plugin@1\"\nlicense = \"MIT\"\n";
+        let ok = format!("{base}[frontend]\ntheme = \"theme.css\"\n[frontend.term_overrides]\n\"levels.class.user.name\" = {{ zh-CN = \"散修\" }}\n");
+        let m = Manifest::parse(&ok).expect("theme with overrides");
+        assert_eq!(m.frontend.map(|f| f.term_overrides.len()), Some(1));
+        let no_theme = format!("{base}[frontend]\n[frontend.term_overrides]\n\"levels.class.user.name\" = {{ zh-CN = \"散修\" }}\n");
+        assert!(Manifest::parse(&no_theme).is_err());
+        let flat = format!("{base}[frontend]\ntheme = \"theme.css\"\n[frontend.term_overrides]\n\"levels.class.user.name\" = \"散修\"\n");
+        assert!(Manifest::parse(&flat).is_err());
+    }
 
     #[test]
     fn parse_minimal() -> PResult<()> {

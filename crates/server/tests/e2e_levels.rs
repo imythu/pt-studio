@@ -142,13 +142,13 @@ async fn levels_end_to_end() {
     assert_eq!(items[16]["key"], "staff_leader");
     assert_eq!(r.body["items"][1]["is_default"], true);
 
-    // 满足 power_user：注册 30 天、上传 60 GiB、分享率 ∞，还要做种积分 ≥ 40000（魔力值不算）→ 每日评估升级，带保护期
+    // 满足 power_user（与 NexusPHP 一致）：注册 30 天、下载 50 GiB、分享率 1.2，还要做种积分 ≥ 40000（魔力值不算）→ 每日评估升级，带保护期
     sqlx::query("UPDATE identity.users SET created_at = now() - interval '30 days' WHERE id = $1")
         .bind(user.id as i64)
         .execute(&mut db)
         .await
         .unwrap();
-    set_traffic(&mut db, user.id, 60 * GIB, 0).await;
+    set_traffic(&mut db, user.id, 60 * GIB, 50 * GIB).await;
     let adjust = |currency: &'static str, amount: i64, key: &'static str| {
         let app = app.clone();
         let h = [admin.headers(), vec![("idempotency-key", key.to_owned())]].concat();
@@ -211,7 +211,7 @@ async fn levels_end_to_end() {
             .await
             .unwrap();
     assert!(!warned);
-    // 保护期结束 → 警告；截止后 → 降到保级条件仍满足的最高等级（用户 keep ≥ 0.5）
+    // 保护期结束 → 警告；截止后 → 降到保级条件仍满足的最高等级（用户 keep ≥ 0.4）
     sqlx::query("UPDATE levels.user_levels SET protect_until = NULL WHERE user_id = $1")
         .bind(user.id as i64)
         .execute(&mut db)
@@ -307,7 +307,7 @@ async fn levels_end_to_end() {
     assert!(me["class"].get("until").is_none(), "{me:?}");
 
     // 增量评估：流量结算后只升级
-    set_traffic(&mut db, user.id, 60 * GIB, 0).await;
+    set_traffic(&mut db, user.id, 60 * GIB, 50 * GIB).await;
     sqlx::query("INSERT INTO levels.dirty_users (user_id, since) VALUES ($1, now()) ON CONFLICT DO NOTHING")
         .bind(user.id as i64)
         .execute(&mut db)

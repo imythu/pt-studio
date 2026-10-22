@@ -301,7 +301,12 @@ async fn hnr_end_to_end() {
     .await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
 
-    // 有计入但未达限制线的用户：hnr 拦截发邀（invite_block_at = 1）
+    // 有计入但未达限制线的用户：hnr 拦截发邀（invite_block_at = 1）；levels 预设中“用户”不能发邀，先把 alice 放到高级用户
+    sqlx::query("UPDATE levels.user_levels SET class_id = 30 WHERE user_id = $1")
+        .bind(alice.id as i64)
+        .execute(&mut db)
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO hnr.user_counts (user_id, failed_effective) VALUES ($1, 1)")
         .bind(alice.id as i64)
         .execute(&mut db)

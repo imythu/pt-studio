@@ -136,7 +136,7 @@ try {
   await p.getByRole('link', { name: '等级' }).click();
   await p.waitForURL(`${BASE}/p/levels/`);
   await p.getByText('保级条件').first().waitFor();
-  await p.getByText('养老族', { exact: true }).waitFor();
+  await p.getByText('养老族（NM）', { exact: true }).waitFor();
 
   // 4. 种子详情：hnr / promotion 插槽、下载链接
   step('torrent detail slots');
@@ -334,9 +334,9 @@ try {
   await a.locator('input[name=reason_code]').fill('e2e');
   await a.locator('select[name=kind]').selectOption('leech_disabled');
   await a.getByRole('button', { name: '施加限制' }).click();
-  await a.getByRole('heading', { name: /leech_disabled/ }).waitFor();
+  await a.getByRole('heading', { name: /禁止下载/ }).waitFor();
   await a.getByRole('button', { name: '解除', exact: true }).click();
-  await a.getByRole('heading', { name: /active/ }).waitFor();
+  await a.getByRole('heading', { name: /正常/ }).waitFor();
 
   // 6d'. 后台用户详情页的插件标签：流量、余额、等级（保号）、邀请名额、促销卡
   step('admin user tabs');
@@ -410,7 +410,8 @@ try {
   await a.goto(`${BASE}/admin/p/accounting/`);
   await a.getByRole('heading', { name: '流量异常信号' }).waitFor();
   await a.goto(`${BASE}/admin/p/ledger/`);
-  await a.getByRole('heading', { name: '货币设置' }).waitFor();
+  await a.getByRole('heading', { name: '账本' }).waitFor();
+  await a.getByRole('tab', { name: '货币设置' }).click();
   await a.goto(`${BASE}/admin/p/moderation/`);
   await a.getByRole('tab', { name: '敏感词' }).click();
   await a.getByRole('button', { name: '添加敏感词' }).click();

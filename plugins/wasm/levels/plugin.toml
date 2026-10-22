@@ -302,9 +302,9 @@ name = ""
 description = ""
 type = "normal"
 is_default = true
-promote = [{ metric = "ratio", op = "gte", value = 0.6 }]
-keep = [{ metric = "ratio", op = "gte", value = 0.5 }]
-can_invite = true
+promote = [{ metric = "ratio", op = "gte", value = 0.4 }]
+keep = [{ metric = "ratio", op = "gte", value = 0.4 }]
+can_invite = false
 protected = false
 color = ""
 
@@ -314,7 +314,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 28 }, { metric = "uploaded_gib", op = "gte", value = 50 }, { metric = "ratio", op = "gte", value = 1.05 }, { metric = "seed_points", op = "gte", value = 40000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 28 }, { metric = "downloaded_gib", op = "gte", value = 50 }, { metric = "ratio", op = "gte", value = 1.05 }, { metric = "seed_points", op = "gte", value = 40000 }]
 keep = [{ metric = "ratio", op = "gte", value = 0.95 }]
 can_invite = true
 protected = false
@@ -326,7 +326,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 56 }, { metric = "uploaded_gib", op = "gte", value = 120 }, { metric = "ratio", op = "gte", value = 1.55 }, { metric = "seed_points", op = "gte", value = 80000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 56 }, { metric = "downloaded_gib", op = "gte", value = 120 }, { metric = "ratio", op = "gte", value = 1.55 }, { metric = "seed_points", op = "gte", value = 80000 }]
 keep = [{ metric = "ratio", op = "gte", value = 1.45 }]
 can_invite = true
 protected = false
@@ -338,7 +338,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 84 }, { metric = "uploaded_gib", op = "gte", value = 300 }, { metric = "ratio", op = "gte", value = 2.05 }, { metric = "seed_points", op = "gte", value = 150000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 105 }, { metric = "downloaded_gib", op = "gte", value = 300 }, { metric = "ratio", op = "gte", value = 2.05 }, { metric = "seed_points", op = "gte", value = 150000 }]
 keep = [{ metric = "ratio", op = "gte", value = 1.95 }]
 can_invite = true
 protected = false
@@ -350,7 +350,7 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 112 }, { metric = "uploaded_gib", op = "gte", value = 500 }, { metric = "ratio", op = "gte", value = 2.55 }, { metric = "seed_points", op = "gte", value = 250000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 175 }, { metric = "downloaded_gib", op = "gte", value = 500 }, { metric = "ratio", op = "gte", value = 2.55 }, { metric = "seed_points", op = "gte", value = 250000 }]
 keep = [{ metric = "ratio", op = "gte", value = 2.45 }]
 can_invite = true
 protected = false
@@ -362,10 +362,10 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 168 }, { metric = "uploaded_gib", op = "gte", value = 750 }, { metric = "ratio", op = "gte", value = 3.05 }, { metric = "seed_points", op = "gte", value = 400000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 280 }, { metric = "downloaded_gib", op = "gte", value = 750 }, { metric = "ratio", op = "gte", value = 3.05 }, { metric = "seed_points", op = "gte", value = 400000 }]
 keep = [{ metric = "ratio", op = "gte", value = 2.95 }]
 can_invite = true
-protected = true
+protected = false
 color = "#3949ab"
 
 [[settings_schema.properties.classes.default]]
@@ -374,10 +374,10 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 224 }, { metric = "uploaded_gib", op = "gte", value = 1024 }, { metric = "ratio", op = "gte", value = 3.55 }, { metric = "seed_points", op = "gte", value = 600000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 420 }, { metric = "downloaded_gib", op = "gte", value = 1024 }, { metric = "ratio", op = "gte", value = 3.55 }, { metric = "seed_points", op = "gte", value = 600000 }]
 keep = [{ metric = "ratio", op = "gte", value = 3.45 }]
 can_invite = true
-protected = true
+protected = false
 color = "#8e24aa"
 
 [[settings_schema.properties.classes.default]]
@@ -386,10 +386,10 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 280 }, { metric = "uploaded_gib", op = "gte", value = 1536 }, { metric = "ratio", op = "gte", value = 4.05 }, { metric = "seed_points", op = "gte", value = 800000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 560 }, { metric = "downloaded_gib", op = "gte", value = 1536 }, { metric = "ratio", op = "gte", value = 4.05 }, { metric = "seed_points", op = "gte", value = 800000 }]
 keep = [{ metric = "ratio", op = "gte", value = 3.95 }]
 can_invite = true
-protected = true
+protected = false
 color = "#d81b60"
 
 [[settings_schema.properties.classes.default]]
@@ -398,10 +398,10 @@ name = ""
 description = ""
 type = "normal"
 is_default = false
-promote = [{ metric = "account_age_days", op = "gte", value = 364 }, { metric = "uploaded_gib", op = "gte", value = 3072 }, { metric = "ratio", op = "gte", value = 4.55 }, { metric = "seed_points", op = "gte", value = 1000000 }]
+promote = [{ metric = "account_age_days", op = "gte", value = 700 }, { metric = "downloaded_gib", op = "gte", value = 3072 }, { metric = "ratio", op = "gte", value = 4.55 }, { metric = "seed_points", op = "gte", value = 1000000 }]
 keep = [{ metric = "ratio", op = "gte", value = 4.45 }]
 can_invite = true
-protected = true
+protected = false
 color = "#e53935"
 
 [[settings_schema.properties.classes.default]]
@@ -493,9 +493,9 @@ color = "#000000"
 "levels.class.peasant.name" = { zh-CN = "农民", en = "Peasant" }
 "levels.class.peasant.desc" = { zh-CN = "分享率过低被降级的用户。不能发送邀请。", en = "Demoted for a low share ratio. Cannot send invites." }
 "levels.class.user.name" = { zh-CN = "用户", en = "User" }
-"levels.class.user.desc" = { zh-CN = "新用户的初始等级。", en = "The default class of new users." }
+"levels.class.user.desc" = { zh-CN = "新用户的初始等级。升到高级用户后才能发送邀请。", en = "The default class of new users. Invites unlock at Power User." }
 "levels.class.power_user.name" = { zh-CN = "高级用户", en = "Power User" }
-"levels.class.power_user.desc" = { zh-CN = "可以查看用户列表、请求续种。", en = "Can view the user list and request reseeds." }
+"levels.class.power_user.desc" = { zh-CN = "可以发送邀请、查看用户列表、请求续种。", en = "Can send invites, view the user list and request reseeds." }
 "levels.class.elite_user.name" = { zh-CN = "精英用户", en = "Elite User" }
 "levels.class.elite_user.desc" = { zh-CN = "高级用户的全部权限。", en = "Everything a Power User can do." }
 "levels.class.crazy_user.name" = { zh-CN = "狂热用户", en = "Crazy User" }
@@ -503,13 +503,13 @@ color = "#000000"
 "levels.class.insane_user.name" = { zh-CN = "疯狂用户", en = "Insane User" }
 "levels.class.insane_user.desc" = { zh-CN = "可以查看普通日志。", en = "Can view the general log." }
 "levels.class.veteran_user.name" = { zh-CN = "资深用户", en = "Veteran User" }
-"levels.class.veteran_user.desc" = { zh-CN = "达到后不会被降级。", en = "Never demoted once reached." }
+"levels.class.veteran_user.desc" = { zh-CN = "可以查看其他用户的评论与帖子历史。", en = "Can view other users' comment and post history." }
 "levels.class.extreme_user.name" = { zh-CN = "极限用户", en = "Extreme User" }
-"levels.class.extreme_user.desc" = { zh-CN = "达到后不会被降级。", en = "Never demoted once reached." }
+"levels.class.extreme_user.desc" = { zh-CN = "可以更新过期的外部信息。", en = "Can refresh outdated external info." }
 "levels.class.ultimate_user.name" = { zh-CN = "终极用户", en = "Ultimate User" }
-"levels.class.ultimate_user.desc" = { zh-CN = "达到后不会被降级。", en = "Never demoted once reached." }
+"levels.class.ultimate_user.desc" = { zh-CN = "极限用户的全部权限。", en = "Everything an Extreme User can do." }
 "levels.class.nexus_master.name" = { zh-CN = "养老族", en = "Nexus Master" }
-"levels.class.nexus_master.desc" = { zh-CN = "最高的普通等级，达到后不会被降级。", en = "The highest regular class; never demoted." }
+"levels.class.nexus_master.desc" = { zh-CN = "最高的普通等级。", en = "The highest regular class." }
 "levels.class.vip.name" = { zh-CN = "贵宾", en = "VIP" }
 "levels.class.vip.desc" = { zh-CN = "由管理员授予，不受分享率考核。", en = "Granted by staff; exempt from ratio requirements." }
 "levels.class.retiree.name" = { zh-CN = "养老人员", en = "Retiree" }
