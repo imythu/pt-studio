@@ -174,7 +174,8 @@ async fn manifest(State(sh): State<Arc<Shared>>) -> Response {
         let rt = sh.plugins.get(&id)?;
         let f = rt.manifest.frontend.as_ref()?;
         let version = rt.manifest.version.to_string();
-        Some(json!({ "id": id, "css": f.theme.as_deref().map(|c| entry_url(&id, &asset_tag(&sh, &id, &version, c), c)),
+        Some(json!({ "id": id, "terms": !f.term_overrides.is_empty(),
+                     "css": f.theme.as_deref().map(|c| entry_url(&id, &asset_tag(&sh, &id, &version, c), c)),
                      "entry": f.entry.as_deref().map(|e| entry_url(&id, &asset_tag(&sh, &id, &version, e), e)) }))
     });
     let plugins: Vec<Json> = sh
@@ -215,33 +216,44 @@ struct TermsQuery {
     locale: Option<String>,
 }
 
-/// 术语快照：清单 `[terms]` 合并（terms 插件接入前的实现）
+/// 术语快照：清单 `[terms]` 合并（terms 插件接入前的实现），再叠加当前主题的 `term_overrides`
 async fn terms(State(sh): State<Arc<Shared>>, Query(q): Query<TermsQuery>, headers: HeaderMap) -> Response {
     let default = sh.cfg.site.default_locale.clone();
     let loc = q
         .locale
         .or_else(|| locale(&headers))
         .unwrap_or_else(|| default.clone());
+    let pick = |v: &Json| -> Option<Json> {
+        let e = v
+            .get(&loc)
+            .or_else(|| v.get(&default))
+            .or_else(|| v.as_object().and_then(|o| o.values().next()))?;
+        Some(match e {
+            Json::String(s) => json!({ "name": s }),
+            o => o.clone(),
+        })
+    };
     let mut out: BTreeMap<String, Json> = BTreeMap::new();
     for rt in sh.plugins.values() {
         for (k, v) in &rt.manifest.terms {
-            let entry = v
-                .get(&loc)
-                .or_else(|| v.get(&default))
-                .or_else(|| v.as_object().and_then(|o| o.values().next()));
-            if let Some(e) = entry {
-                let term = match e {
-                    Json::String(s) => json!({ "name": s }),
-                    o => o.clone(),
-                };
+            if let Some(term) = pick(v) {
                 out.insert(k.clone(), term);
+            }
+        }
+    }
+    if let Some(id) = active_theme(&sh).await
+        && let Some(f) = sh.plugins.get(&id).and_then(|rt| rt.manifest.frontend.as_ref())
+    {
+        for (k, v) in &f.term_overrides {
+            if let (Some(Json::Object(base)), Some(Json::Object(o))) = (out.get_mut(k), pick(v)) {
+                base.extend(o);
             }
         }
     }
     let mut resp = AxJson(json!({ "locale": loc, "version": 1, "terms": out })).into_response();
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=300"),
+        HeaderValue::from_static("no-cache"),
     );
     resp
 }

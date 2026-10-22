@@ -82,7 +82,7 @@ function MyCard() {
         <Avatar src={(s.me as { avatar_url?: string | null }).avatar_url} name={s.me.username} size={42} ring />
         <span className="me-name">
           <b>{s.me.username}</b>
-          {cls && <span className="cls">{cls}</span>}
+          {cls && <span className="cls" data-level={lv?.class?.key}>{cls}</span>}
         </span>
       </Link>
       {st && (
@@ -650,7 +650,7 @@ export function MePage() {
       <Link to={`/users/${s.me.id}`} className="panel me-hero">
         <Avatar src={(s.me as { avatar_url?: string | null }).avatar_url} name={s.me.username} size={56} ring />
         <span>
-          <b>{s.me.username}</b> {cls && <span className="cls">{cls}</span>}
+          <b>{s.me.username}</b> {cls && <span className="cls" data-level={lv?.class?.key}>{cls}</span>}
           <span className="small muted">{t('ui.me.view_profile')}</span>
         </span>
         <span className="muted">›</span>

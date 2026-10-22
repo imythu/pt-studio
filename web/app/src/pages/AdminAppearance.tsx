@@ -23,8 +23,9 @@ export function AdminAppearance() {
     mutationFn: async (theme: string) => {
       await api('/api/kernel/v1/admin/appearance', { method: 'PUT', json: { theme } });
       const m = await api<FrontendManifest>('/api/kernel/v1/frontend/manifest');
-      // 替换页面的主题需要重新加载才能完整生效；只换样式表的直接切换
-      if (m.theme?.entry || document.documentElement.dataset.skinPages) window.location.reload();
+      // 替换页面或覆盖术语的主题需要重新加载才能完整生效；只换样式表的直接切换
+      const root = document.documentElement.dataset;
+      if (m.theme?.entry || m.theme?.terms || root.skinPages || root.skinTerms) window.location.reload();
       else await applyTheme(m.theme ?? null);
     },
     onSuccess: () => {

@@ -1,0 +1,13 @@
+[package]
+name = "pt-wasm-theme-xiudaoyuan"
+description = "PT Studio 修道院 theme (frontend stylesheet; the component itself does nothing)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pt-plugin-sdk = { path = "../../../crates/plugin-sdk-rust" }

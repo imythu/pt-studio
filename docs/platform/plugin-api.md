@@ -1233,7 +1233,7 @@ audience = "user"                  # "user" | "admin"
 | `[redis]` | | 否 | `quota_mb`（默认 32）、`max_keys`（默认 100000） |
 | `[wasm]` | | 否 | 仅 `kind = "wasm"` |
 | `[terms]` | map | 否 | 键必须以 `<plugin_id>.` 开头；值为 `{ <locale> = "..." }` 或 `{ <locale> = { name, short, unit, icon } }` |
-| `[frontend]` | | 否 | `entry`、`slots`（须在 [catalog/slots.md](catalog/slots.md)）、`routes`（须以 `/p/<plugin_id>/` 或 `/admin/p/<plugin_id>/` 开头）、`settings_ui`、`theme`（相对 `.css` 路径，声明后即为主题插件） |
+| `[frontend]` | | 否 | `entry`、`slots`（须在 [catalog/slots.md](catalog/slots.md)）、`routes`（须以 `/p/<plugin_id>/` 或 `/admin/p/<plugin_id>/` 开头）、`settings_ui`、`theme`（相对 `.css` 路径，声明后即为主题插件）、`term_overrides`（仅主题插件，见下文） |
 | `[settings_schema]` | | 否 | 运行时设置的 JSON Schema（后台 schema 表单）。顶层字段标注 `x-pt-secret = true` 时：后台接口与审计日志只显示 `********`，提交占位符保留原值、提交空串删除该值 |
 | `[[mcp.tools]]` | table[] | 否 | 官方插件的工具名在 [catalog/mcp-tools.md](catalog/mcp-tools.md) 中登记；管理员工具以 `admin_` 开头 |
 | `[error_codes]` | map | 否 | 本插件错误码 → HTTP 状态（4xx / 5xx），如 `"notes.too_many" = 422`；键须以 `<id>.` 开头。只对 [catalog/error-codes.md](catalog/error-codes.md) 未登记的码生效，都未声明时按后缀规则（conventions/api.md §7） |
@@ -1241,6 +1241,8 @@ audience = "user"                  # "user" | "admin"
 清单的 JSON Schema 放在 `crates/plugin-api/schemas/plugin-manifest.schema.json`，内核用它校验 TOML 解析后的结果；上表与该 schema 不一致时以本文为准并修正 schema。
 
 **主题插件**：`[frontend]` 声明 `theme = "theme.css"` 的插件即为主题插件，管理员在后台“外观”（`/admin/appearance`，接口 `GET/PUT /api/kernel/v1/admin/appearance`，权限 `kernel.settings.manage`，写审计 `kernel.appearance_update`）中选择站点主题；未选择时使用第一个已安装的主题插件，选 `classic` 则不加载主题（框架自带样式）。前端清单的 `theme` 字段给出当前主题的样式表与入口地址，宿主在启动时把样式表挂在框架样式之后（同优先级选择器直接覆盖，主题令牌见 `web/themes/tokens.css`），并在 `<html data-skin="<id>">` 上标记。主题插件的 `entry` 模块可以导出 `pages`（键为页面 ID：`home`、`login`、`register`、`torrents`、`torrent`、`group`、`upload`、`profile`、`settings`、`admin`）替换框架页面；只采用当前主题的替换。样式表源文件放在 `web/plugins/<id>/src/*.css`，构建时复制到前端产物目录。
+
+**主题覆盖术语**：主题插件可以在 `[frontend.term_overrides]` 里改写其他插件的术语（写法同 `[terms]`，如 `"levels.class.administrator.name" = { zh-CN = "仙人", en = "Immortal" }`）。只在该插件是当前站点主题时生效：`GET /api/kernel/v1/terms` 先合并各插件的 `[terms]`，再叠加当前主题的覆盖；只覆盖已存在的术语，对象值按字段合并。插件自身设置里写死的名称（如等级设置里手填的 `name`）不走术语，仍以设置为准。术语快照因此返回 `Cache-Control: no-cache`；前端清单 `theme.terms` 为真时，后台切换主题后会重新加载页面以刷新术语。
 
 ### 4.3 能力（capabilities）清单
 

@@ -109,9 +109,11 @@ const built = [];
 if (existsSync(pluginsDir)) {
   for (const id of readdirSync(pluginsDir)) {
     const entry = ['src/index.tsx', 'src/index.ts'].map((f) => join(pluginsDir, id, f)).find(existsSync);
-    // 主题插件的样式表：src/*.css → dist/plugins/<id>/*.css（清单 frontend.theme 引用）
+    // 主题插件的样式表：src/*.css → dist/plugins/<id>/*.css（清单 frontend.theme 引用）；
+    // 样式表引用的图片与字体（src/*.svg|png|webp|woff2）原样复制，样式表里用相对路径引用
     const srcDir = join(pluginsDir, id, 'src');
     const styles = existsSync(srcDir) ? readdirSync(srcDir).filter((f) => f.endsWith('.css')) : [];
+    const files = existsSync(srcDir) ? readdirSync(srcDir).filter((f) => /\.(svg|png|webp|woff2)$/.test(f)) : [];
     if (!entry && styles.length === 0) continue;
     mkdirSync(join(out, 'plugins', id), { recursive: true });
     if (entry) {
@@ -122,6 +124,7 @@ if (existsSync(pluginsDir)) {
       const min = await esbuild.transform(readFileSync(join(srcDir, f), 'utf8'), { loader: 'css', minify: !dev });
       writeFileSync(join(out, 'plugins', id, f), min.code);
     }
+    for (const f of files) cpSync(join(srcDir, f), join(out, 'plugins', id, f));
     built.push(id);
   }
 }

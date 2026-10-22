@@ -220,7 +220,7 @@ export function useLevelClasses(): LevelClass[] {
 export function LevelName({ t, c }: { t: (k: string) => string; c?: LevelClass | null }) {
   if (!c) return <span className="muted">—</span>;
   return (
-    <span className="cls-name" style={c.color ? { color: c.color } : undefined}>
+    <span className="cls-name" data-level={c.key} style={c.color ? { color: c.color } : undefined}>
       {levelName(t, c)}
     </span>
   );

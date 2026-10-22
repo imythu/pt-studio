@@ -494,6 +494,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-theme-xiudaoyuan"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+]
+
+[[package]]
 name = "pt-wasm-tickets"
 version = "0.1.0"
 dependencies = [

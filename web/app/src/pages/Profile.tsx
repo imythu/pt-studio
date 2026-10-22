@@ -161,7 +161,7 @@ export function ProfilePage() {
             <h1>
               {profile.username}
               {level && (
-                <span className="cls" style={level.color ? { color: level.color, borderColor: level.color } : undefined}>
+                <span className="cls" data-level={level.key} style={level.color ? { color: level.color, borderColor: level.color } : undefined}>
                   {levelName(t, level)}
                 </span>
               )}

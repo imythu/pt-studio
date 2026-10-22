@@ -45,10 +45,13 @@ export async function applyTheme(theme: ActiveTheme | null) {
   }
   if (!theme) {
     delete root.dataset.skin;
+    delete root.dataset.skinTerms;
     document.querySelector('link[data-skin]')?.remove();
     return;
   }
   root.dataset.skin = theme.id;
+  if (theme.terms) root.dataset.skinTerms = '1';
+  else delete root.dataset.skinTerms;
   const tasks: Promise<unknown>[] = [];
   if (theme.css) tasks.push(link(theme.css));
   else document.querySelector('link[data-skin]')?.remove();

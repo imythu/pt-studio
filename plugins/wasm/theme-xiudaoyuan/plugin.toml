@@ -1,0 +1,57 @@
+id = "theme-xiudaoyuan"
+name = "主题：修道院"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "取材网络小说《让仙门再次伟大》的站点主题：月白天青配色，用户等级按「渡劫，炼炁，修真而登仙」改称渡劫一重、炼炁二重、真人、真君等，管理员称仙人。切换主题即生效，切回后恢复原名；站长在等级设置里手填的名称优先。在后台“外观”中切换"
+summary = "仙门主题（白玉京配色，等级改称修为境界）"
+category = "system"
+
+[wasm]
+memory_mb = 16
+
+[frontend]
+theme = "theme.css"
+settings_ui = "none"
+
+# 启用本主题期间覆盖等级插件的称呼与说明（境界出处见 docs 与设计稿「境界总览」）
+[frontend.term_overrides]
+"levels.class.peasant.name" = { zh-CN = "力士", en = "Golem" }
+"levels.class.peasant.desc" = { zh-CN = "仙门炼制的傀儡。分享率过低被降入此列，不能发送邀请。", en = "Demoted for a low share ratio. Cannot send invites." }
+"levels.class.user.name" = { zh-CN = "散修", en = "Rogue Cultivator" }
+"levels.class.user.desc" = { zh-CN = "身无道籍，连外门弟子都算不上。注册即为散修，渡过人劫后才能发送邀请。", en = "No Dao registry yet. Invites unlock at Tribulation I." }
+"levels.class.power_user.name" = { zh-CN = "渡劫一重", en = "Tribulation I" }
+"levels.class.power_user.desc" = { zh-CN = "人劫：修成通灵识念、无漏真身、周天吐纳、借炁显法，录入道籍成为外门弟子。可以发送邀请、查看用户列表、请求续种。", en = "Human tribulation. Can send invites, view the user list and request reseeds." }
+"levels.class.elite_user.name" = { zh-CN = "渡劫二重", en = "Tribulation II" }
+"levels.class.elite_user.desc" = { zh-CN = "天劫：渡风火雷三灾、八十一道雷劫，法术升华为神通。", en = "Heavenly tribulation." }
+"levels.class.crazy_user.name" = { zh-CN = "渡劫三重", en = "Tribulation III" }
+"levels.class.crazy_user.desc" = { zh-CN = "命劫：神识投入【命运】洪流，描绘出自身命形。渡尽三劫，始能炼炁。", en = "Tribulation of fate." }
+"levels.class.insane_user.name" = { zh-CN = "炼炁一重", en = "Qi Refining I" }
+"levels.class.insane_user.desc" = { zh-CN = "掌握天地之炁的炁象，寻常三道，历史上最多九道。可以查看普通日志。", en = "Masters qi images. Can view the general log." }
+"levels.class.veteran_user.name" = { zh-CN = "炼炁二重", en = "Qi Refining II" }
+"levels.class.veteran_user.desc" = { zh-CN = "定义天地之炁，开创独属于自己的炁象。可以查看其他用户的评论与帖子历史。", en = "Defines a qi image of one's own. Can view other users' comment and post history." }
+"levels.class.extreme_user.name" = { zh-CN = "炼炁三重", en = "Qi Refining III" }
+"levels.class.extreme_user.desc" = { zh-CN = "结成道果。可以更新过期的外部信息。", en = "Forms a Dao fruit. Can refresh outdated external info." }
+"levels.class.ultimate_user.name" = { zh-CN = "真人", en = "True Person" }
+"levels.class.ultimate_user.desc" = { zh-CN = "修真得道者。", en = "Has attained the Dao." }
+"levels.class.nexus_master.name" = { zh-CN = "真君", en = "True Lord" }
+"levels.class.nexus_master.desc" = { zh-CN = "坐镇仙境的无上真君，最高的普通等级。", en = "Supreme lord of an immortal realm; the highest regular class." }
+"levels.class.vip.name" = { zh-CN = "真传", en = "True Disciple" }
+"levels.class.vip.desc" = { zh-CN = "仙门真传，可阅三道八法。由站务授予，不受分享率考核。", en = "Granted by staff; exempt from ratio requirements." }
+"levels.class.retiree.name" = { zh-CN = "闭关", en = "In Seclusion" }
+"levels.class.retiree.desc" = { zh-CN = "退隐的站务，保留道籍与境界。", en = "Retired staff member." }
+"levels.class.uploader.name" = { zh-CN = "神兵院", en = "Divine Armory" }
+"levels.class.uploader.desc" = { zh-CN = "三大院之一，以金炁为主，炼制法宝——专职发布资源。", en = "Dedicated uploader." }
+"levels.class.moderator.name" = { zh-CN = "护法院", en = "Dharma Guard" }
+"levels.class.moderator.desc" = { zh-CN = "三大院之一，以土炁为君，管种子、评论与举报。", en = "Moderates torrents, comments and reports." }
+"levels.class.administrator.name" = { zh-CN = "仙人", en = "Immortal" }
+"levels.class.administrator.desc" = { zh-CN = "「而登仙」：九字真言的终点。管理用户与站点内容。", en = "Manages users and site content." }
+"levels.class.sysop.name" = { zh-CN = "仙方院", en = "Immortal Formulary" }
+"levels.class.sysop.desc" = { zh-CN = "三大院之一，以木炁为尊，负责站点运行与维护。", en = "Runs and maintains the site." }
+"levels.class.staff_leader.name" = { zh-CN = "掌教", en = "Sect Master" }
+"levels.class.staff_leader.desc" = { zh-CN = "一派之主，站务负责人。", en = "Leads the staff." }
+
+[terms]
+"theme-xiudaoyuan.name" = { zh-CN = "修道院", en = "Monastery of the Dao" }

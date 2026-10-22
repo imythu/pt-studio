@@ -114,6 +114,8 @@ export interface ActiveTheme {
   id: string;
   css: string | null;
   entry: string | null;
+  /** 主题覆盖了术语（如等级名称）；切换后需重新加载术语 */
+  terms?: boolean;
 }
 
 export interface FrontendManifest {
