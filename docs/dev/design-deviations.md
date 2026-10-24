@@ -1,0 +1,89 @@
+# 与设计文档的差异
+
+> 实现时偏离设计文档（`docs/design/`、`docs/plugins/*/0x-*.md`）的决定与原因。读设计文档时，以本文为准。
+
+
+- **Native 插件的 SQL**：除 `query`/`execute` 外增加 `ctx.sql.conn()`，直接拿到工作单元事务中的 `PgConnection` 使用 sqlx（仍在 `SET LOCAL ROLE` 之下）。
+- **Native HTTP**：`HttpRoutes::router()` 返回 `axum::Router`，handler 用 `RequestCtx` 提取器取上下文（设计中为 `Router<Arc<NativeState>>`）。
+- **服务调用**：`ctx.service::<dyn S>(name)?.call(|s, c| s.method(c, …))`，每次调用独立工作单元，超时取被调方截止时间。
+- **InvocationInfo** 增加 `chain`（重入检测）、`authenticated`、`client_ip`、`user_agent`、`request_id`。
+- **identity 邮箱**：按评审 U-1 推荐方案实现——`email_enc`（AES-256-GCM）+ `email_mac`（HMAC，唯一）+ `email_domain`，没有明文邮箱视图。
+- **错误码后缀规则**：conventions/api.md §7 原先只引用未定义，已补充定义并实现。
+- **ledger 币种设置**：内核设置接口完成前，可变设置存放在 `ledger.currency_settings` 表，管理员经 `PATCH /v1/admin/currencies/{code}` 修改。
+- **ledger 冻结到期**：每个冻结创建时登记一个延迟任务 `expire_hold`（内核 cron 尚未实现）。
+- **accounting 落库**：用 `unnest` 多行语句代替 COPY + 暂存表；用户日统计暂按 UTC 日期；`PartitionWorker` 采用 `poll(ctx, partition, fence)` 模型（accounting HLD §7 N-1），取代 plugin-api 初稿中的 `run(…, cancel)`。
+- **网关幂等与插件幂等**：路由声明 `idempotent = true` 时，网关先按 `Idempotency-Key` 返回首次响应（`Idempotent-Replayed: true`）；ledger 等插件内部的服务级幂等仍然保留（服务调用没有网关）。
+- **测试已知风险**：端到端测试中钩子处理者的超时为目录规定值（如注册钩子 500 ms），机器负载很高时偶发超时导致失败（2026-10-07 观察到一次，复跑 9 次未复现）。
+
+- **WASM 业务服务**：v0.1 采用 JSON 分派（plugin-api.md §2.0），类型化服务 WIT 包推迟到 0.2。
+- **WASM 插件构建**：`plugins/wasm` 为独立工作区，`cargo build --release --target wasm32-wasip2`；包目录为 `<plugins.dir>/<id>/{plugin.toml, plugin.wasm, migrations/}`，端到端测试自动构建并打包。
+- **bonus 规则编译**：设计为编译结果 bincode 存 kv；当前每次调用从 `rule_versions.definition` 重新编译（单条规则集约数十微秒，后续需要时再加缓存）。
+- **bonus 审核通过奖励**：torrent 状态机接入前，以 `torrent.created` 且初始状态为 approved 视为审核通过。
+- **levels 等级表**：`classes` 增加 `is_default` 列明确默认等级（设计中由 rank 推断）；NexusPHP 预设中“农民 → 用户”滞回写成用户 promote = ratio ≥ 0.6、keep = ratio ≥ 0.5。
+- **levels 角色同步**：identity 新增 `class_roles`（等级 → 角色），等级角色并入有效角色；插件只能绑定自身前缀角色或 rank ≤ 2 的内置角色。
+- **搜索贡献者调用**：内核在 `Ctx` 上提供 `search_contributors` / `contributor_schemas` / `contributor_documents`（plugin-api.md §2.0.1），仅 `ctx.search` 提供方可用；WASM 贡献者逐条调用 `to-document`。
+- **search-meilisearch 实现取舍**：运行时设置项（窗口、批量、缓存 TTL 等）暂放在静态配置；哈希以十六进制文本保存；索引拥有者与重建枚举视图由插件内的标准索引登记表决定（WIT 的 `owner`、`list-ids` 待 0.2）；flush 依赖 `FOR UPDATE SKIP LOCKED` 行锁而不另加 Redis 锁（同一实体只有一行待写，顺序由行锁保证）；`filterableAttributes` 用字段名列表（兼容所有 1.x）。
+- **已知限制：延迟任务串行执行**：内核在持有 `k:lock:delayed-jobs` 的单个节点上逐条执行延迟任务，search 重建步骤等待 Meilisearch 任务时会推迟同期的 flush；后续改为按插件 / 任务名并发执行。
+- **搜索结果缓存**：普通通道写入不使缓存失效（新文档最多滞后 `cache_ttl_secs`，默认 45 s），删除与优先通道写入立即失效（LLD §1.6）。
+- **种子可见性映射（搜索）**：approved → member；candidate / pending → staff（上传者本人可见，匿名发布不写 `vis_owner_id`）；rejected / disabled / deleted 不进索引。
+- **invite 实现取舍**：持有者规范化只做去空白与小写（WASM 中无 NFC 库；identity 在钩子与事件中给出同一显示形用户名，两处一致）；HMAC / HKDF / base64 在插件内用 `sha2` 自行实现（RFC 4231 / 5869 向量测试）；服务方法 `issue` 的来源记为 `api`；连坐的 `notify` 动作在 notify 插件接入前不执行。
+- **identity 限制**：本版本以“同用户同类型同来源只有一条生效限制”的 upsert 保证幂等，不建 `restriction_requests` 表；不发布 `user.restriction_changed`；到期由每分钟的 `restriction_sweep` cron 处理（不调度逐条延迟任务）。
+- **hnr 种子标签**：豁免谓词的 `tags` 字段在 torrent 提供标签前恒为空数组；`is_seedbox` 恒为 false。
+- **钩子超时倍数**：`[kernel] hook_timeout_factor`（只在 dev 模式生效）放大钩子目录给出的超时，供调试构建与并行测试使用；生产保持目录预算。
+- **已知限制：嵌套调用占用连接**：服务调用与钩子处理者各自开独立工作单元（各占一个连接），调用方的连接在等待期间不释放；连接池须不小于“并发请求 × 嵌套深度”（测试配置用 20）。后续考虑同插件链路复用或为嵌套调用预留连接。
+- **前端选型调整**：构建用 esbuild（而非 Vite；内核直接提供构建产物，不需要开发服务器）；路由用 React Router 7（而非 TanStack Router）；包管理用 npm workspaces（而非 pnpm）；schema 表单校验用自写的无 eval 子集校验器（Ajv 依赖代码生成，严格 CSP 不允许 `unsafe-eval`）。
+- **共享依赖打包**：React / ReactDOM / client / jsx-runtime 打进一个 `react-all` 模块，各说明符为 ESM 门面再导出（CJS 互操作下保持单实例）；`@tanstack/react-query`、`react-router` 与 `@pt-studio/*` 各自为独立模块；均写入 import map，插件与宿主把它们标记为 external。
+- **插件前端位置**：源码在 `web/plugins/<id>/`，构建到 `web/dist/plugins/<id>/index.js`；清单 `[frontend] entry = "index.js"`，URL 为 `/static/plugins/<id>/<version>/index.js`（版本进路径，长期缓存）。
+- **插件设置 schema**：清单内联 `[settings_schema]`（hnr 已提供），后台按 schema 生成表单；未提供时退化为 JSON 编辑。
+- **资源类型的登记方式**：类型插件以 `capabilities.content_type = true` 声明 `content-type` 导出（与 `search_contributor` 一致），不在 `provides` 中声明 `ctx.content_types`（多个类型插件会被单实现服务解析视为歧义）；torrent 经 `ctx.content_types()` / `content_type_call` 聚合调用，类型信息缓存 30 s。
+- **字段顺序**：JSON 对象经内核后键序不保证，类型 schema 用 `x-pt-order` 声明表单字段顺序。
+- **外部 ID 字段**：客户端不按 `pattern` 校验 `x-pt-widget = external-id` 字段（允许粘贴链接），由类型插件规范化时提取。
+- **type-generic 的 `pattern` 字段约束**：WASM 中未引入 regex，本版本不支持 kind 字段的 `pattern`。
+- **改密码的再认证**：设计要求 reauth；本版本以“校验当前密码”代替，成功后撤销除当前外的全部会话。
+- **元数据服务的形态**：`ctx.metadata` 作为多实现 JSON 服务（`MULTI_SERVICES`），元数据插件以 `service-provider` 导出 `info / lookup / search`，调用方传 `source`（路由到 `metadata-<source>`）；未使用 WIT 的 `metadata-provider` 导出（wasmtime 49 bindgen 对其 `lookup` 函数生成有误，见 plugin-api.md §2.0）。
+- **出站的测试方式**：元数据插件的 API 与图片地址经静态配置（`config:api_base_url`，`allow_private`）指向本地模拟服务；生产默认 `api.themoviedb.org` / `image.tmdb.org`。
+- **钩子输入带已有 Group**：钩子处理者不能回调 `ctx.torrents`（调用链重入），所以 torrent 在 `torrent.before_upload` 输入中直接带上已有 Group 的 `group_id` 与 `group_fields`（catalog/hooks.md 已补充）。
+- **作品标题由类型给出**：规范化结果中的 `group_title` 作为新建 Group 的标题（剧集带季），不进入 Group 字段，作品页不显示。
+- **测试种子的子目录**：`fixtures::sample_v1` 的文件路径用 `/` 分隔子目录（用于 sample 目录等场景）。
+- **音乐艺人字段**：LLD 为 `artists[]` 对象数组（`{name, role, mbid?}`）；表单与搜索更适合字符串数组，本版本按角色分为 `artists`、`guest_artists`、`composers` 等字符串数组，规范化仍接受对象形态；MBID 留待 MusicBrainz 元数据接入。
+- **log 存放位置**：按 LLD 放在种子字段 `logs[]`（作品页不显示）；种子字段整体受 torrent 表 64 KiB 约束，所以随种子保存的 log 总量上限为 56 KiB（LLD 为 5 个各 512 KiB；预检接口仍接受 512 KiB）。大 log 的独立存储（blob）留待后续。评分写回由 `ctx.torrents.update_fields` 完成，编辑字段后由 `torrent.updated` 重新评分（检查任务幂等，分数不变不写回，不会循环）。
+- **`ctx.llm` 的形态**：v0.1 与其他业务服务一致，用 JSON 分派（请求 / 响应字段与 `pt:llm@0.1.0` WIT 一一对应，内容块以 `type` 区分：`text`、`untrusted`、`tool_call`、`tool_result`）；类型化 WIT 推迟到 0.2。
+- **llm-claude 用量汇总**：每次调用在同一工作单元内直接累加 `usage_daily`（设计为自订阅 `llm.usage_recorded` 后累加），事件仍照常发布。
+- **服务端回退默认关闭**：`fallbacks_enabled` 默认 false（beta 能力，开启前须按当期 API 文档核对请求头与参数）。
+- **未配置的 profile**：调用方请求的 profile 未在 site.toml 配置时退回 `default`（作用域检查仍按请求的名字）。
+- **MCP token 作用域**：identity 设计的 MCP token 作用域为 read / write / admin，mcp 设计写作 `mcp:user` / `mcp:admin`；本版本统一用前者（读工具需要任一作用域，写工具需要 write，admin 工具需要 admin）。
+- **公开根路由不经网关鉴权**：`/mcp` 等根路由声明为 `auth = "public"` 时网关不处理凭据，由插件自行认证 Bearer（否则只读 MCP token 的 POST 会被“只读 token 不能写”规则拦下）。
+- **token 凭据 ID**：Principal 的 `credential_id` 为 `tok:<id>`（会话为 UUID），插件据此区分浏览器会话与 token（如 passkey、token 管理、站内确认只允许会话）。
+- **token 管理的再认证**：设计要求签发 token 前 reauth；本版本以“只有浏览器会话能签发”代替，reauth 接入后补上。
+- **确认的执行身份**：站内确认后以当前浏览器会话身份执行工具（发起调用的 token 已在创建确认项时通过内核的权限与参数检查）。
+- **助手的检索**：设计经 `ctx.search` 建自有索引；规则文档规模小（数百段），本版本在插件内打分（不依赖 Meilisearch），之后数据量变大再接入搜索。
+- **非网关插件调用 MCP 工具**：设计中 ai-assistant 直接用 `mcp_registry.call`；内核以清单 `capabilities.mcp_tools` 白名单开放（只读工具），提问者主体为 `session` 类、作用域 read。
+- **评论渲染不引入 ammonia**：设计为 ammonia 白名单净化；本版本由 `pt-markup` 自行输出全部标签（用户输入只作为转义后的文本与经校验的属性），WASM 包更小；前端 UserContent 再做一次白名单净化。
+- **系统举报者**：`ctx.reports.create` 未给出举报者时记为用户 0（系统，如 ai-moderation）。
+- **初始状态规则的默认值**：设计中没有规则命中时默认 `pending`；本版本由设置 `default_status` 决定（默认留空 = 不改变 torrent 的初始状态），站点启用审核时再配置，避免安装插件即改变全部上传的行为。
+- **候选区投票即时决定**：设计为调度 `candidate_resolve` 延迟任务以保证状态变更钩子的 actor 为本插件；torrent 尚无状态变更钩子，本版本在投票请求中直接决定。
+- **敏感词只支持精确匹配**：规范化（小写、去空白与零宽字符）后逐词查找；通配符与 Aho-Corasick 自动机在词表规模变大时再引入。
+- **通知模板的渲染位置**：设计为 notify 服务端按模板术语渲染；内核的术语对象只含插件自己的清单术语，本版本由前端（术语快照包含全部插件的术语）按 `<key>.title` / `<key>.body` 插值，服务端保存调用方给出的回退文本（外部渠道接入时再做服务端渲染）。
+- **rss 的查询方式**：设计为把订阅编译成 `ctx.search` 查询；本版本直接查询 torrent / accounting 的只读视图（只含已发布的种子），按发布时间倒序——订阅只需要“最新若干条”，不需要相关度，也不受搜索索引同步延迟影响；字段条件在种子字段与分组字段合并后的 JSON 上比较，字段名只做格式校验（不校验是否为可筛选字段）。Torznab 的 `offset` 直接用 SQL 偏移（≤ 1000）。
+- **feed key 的签发**：identity 的 `tokens` 表早已允许 kind = feed（`audience_plugin` 必填）；本版本补上签发与校验：`ctx.auth.issue_token` 接受 kind = feed（忽略 ttl、不过期），`Credential::Feed` 只接受 `audience_plugin` 等于调用方插件的 key，Bearer 不接受 feed key；用户的 token 管理接口不能创建、也不列出 feed key。
+- **邮件渠道的配置位置**：提供方、凭据、发件人、站点地址与退订密钥放在 site.toml `[plugin.notify]`（静态配置），不放后台可改的设置；邮件正文使用调用方给出的回退标题与正文（纯文本，HTML 版本转义），服务端模板渲染留待术语服务支持渲染后实现。
+- **SDK 的形态**：设计为 `pt-plugin-sdk` 提供 `#[pt_plugin::main]` 过程宏、`sql::query!` 绑定宏与从 schema 生成的类型化事件 / 钩子；本版本用声明宏 `world!`（内部调用 wit-bindgen，以 `with` 把宿主接口映射到 SDK 中生成的绑定）、`SqlValue` 的 `From` 转换代替 `query!`，事件与钩子仍以 `serde_json::Value` 传递。SDK 放在 `crates/plugin-sdk-rust`，不在主工作区（只为 `wasm32-wasip2` 构建，由 WASM 工作区与模板以路径依赖使用）。
+- **打包工具**：设计为 `xtask package` / `sign`；本版本由 `pt-server plugin package` 组装包（含 `checksums.txt`）并调用 `plugin check`；`--sign` 用 minisign 私钥签名（`plugin keygen` 生成，加密私钥的口令取自 `PT_PLUGIN_KEY_PASSWORD`）。内核加载时有 `plugin.sig` 就按 `plugins.trusted_keys` 校验签名、文件哈希与清单之外的文件（开发模式且未配置公钥时跳过）；没有签名只在 dev 模式 + `allow_unsigned` 时接受。发布构建在配置了签名密钥时签名全部插件包，并让 `init-config.sh` 生成生产模式配置；Docker 镜像仍为未签名包（dev 模式）。
+- **第三方钩子点与错误码**：钩子点原本只能来自 catalog/hooks.md（内核编译时生成）；为了让第三方插件定义钩子点，目录之外、以 `<id>.` 开头的钩子点按清单中的参数登记（不受 `strict_catalog` 限制）。错误码同理，清单 `[error_codes]` 补充目录之外的 HTTP 状态。
+- **模板仓库**：设计为独立的模板仓库；本版本放在本仓库 `templates/` 下（带独立 `[workspace]` 与 WIT 副本，可直接复制到仓库外），独立发布留到开源发布时。
+- **pt-tracker 的实现方式**（决策 D20，取代 D9 / D14）：不使用 torrust，协议、准入、增量与事件出口自研；swarm 与会话状态全部存在 Redis（每个种子的做种 / 下载 ZSET + 会话 HASH，键带 Cluster 哈希标签 `{info_hash}`），每次 announce 一个 Lua 脚本完成 CAS、清理超时 peer、更新与抽取 peer，tracker 无状态、可多节点。会话值用 JSON（设计为紧凑二进制）；announce 在请求内同步写 Redis（设计为异步 worker 队列 + 背压）。已用 Transmission 4.1 真实传输与压测验证（见 crates/pt-tracker/README.md）。
+- **tracker-bridge 的 `ver`**：设计为“先取 ver 再读源”并在脚本中比较；本版本由 `trk:ver` 计数器在写入脚本内生成，快照总是被最新一次写覆盖。限制类变化（H&R 限制下载等）没有事件，由每 10 分钟的全量同步兜底。
+- **开发站点的数据库**：`run-site.sh` 使用库 `ptsite` 与角色前缀 `ptsite_`（端到端测试会删除 `pt_plugin_*` 角色，同一 PostgreSQL 集群中不能共用）。
+- **通知模板不单独登记**：类别、链接随每次发送给出；模板键前缀必须是调用方插件 ID。
+- **求种悬赏同步结算**：设计中托管 / 发放 / 退款经 `bounty_step` 延迟任务异步执行；本版本在请求内直接调用 `ctx.ledger`（ledger 工作单元独立提交，幂等键按贡献 / 应求，重试不会重复扣款）。
+- **签到按 UTC 计日**：WASM 宿主的站点时区尚未接入，签到日期用 UTC。
+- **测试已知风险（2026-10-13）**：完整测试并行负载很高时，`e2e_wasm` 的沙箱越界用例偶发一次错误码不符（单独运行与随后的完整运行均通过）；待复现时记录具体用例与返回值。
+- **identity 的 IP 记录不分区**：设计中 `ip_log` / `security_events` 按月分区，由分区保留期删除；内核的分区维护只建分区、不删旧分区，本版本改为普通表 + 每日 `ip_retention` 按批截断与删除。新设备提醒由 notify 订阅 `user.logged_in`（`alert = true`）发送：identity 不能依赖 notify（notify 依赖 `ctx.users`，会形成依赖环）。
+- **邮箱验证默认关闭**：设计默认 `require_email_verification = true`；本版本默认 false（未配置邮件渠道的站点开启后新用户无法激活），配置好 notify 邮件渠道后在后台开启。挑战投递采用设计中的拉取模式，但链接以站内相对路径返回，由 notify 用自己的 `site_url` 补全。
+- **强制 2FA 的配置**：设计为 `two_factor.required_roles`（角色列表，默认 `["moderator"]`）；本版本为单个“最低角色” `two_factor_required_role`，默认不强制（开启后已有员工须先绑定才能继续使用管理权限）。个人 / MCP token 不受此限制。
+- **WebAuthn 不用 webauthn-rs**：设计使用 webauthn-rs；本环境没有该 crate 的缓存，改为自行实现最小子集（不校验证明链，只接受签名算法 ES256 / EdDSA / RS256），依赖 p256、ed25519-dalek、rsa。
+- **registration-policy 的取舍**：人机验证拆到 captcha 插件（钩子中不能出站 HTTP）；域名名单直接放在设置里（设计为独立表与导入）；时区只支持固定偏移（WASM 中没有时区库）；同 IP 上限默认每 24 小时 3 个。
+- **默认启用程度**：发布包会带上全部 WASM 插件。会改变已有行为的默认值尽量保守：newbie-exam 默认不自动分配；captcha 未配置服务商时不验证；registration-policy 默认只限制同 IP 每 24 小时 3 个账号；ratio-policy 默认按 Gazelle 表考核（下载 ≥ 5 GiB、注册满 7 天才考核），不需要的站点可在 `plugins.disabled` 中停用。
+- **WASM 插件的 HTTP 错误会回滚工作单元**：插件以 ≥ 400 状态返回时内核按错误处理并回滚本次写入。需要在“失败”响应里保留的写入（如负缓存）要放到 Redis。已知问题：metadata-tmdb 的 `/v1/lookup` 对不存在的条目写入的 PG 负缓存会被回滚（经 `ctx.metadata` 服务调用的路径不受影响）。
+- **手动运行 cron**：`Kernel::run_job_now` 在任务正在运行（如启动时 catch_up）时最多等待 30 s。
+

@@ -1,10 +1,10 @@
 # PT Studio 设计文档
 
-> 状态：草案 v0.1 · 最后更新：2026-10-04
+> 架构级设计文档。写于实现之前（2026-10-04 起），实现中的调整记录在下方决策表与 [../dev/design-deviations.md](../dev/design-deviations.md)。
 
 PT Studio 是一个面向几十万用户、可水平扩展的 PT 站点系统：
 
-- **Tracker**：基于 [Torrust](https://github.com/torrust/torrust-tracker) 各组件组装的 PT 专用 tracker
+- **Tracker**：自研的 PT 专用 HTTP tracker，状态全部存于 Redis、无状态多节点（D20；早期的 Torrust 方案见 10 号文档）
 - **后端**：Rust，微内核 + 万物皆插件（Native 插件 + WASM 插件）
 - **前端**：React，可整体替换，也可二次开发
 - **AI**：原生支持，提供 MCP 服务
@@ -15,14 +15,14 @@ PT Studio 是一个面向几十万用户、可水平扩展的 PT 站点系统：
 |---|---|
 | [01-architecture.md](01-architecture.md) | 设计原则、总体架构、微内核、双层插件、预设、技术栈、仓库结构 |
 | [02-plugin-system.md](02-plugin-system.md) | 插件加载、扩展点、WIT 契约、清单与权限、数据访问（基础方法 / SQL 执行器 / Redis） |
-| [03-tracker-and-accounting.md](03-tracker-and-accounting.md) | Torrust 集成、水平扩展、记账链路、反作弊信号 |
+| [03-tracker-and-accounting.md](03-tracker-and-accounting.md) | Tracker、水平扩展、记账链路、反作弊信号 |
 | [04-search.md](04-search.md) | `search-meilisearch` 插件 |
 | [05-content-types-and-terms.md](05-content-types-and-terms.md) | 混合资源类型、术语表系统 |
 | [06-frontend.md](06-frontend.md) | 可替换前端、插槽、Schema 驱动 UI |
 | [07-ai-and-mcp.md](07-ai-and-mcp.md) | `ctx.llm`、MCP 网关、AI 插件 |
 | [08-lessons-learned.md](08-lessons-learned.md) | 现有开源 PT 程序的教训与对策 |
 | [09-roadmap.md](09-roadmap.md) | 路线图、待验证项、待决问题 |
-| [10-torrust-integration.md](10-torrust-integration.md) | Torrust 集成技术方案：源码调研、方案对比、pt-tracker 详细设计、原型验证结果 |
+| [10-torrust-integration.md](10-torrust-integration.md) | Torrust 集成调研（已由 D20 取代，保留作为决策依据）：源码调研、方案对比、原型验证结果 |
 | [11-plugin-settings.md](11-plugin-settings.md) | 统一插件配置模型：一份声明、分层取值（默认 / 部署 / 站点 / 用户）、类型清单、内核校验与合并、SDK 生成类型、宿主统一渲染 |
 
 ## 已确定的决策
