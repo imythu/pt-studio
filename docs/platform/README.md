@@ -9,7 +9,7 @@
 
 | # | 决策 |
 |---|---|
-| D18 | 数据库确定为 PostgreSQL（最低 16，推荐 17），不支持 MySQL |
+| D18 | 数据库确定为 PostgreSQL（最低 16，推荐 17） |
 | D19 | 内核、全部官方插件、前端使用 `MIT OR Apache-2.0` 双许可证；pt-tracker 仍为 AGPL-3.0-only（D16），只通过 Redis 通信，不得被链接 |
 
 ## 1. 目录

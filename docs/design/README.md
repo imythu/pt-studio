@@ -46,7 +46,7 @@ PT Studio 是一个面向几十万用户、可水平扩展的 PT 站点系统：
 | D15 | tracker 只支持 HTTP(S) announce，不提供 UDP | spike 实测（torrust 私有模式禁用 UDP，也没有实现 BEP 41） |
 | D16 | `crates/pt-tracker` 单独使用 AGPL-3.0-only 许可证，与内核和插件只通过 Redis 通信，不互相链接代码 | torrust 各包都是 AGPL-3.0-only；用户确认保留 AGPL，不切换方案 D |
 | D17 | 增量计算依据 pt-tracker 自己维护的 peer 会话状态（user_id + info_hash + peer_id，写穿 Redis），不依赖 torrust 的 swarm 或 events | spike 实测（torrust 的事件和 swarm 不带用户身份，也拿不到旧值） |
-| D18 | 数据库使用 PostgreSQL（最低 16，推荐 17），不支持 MySQL | 用户确认 |
+| D18 | 数据库使用 PostgreSQL（最低 16，推荐 17） | 用户确认 |
 | D19 | 内核与插件采用 MIT OR Apache-2.0 双许可证；pt-tracker 仍为 AGPL-3.0-only（D16），二者只通过 Redis 通信、互不链接代码 | 用户确认 |
 | D20 | pt-tracker 自研，不依赖 torrust：HTTP 协议（BEP 3 / 23 / 7 / 48）、准入、增量计算与事件出口自己实现；**swarm 与会话状态全部存在 Redis**（每个种子的做种 / 下载 ZSET + 会话 HASH，Lua 脚本 CAS），tracker 无状态、可多节点水平扩展、不需要按 info_hash 分片。D15（只做 HTTP）、D16（AGPL，只经 Redis 通信）、D17（自己维护会话状态）保持不变 | 2026-10-14 用户决定（torrust 相关包未发布到 crates.io，develop 分支 API 不稳定）；真实客户端（Transmission 4.1）与压测验证见 components/pt-tracker、dev/README |
 | D21 | 插件配置统一为 `plugin.toml [[settings]]` 一份声明：值按“清单默认 → 部署层（site.toml / 环境变量）→ 站点层（后台）→ 用户层（个人设置）”覆盖，字段以 `editable` 声明最高可写层；内核负责校验、合并、存储、审计与变更通知，SDK 编译期生成强类型，宿主统一渲染后台与个人设置界面。破坏式替换 `settings_schema` / `settings_ui` / `config.get-static` / `get-settings`，见 11 号文档 | 2026-10-14 用户决定（不考虑历史兼容） |

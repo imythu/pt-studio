@@ -1,12 +1,13 @@
 # PT Studio：docker compose 一键部署（站点 + tracker + PostgreSQL + Redis + Meilisearch）。
-# 快速开始见 deploy/docker/README.md：
+# 只需要本文件和同目录的 .env（模板：deploy/docker/.env.example），详见 deploy/docker/README.md：
 #   mkdir pt-studio && cd pt-studio
 #   curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/compose.yaml
-#   curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/initdb.sh && chmod +x initdb.sh
+#   curl -fsSL https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/.env.example -o .env
 #   docker compose up -d
 #
+# 需要 Docker Compose ≥ 2.23（数据库初始化脚本内嵌在下方 configs 中）。
 # 全部数据在本目录的 ./data/ 下（postgres、redis、meilisearch、pt：站点配置 site.toml 与种子文件）。
-# 密码与对外地址从同目录的 .env 读取（没有 .env 时用下面的默认值，正式使用前务必修改）。
+# 没有 .env 时用下面的默认值，只适合本机试用。
 # 镜像由 GitHub Actions 构建：ghcr.io/imythu/pt-studio（latest 为最新版本，main 为主分支最新提交；可用 PT_IMAGE 指定）。
 name: pt-studio
 
@@ -24,7 +25,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
-      - ./initdb.sh:/docker-entrypoint-initdb.d/10-pt.sh:ro
+    configs:
+      - source: initdb
+        target: /docker-entrypoint-initdb.d/10-pt.sh
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
@@ -84,3 +87,22 @@ services:
       - "${PT_TRACKER_PORT:-31252}:31252"
     depends_on:
       - server
+
+configs:
+  # PostgreSQL 首次初始化（数据目录为空时执行一次），等价于 deploy/postgres/bootstrap.sql。
+  # 由官方镜像的入口脚本 source 执行，失败时 psql 返回非零、初始化中止；密码由 compose 从 .env 代入。
+  initdb:
+    content: |
+      psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres <<'SQL'
+      CREATE ROLE pt_admin LOGIN CREATEROLE PASSWORD '${PT_DB_ADMIN_PASSWORD:-change-me-admin}';
+      CREATE ROLE pt_gateway LOGIN NOINHERIT PASSWORD '${PT_DB_GATEWAY_PASSWORD:-change-me-gateway}';
+      GRANT pt_gateway TO pt_admin WITH INHERIT FALSE, SET TRUE;
+      CREATE DATABASE pt OWNER pt_admin;
+      SQL
+      psql -v ON_ERROR_STOP=1 --username postgres --dbname pt <<'SQL'
+      REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE EXECUTE ON FUNCTION pg_catalog.set_config(text, text, boolean) FROM PUBLIC;
+      GRANT  EXECUTE ON FUNCTION pg_catalog.set_config(text, text, boolean) TO pt_gateway, pt_admin;
+      REVOKE USAGE ON LANGUAGE plpgsql FROM PUBLIC;
+      GRANT  USAGE ON LANGUAGE plpgsql TO pt_gateway, pt_admin WITH GRANT OPTION;
+      SQL

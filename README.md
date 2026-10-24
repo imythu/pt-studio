@@ -51,25 +51,24 @@ tracker 与站点只经 Redis 通信，互不链接代码。设计细节见 [架
 
 ## 快速开始
 
-### Docker（推荐体验）
+### Docker（推荐）
 
-镜像 `ghcr.io/imythu/pt-studio`，包含站点、tracker 与全部插件，数据保存在 `./data/`。
+只需要一个 compose 文件和一个配置文件：
 
 ```sh
 mkdir pt-studio && cd pt-studio
 curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/compose.yaml
-curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/initdb.sh && chmod +x initdb.sh
-curl -fsSL  https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/.env.example -o .env   # 修改密码与地址
+curl -fsSL https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/.env.example -o .env   # 改密码与地址
 docker compose up -d
 ```
 
-打开 http://localhost:31251 注册账号，然后授予管理员：
+打开 http://localhost:31251 注册账号，再设为管理员：
 
 ```sh
 docker compose exec server pt-server --config /data/site.toml user grant-role <用户名> admin
 ```
 
-详见 [Docker 部署](deploy/docker/README.md)。
+数据都在 `./data/`，更多说明见 [Docker 部署](deploy/docker/README.md)。
 
 ### 服务器部署
 

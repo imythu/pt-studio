@@ -1,5 +1,5 @@
 //! Swarm 后端抽象。原型的实现直接包装 torrust `swarm-coordination-registry` 的 `Registry`，
-//! 不经过 `tracker-core`（从而不引入 sqlx / MySQL / PostgreSQL / SQLite 依赖）。
+//! 不经过 `tracker-core`（从而不引入 sqlx 等数据库依赖）。
 //!
 //! 之所以加一层 trait：torrust 的这些包未发布、API 变动频繁、且为 AGPL，
 //! 将来若改为自研 swarm（见 10 号文档方案 D），只需替换本模块的实现。

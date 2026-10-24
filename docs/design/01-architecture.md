@@ -123,7 +123,7 @@ list = ["lottery"]
 | 层 | 选型 |
 |---|---|
 | Web 框架 | axum + tower |
-| 数据库 | PostgreSQL（最低 16，推荐 17；不支持 MySQL，D18）+ sqlx |
+| 数据库 | PostgreSQL（最低 16，推荐 17，D18）+ sqlx |
 | 缓存 / 队列 | Redis（实时计数、Redis Streams） |
 | 插件运行时 | wasmtime（Component Model + WIT） |
 | 搜索 | Meilisearch |
