@@ -170,7 +170,6 @@
 
 - 周边工具对接：IYUU 辅种（见 `crossseed-api`）、MoviePilot / PT-depiler 等工具的长期 token 接口、IRC 播报。
 - 多租户（一套部署对应一个站点，决策 D6）。
-- MySQL（只支持 PostgreSQL ≥ 16，决策 D18）。
 
 ### 待验证
 

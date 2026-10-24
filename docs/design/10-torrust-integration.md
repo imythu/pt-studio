@@ -83,7 +83,7 @@ torrust-tracker-swarm-coordination-registry = { git = "https://github.com/torrus
         ▲             ▲                                    ▲                       │
         └──── tracker-core ──────────────────────────────┐ │                       │
               (AnnounceHandler、ScrapeHandler、key 鉴权、  │ │                       │
-               白名单、数据库：sqlx mysql+postgres+sqlite)  │ │                       │
+               白名单、数据库：sqlx 多种数据库)             │ │                       │
                       ▲                                   │ │                       │
                http-core (AnnounceService：鉴权→白名单→IP→announce→事件)     udp-core (cookie、封禁)
                       ▲                                                            ▲
@@ -169,7 +169,7 @@ GET /announce/{key}?info_hash=…
 |---|---|
 | 格式 | `Key(String)`，**正好 32 个字符，只允许 `[0-9A-Za-z]`**（`AUTH_KEY_LENGTH = 32`）。我们的 32 位小写十六进制 passkey 在**语法上兼容** |
 | 携带方式 | HTTP 路径 `/announce/{key}`、`/scrape/{key}`（axum 路由写死） |
-| 存储 | `InMemoryKeyRepository = RwLock<HashMap<Key, PeerKey>>`，`PeerKey{key, valid_until}`；持久化用 sqlx（MySQL / PostgreSQL / SQLite）表 |
+| 存储 | `InMemoryKeyRepository = RwLock<HashMap<Key, PeerKey>>`，`PeerKey{key, valid_until}`；持久化用 sqlx 数据库表 |
 | 校验 | `core.private=true` 时：查内存表，并按 `private_mode.check_keys_expiration` 检查过期时间 |
 | 能否换成自定义鉴权 | **不能直接替换**：① `PeerKey` 里**没有 user_id**，鉴权通过后上层也拿不到用户；② `InMemoryKeyRepository::insert/remove` 是 `pub(crate)`，外部只能通过 `KeysHandler`（必须有数据库）或 `reset_with`（全量替换）写入；③ 根二进制在 `private=true` 且没有数据库时拒绝启动（`PersistenceRequirementError::PrivateRequiresDatabase`）；④ 没有鉴权 trait 可以注入 |
 | 白名单 | 情况相同：`InMemoryWhitelist::add` 是公开的，`remove` 是 `pub(crate)`，删除也只能走需要数据库的 `WhitelistManager` |

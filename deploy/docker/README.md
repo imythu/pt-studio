@@ -3,15 +3,14 @@
 用 `docker compose` 在一台机器上运行完整的 PT Studio：站点（pt-server，含全部插件与前端）、tracker（pt-tracker）、
 PostgreSQL 17、Redis 8、Meilisearch。镜像 `ghcr.io/imythu/pt-studio` 由 GitHub Actions 构建，不需要在本地编译。
 
-需要 Docker 24+（含 compose 插件）。
+只需要两个文件：`compose.yaml` 与配置文件 `.env`。需要 Docker 24+ 与 Docker Compose ≥ 2.23。
 
 ## 1. 获取文件
 
 ```bash
 mkdir pt-studio && cd pt-studio
 curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/compose.yaml
-curl -fsSLO https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/initdb.sh && chmod +x initdb.sh
-curl -fsSL  https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/imythu/pt-studio/main/deploy/docker/.env.example -o .env
 ```
 
 ## 2. 修改 `.env`
