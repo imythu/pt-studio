@@ -20,7 +20,7 @@
 ## 2. 待验证项
 
 - [x] **Torrust 集成方案**：已确定采用方案 B′（见 [10-torrust-integration.md](10-torrust-integration.md)、决策 D14～D17）；原型已跑通 passkey 鉴权、过滤、增量计算、事件输出。
-- [ ] **pt-tracker 未验证项**（P8 已验证：passkey 鉴权、客户端白名单、增量计算、Redis 中的 swarm（多节点共享）、真实 Transmission 4.1 传输与记账；以下仍未验证）：真实 Redis（会话状态 CAS、批量写入）、异步队列与背压、与 tracker-bridge 的同步、重启与分片迁移后的懒加载恢复、LB 按 URL 解码后的 info_hash 哈希、真实 BT 客户端接入、hybrid 种子只按 v1 hash 计账。
+- [ ] **pt-tracker 未验证项**（已验证：passkey 鉴权、客户端规则（含即时生效与被拒统计）、增量计算、Redis 中的 swarm（多节点共享）、与 tracker-bridge 的同步、节点状态上报与告警、真实 Transmission 4.1 / qBittorrent 5.1 / Deluge 2.1 传输与记账；以下仍未验证）：真实 Redis（会话状态 CAS、批量写入）、异步队列与背压、重启与分片迁移后的懒加载恢复、LB 按 URL 解码后的 info_hash 哈希、µTorrent 接入、hybrid 种子只按 v1 hash 计账。
 - [ ] **pt-tracker 压测**：目标平均 1.7 万次/秒，高峰 2～3 倍。（P8 开发机同机压测约 1.05 万次/秒、p99 13 ms；需在 tracker 与 Redis 分开部署的环境复测）
 - [ ] **记账链路压测**：Redis Streams 吞吐、窗口聚合内存占用、`COPY` + `ON CONFLICT` 落库速度。
 - [ ] **Meilisearch**：100 万～1000 万种子文档下的索引速度、查询 p99 延迟、中文和中英混排标题的检索效果、部分更新做种数的吞吐。
@@ -63,7 +63,7 @@
 ### M2 能稳定开站
 
 - [x] M2.1 插件包签名（minisign；`plugin keygen` / `package --sign`；`kernel.mode = "prod"` 校验）
-- [x] M2.2 qBittorrent / Deluge 客户端兼容测试（qBittorrent 5.1 双向实测通过；Deluge 同为 libtorrent，未单独实测）
+- [x] M2.2 qBittorrent / Deluge 客户端兼容测试（qBittorrent 5.1、Deluge 2.1 双向实测通过）
 - [x] M2.3 ratio-policy（按等级的最低分享率、警告期、限制下载）
 - [x] M2.4 seedbox（用户登记 IP 段 + 审核，accounting 标记盒子 peer；ASN 自动识别与 H&R / 魔力值规则接入待做）
 - [x] M2.5 newbie-exam（新手考核）
@@ -73,7 +73,7 @@
 
 - [x] M3.1 种子认领（claims：认领、保种考核、认领奖励）
 - [x] M3.2 forum（版块、主题、回复、种子讨论帖、公告）
-- [x] M3.3 metadata-douban / PT-Gen 兼容简介生成
+- [x] M3.3 metadata-douban / PT-Gen 兼容简介生成（含豆瓣图书）；另有 metadata-bangumi、metadata-musicbrainz
 - [x] M3.4 mediainfo（MediaInfo / BDInfo 解析，上传校验）
 - [x] M3.5 收藏、置顶、排行榜（top10）、合集
 - [x] M3.6 图片上传（附件 / 图床，blob 存储）

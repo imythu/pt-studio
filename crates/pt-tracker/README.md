@@ -3,7 +3,7 @@
 PT Studio 的 HTTP tracker（许可证 AGPL-3.0-only，见决策 D16；自研实现，见决策 D20）。独立程序，只经 Redis 与站点通信，
 不链接站点代码。**无状态**：swarm 与会话状态都在 Redis 中，可以同时运行多个节点、随意重启，负载均衡不需要按 info_hash 分片。
 
-- `GET /announce/<passkey>`：准入（passkey、账号状态、客户端白名单、种子状态）→ swarm → 增量计算 → 写记账流
+- `GET /announce/<passkey>`：准入（passkey、账号状态、客户端规则、种子状态）→ swarm → 增量计算 → 写记账流
 - `GET /scrape/<passkey>?info_hash=…`：单个（最多 10 个）hash 的做种 / 完成 / 下载中人数
 - `GET /health`：状态与已加载的 passkey / 种子数
 
