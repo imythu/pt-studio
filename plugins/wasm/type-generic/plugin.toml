@@ -9,11 +9,30 @@ description = "通用资源类型：管理员定义 kind（字段描述语言编
 summary = "通用资源类型：管理员可自定义字段，适合游戏、软件等"
 category = "content"
 
+requires = ["ctx.torrents@^0.1"]
+optional_requires = ["ctx.metadata@^0.1"]
+
 [capabilities]
 sql = true
 content_type = true
 search_contributor = true
 views = ["torrent.v_torrent_fields"]
+
+[capabilities.scopes]
+"ctx.torrents" = ["write:group"]
+
+# 电子书：按豆瓣编号或 ISBN 从豆瓣图书补全作品（封面、简介、评分、作者、出版社）
+[[subscriptions]]
+name = "on_group_created"
+event = "group.created"
+
+[[subscriptions]]
+name = "on_torrent_created"
+event = "torrent.created"
+
+[[jobs]]
+name = "fetch_metadata"
+timeout_secs = 60
 
 [[http.routes]]
 id = "list_kinds"

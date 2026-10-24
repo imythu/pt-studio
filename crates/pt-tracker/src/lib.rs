@@ -7,6 +7,7 @@
 
 pub mod accounting;
 pub mod admission;
+pub mod clients;
 pub mod metrics;
 pub mod protocol;
 pub mod store;
@@ -89,7 +90,11 @@ impl Config {
 
 pub struct App {
     pub cfg: Config,
+    /// 启动时间（Unix 秒）
+    pub boot: u64,
     pub admission: Admission,
+    /// 被拒客户端计数（随节点心跳写入 `trk:stats:denied:<日期>`）
+    pub denied: clients::Denied,
     pub store: Store,
     pub sync: redis::aio::ConnectionManager,
     pub acct: redis::aio::ConnectionManager,
@@ -206,8 +211,12 @@ async fn announce_inner(
     if user.st == 2 {
         return fail("account disabled");
     }
-    // ③ 客户端白名单
-    if !app.admission.client_allowed(&pid) {
+    // ③ 客户端规则
+    let ua = headers
+        .get(header::USER_AGENT)
+        .map_or(&b""[..], HeaderValue::as_bytes);
+    if app.admission.client_decide(&pid, ua).0 == clients::Action::Deny {
+        app.denied.record(&pid, ua);
         return fail("client not allowed");
     }
     // ④ 种子
@@ -290,10 +299,7 @@ async fn announce_inner(
     };
     // ⑥ 流量事件（只对计账的 hash；没有变化的普通 announce 不写）
     if torrent.acct && (!delta.is_zero() || event != Event::None) {
-        let ua = headers
-            .get(header::USER_AGENT)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
+        let ua = std::str::from_utf8(ua).unwrap_or("");
         let fact = Fact {
             ts,
             uid: user.uid,
@@ -390,6 +396,73 @@ async fn scrape_inner(app: Arc<App>, passkey: String, q: Option<String>) -> Resp
     bencode(protocol::scrape(&files))
 }
 
+/// 节点状态（tracker-bridge LLD §1.9）：每 10 秒写 `trk:stats:node:<node_id>`，30 秒过期；写入失败只记日志
+async fn heartbeat(app: Arc<App>) {
+    let mut conn = app.sync.clone();
+    // 最近 60 秒 announce 速率：6 个 10 秒采样
+    let mut samples: std::collections::VecDeque<u64> = std::collections::VecDeque::with_capacity(7);
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
+    loop {
+        tick.tick().await;
+        let total = metrics::announces_total();
+        samples.push_back(total);
+        if samples.len() > 7 {
+            samples.pop_front();
+        }
+        let rps = match (samples.front(), samples.len()) {
+            (Some(first), n) if n > 1 => (total - first) as f64 / ((n - 1) as f64 * 10.0),
+            _ => 0.0,
+        };
+        let (pk, t) = app.admission.counts();
+        let (sid, lag) = app.admission.sync_state();
+        let key = format!("trk:stats:node:{}", app.cfg.node_id);
+        let r: redis::RedisResult<()> = redis::pipe()
+            .atomic()
+            .cmd("HSET")
+            .arg(&key)
+            .arg(&[
+                ("ver", env!("CARGO_PKG_VERSION").to_owned()),
+                ("boot", app.boot.to_string()),
+                ("sid", sid),
+                ("lag_ms", lag.to_string()),
+                ("pk", pk.to_string()),
+                ("t", t.to_string()),
+                ("mpt", app.cfg.max_peer_timeout.to_string()),
+                ("rps", format!("{rps:.1}")),
+                ("ts", now().to_string()),
+            ])
+            .ignore()
+            .cmd("EXPIRE")
+            .arg(&key)
+            .arg(30)
+            .ignore()
+            .query_async(&mut conn)
+            .await;
+        if let Err(e) = r {
+            tracing::warn!(error = %e, "writing node status failed");
+        }
+        flush_denied(&app, &mut conn).await;
+    }
+}
+
+/// 被拒客户端计数写入 `trk:stats:denied:<UTC yyyymmdd>`（ZSET，8 天过期）；失败时合并回本地表下次再写
+async fn flush_denied(app: &App, conn: &mut redis::aio::ConnectionManager) {
+    let counts = app.denied.take();
+    if counts.is_empty() {
+        return;
+    }
+    let key = format!("trk:stats:denied:{}", clients::utc_day(now()));
+    let mut p = redis::pipe();
+    for (member, n) in &counts {
+        p.cmd("ZINCRBY").arg(&key).arg(*n).arg(member).ignore();
+    }
+    p.cmd("EXPIRE").arg(&key).arg(8 * 86_400).ignore();
+    if let Err(e) = p.query_async::<()>(conn).await {
+        tracing::warn!(error = %e, "writing denied client stats failed");
+        app.denied.restore(counts);
+    }
+}
+
 async fn health(State(app): State<Arc<App>>) -> impl IntoResponse {
     let (users, torrents) = app.admission.counts();
     axum::Json(
@@ -448,9 +521,12 @@ pub async fn start(cfg: Config) -> Result<Router, String> {
     let follower = connect_blocking(cfg.sync_url())
         .await
         .map_err(|e| format!("redis {}: {e}", cfg.sync_url()))?;
+    let boot = now();
     let app = Arc::new(App {
-        store: Store::new(cfg.node_id.clone(), now(), partitions, cfg.max_peer_timeout),
+        boot,
+        store: Store::new(cfg.node_id.clone(), boot, partitions, cfg.max_peer_timeout),
         admission,
+        denied: clients::Denied::default(),
         sync,
         acct,
         state,
@@ -459,6 +535,10 @@ pub async fn start(cfg: Config) -> Result<Router, String> {
     {
         let app = app.clone();
         tokio::spawn(async move { app.admission.follow(follower, last).await });
+    }
+    {
+        let app = app.clone();
+        tokio::spawn(async move { heartbeat(app).await });
     }
     if let Some(mb) = app.cfg.metrics_bind.clone() {
         let a = app.clone();

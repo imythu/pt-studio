@@ -49,6 +49,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0005_peer_liveness.sql"),
     ),
     ("0006_seedbox.sql", include_str!("../migrations/0006_seedbox.sql")),
+    (
+        "0007_client_fingerprint.sql",
+        include_str!("../migrations/0007_client_fingerprint.sql"),
+    ),
 ];
 pub const ACCOUNTING: &str = "ctx.accounting";
 

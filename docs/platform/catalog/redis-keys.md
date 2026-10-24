@@ -26,7 +26,7 @@
 |---|---|---|---|---|---|---|
 | `acct:<partition>` | acct | STREAM | pt-tracker | accounting（消费组 `accounting`） | `MAXLEN ~` 配置 | 流量增量，`partition = user_id % N`，N 全站固定（默认 64），字段见 design/10 §5.4 |
 | `u:<user_id>:live` | acct | HASH | pt-tracker（HINCRBY）、accounting（结算后扣减/重置） | accounting | 7 天无更新过期 | 实时原始计数 `up`、`down`、`seed_time` |
-| `ps:{<info_hash_hex>}` | tracker_state | HASH | pt-tracker | pt-tracker、accounting（只读：管理员查看同伴 IP，不落库） | `max_peer_timeout × 2`（每次写刷新） | 会话状态：field `<uid>:<peer_id_hex>` → JSON（累计值、left、最近时间、是否完成、IP、端口）。`{}` 是真实的 Cluster 哈希标签（D20），同一种子的 `ps:` / `sw:` 键在同一 slot |
+| `ps:{<info_hash_hex>}` | tracker_state | HASH | pt-tracker | pt-tracker、tracker-bridge（只读：`ctx.tracker.peers`，IP 只交给获授 `peer.ip` 的调用方，不落库） | `max_peer_timeout × 2`（每次写刷新） | 会话状态：field `<uid>:<peer_id_hex>` → JSON（累计值、left、最近时间、是否完成、IP、端口）。`{}` 是真实的 Cluster 哈希标签（D20），同一种子的 `ps:` / `sw:` 键在同一 slot |
 | `sw:{<info_hash_hex>}:s` / `sw:{<info_hash_hex>}:l` | tracker_state | ZSET | pt-tracker | pt-tracker | 同上 | 做种者 / 下载者：member 同上，score 为最近 announce 时间；超时成员在 announce 脚本中清理 |
 | `sw:{<info_hash_hex>}:n` | tracker_state | STRING(计数器) | pt-tracker | pt-tracker | 同上 | 完成次数（scrape 的 downloaded） |
 | `trk:pk:<passkey>` | tracker_sync | HASH | tracker-bridge | pt-tracker | 无（随用户生命周期删除） | `uid`、`st`、`ver` |
@@ -36,7 +36,9 @@
 | `trk:sync` | tracker_sync | STREAM | tracker-bridge | pt-tracker | `MAXLEN ~ 1000000` | 变更流 |
 | `trk:u:<user_id>` | tracker_sync | STRING | tracker-bridge | tracker-bridge | 无 | 用户当前 passkey（反向索引：换 passkey 时删除旧的 `trk:pk:*`） |
 | `trk:ver` | tracker_sync | STRING(计数器) | tracker-bridge | tracker-bridge | 无 | 快照与变更流的 `ver` 来源（INCR，单调递增） |
-| `trk:stats:*` | tracker_sync | — | 预留 | — | — | 预留给 pt-tracker 汇总数据（design/10 §5.7 scrape 汇总） |
+| `trk:stats:node:<node_id>` | tracker_sync | HASH | pt-tracker | tracker-bridge | 30 s，每 10 s 续写 | 节点状态：`ver`、`boot`、`sid`、`lag_ms`、`pk`、`t`、`mpt`、`rps`、`ts`（pt-tracker README） |
+| `trk:stats:denied:<yyyymmdd>` | tracker_sync | ZSET | pt-tracker | tracker-bridge | 8 天 | 被拒客户端（UTC 日期）：member `<peer_id 前 8 字节转义>|<UA 前 32 字节>`，score 次数；超过 1 万个 member 后计入 `~overflow|` |
+| `trk:stats:*`（其余） | tracker_sync | — | 预留 | — | — | 预留给 pt-tracker 汇总数据（design/10 §5.7 scrape 汇总） |
 | `ev:<event_type>:<partition>` | main | STREAM | 内核 outbox 中继 | 内核事件消费者 | `MAXLEN ~` 按事件配置（默认 1,000,000） | 领域事件流 |
 | `evr:<replay_id>` | main | STREAM | 内核回放器 | 指定订阅 | 回放结束后 24 h | 回放流 |
 | `evdlq:<plugin_id>:<subscription>` | main | STREAM | 内核 | 管理后台 | `MAXLEN ~ 100000` | 死信（同时写入 PG `kernel.event_dead_letter`） |

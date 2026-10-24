@@ -29,7 +29,7 @@ async fn redis() -> redis::aio::MultiplexedConnection {
 }
 
 /// 模拟 pt-tracker 写入一条记账流（`ip` 为 announce 的来源地址）
-async fn announce(uid: u64, tid: u64, peer: u8, ip: &str, eid: &str) {
+async fn announce(uid: u64, tid: u64, peer: u8, ip: &str, eid: &str, dup: u64) {
     let _: String = redis::cmd("XADD")
         .arg(format!("acct:{}", uid % 2))
         .arg("*")
@@ -47,7 +47,7 @@ async fn announce(uid: u64, tid: u64, peer: u8, ip: &str, eid: &str) {
             ("up", "0".into()),
             ("down", "0".into()),
             ("left", "0".into()),
-            ("dup", "0".into()),
+            ("dup", dup.to_string()),
             ("ddown", "0".into()),
             ("dseed", "30".into()),
             ("dleech", "0".into()),
@@ -113,7 +113,7 @@ async fn seedbox_registry_and_peer_marking() {
     let box_id = r.body["id"].as_i64().unwrap();
 
     // 审核前：不标记
-    announce(alice.id, 5, 1, "198.51.100.20", "s:1:1").await;
+    announce(alice.id, 5, 1, "198.51.100.20", "s:1:1", 0).await;
     assert_eq!(peers(alice.id, 1).await, vec![(1, false)]);
 
     // 普通用户不能审核；版主批准
@@ -128,9 +128,10 @@ async fn seedbox_registry_and_peer_marking() {
 
     // 批准后（accounting 每分钟重载网段，测试中等待重载）：盒子网段内的 peer 标记，家宽不标记
     tokio::time::sleep(std::time::Duration::from_secs(61)).await;
-    announce(alice.id, 6, 2, "198.51.100.99", "s:1:2").await;
-    announce(alice.id, 6, 3, "203.0.113.5", "s:1:3").await;
-    announce(alice.id, 7, 4, "2001:db8:7:1::9", "s:1:4").await;
+    // 家宽 peer 3（种子 6）与盒子 peer 4（种子 7）各上传 200 MiB 且无下载者 → peer_not_in_swarm 信号
+    announce(alice.id, 6, 2, "198.51.100.99", "s:1:2", 0).await;
+    announce(alice.id, 6, 3, "203.0.113.5", "s:1:3", 200 << 20).await;
+    announce(alice.id, 7, 4, "2001:db8:7:1::9", "s:1:4", 200 << 20).await;
     let got = peers(alice.id, 4).await;
     assert_eq!(got, vec![(1, false), (2, true), (3, false), (4, true)], "{got:?}");
     let swarm: Vec<(i64, bool)> = sqlx::query_as("SELECT torrent_id, is_seedbox FROM accounting.v_swarm_peers WHERE user_id = $1 ORDER BY torrent_id, is_seedbox")
@@ -141,6 +142,21 @@ async fn seedbox_registry_and_peer_marking() {
     assert!(swarm.contains(&(6, true)) && swarm.contains(&(7, true)), "{swarm:?}");
     let r = call(&app, "GET", "/api/p/seedbox/v1/boxes", None, &hv(&alice.headers())).await;
     assert_eq!(r.body["items"][0]["state"], "approved", "{:?}", r.body);
+    // 信号 details 带盒子标记（供 anticheat 的 ctx.is_seedbox 降权），不含 IP
+    let sigs: Vec<(i64, Value)> = sqlx::query_as(
+        "SELECT torrent_id, details FROM accounting.signals WHERE user_id = $1 AND signal = 'peer_not_in_swarm' ORDER BY torrent_id",
+    )
+    .bind(i64::try_from(alice.id).unwrap())
+    .fetch_all(&mut db().await)
+    .await
+    .unwrap();
+    assert_eq!(sigs.len(), 2, "{sigs:?}");
+    assert_eq!((sigs[0].0, sigs[0].1.get("seedbox")), (6, None), "{sigs:?}");
+    assert_eq!((sigs[1].0, &sigs[1].1["seedbox"]), (7, &json!(true)), "{sigs:?}");
+    assert!(
+        !sigs[1].1.to_string().contains("2001:db8"),
+        "IP must not be stored"
+    );
 
     // 删除登记：网段立即删除
     let r = call(&app, "DELETE", &format!("/api/p/seedbox/v1/boxes/{box_id}"), None, &hv(&alice.headers())).await;

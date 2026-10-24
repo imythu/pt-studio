@@ -84,6 +84,13 @@ pub async fn reset() {
         "postgres://postgres@127.0.0.1:55432/pt_test",
     );
     let mut c = PgConnection::connect(&su).await.unwrap();
+    // 上一个内核 drop 后，其后台任务（结算、快照等）可能仍在查询，与 DROP SCHEMA 死锁：先断开测试库的其他连接
+    sqlx::query(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()",
+    )
+    .execute(&mut c)
+    .await
+    .unwrap();
     // 删除测试库中全部非系统 schema 与插件角色
     let schemas: Vec<String> = sqlx::query_scalar(
         "SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' AND nspname NOT IN ('public', 'information_schema')",
@@ -331,6 +338,10 @@ pub async fn mock_tmdb(hits: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> 
                     if !auth(&q) {
                         return (axum::http::StatusCode::UNAUTHORIZED, "{}").into_response();
                     }
+                    // 500：上游故障（重试与熔断）
+                    if id == 500 {
+                        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, "{}").into_response();
+                    }
                     if id != 603 {
                         return (axum::http::StatusCode::NOT_FOUND, "{}").into_response();
                     }
@@ -339,7 +350,8 @@ pub async fn mock_tmdb(hits: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> 
                         "id": 603, "title": if zh { "黑客帝国" } else { "The Matrix" }, "original_title": "The Matrix",
                         "release_date": "1999-03-30", "imdb_id": "tt0133093", "runtime": 136, "vote_average": 8.2, "vote_count": 25000,
                         "genres": [{ "id": 28 }, { "id": 878 }], "production_countries": [{ "iso_3166_1": "US" }], "original_language": "en",
-                        "overview": "一名黑客发现了世界的真相。", "poster_path": "/matrix.jpg",
+                        "overview": "一名黑客发现了世界的真相。", "poster_path": "/matrix.jpg", "backdrop_path": "/matrix_bg.jpg",
+                        "translations": { "translations": [{ "iso_639_1": "zh", "iso_3166_1": "TW", "data": { "title": "駭客任務" } }] },
                         "credits": { "crew": [{ "job": "Director", "name": "Lana Wachowski" }], "cast": [{ "name": "Keanu Reeves" }] },
                         "external_ids": { "imdb_id": "tt0133093" },
                     }))
@@ -381,6 +393,12 @@ pub async fn mock_tmdb(hits: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> 
                 axum::Json(serde_json::json!({ "results": if q.get("query").map(String::as_str) == Some("matrix") {
                     serde_json::json!([{ "id": 603, "title": "黑客帝国", "original_title": "The Matrix", "release_date": "1999-03-30", "poster_path": "/matrix.jpg" }])
                 } else { serde_json::json!([]) } }))
+            }),
+        )
+        .route(
+            "/t/p/w1280/{file}",
+            axum::routing::get(|axum::extract::Path(file): axum::extract::Path<String>| async move {
+                if file == "matrix_bg.jpg" { ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], JPEG).into_response() } else { axum::http::StatusCode::NOT_FOUND.into_response() }
             }),
         )
         .route(

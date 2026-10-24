@@ -10,6 +10,7 @@ import { TermsProvider, useTranslator } from '@pt-studio/terms';
 import { ToastHost, useToast } from '@pt-studio/ui-kit';
 import { ManifestCtx } from './manifest';
 import { applyTheme, preloadTheme } from './theme';
+import { ReauthHost } from './reauth';
 import { router } from './router';
 import { SessionProvider, useSession } from './session';
 
@@ -49,6 +50,7 @@ function Host({ manifest }: { manifest: FrontendManifest }) {
   return (
     <SlotsProvider host={host}>
       <RouterProvider router={router} />
+      <ReauthHost />
     </SlotsProvider>
   );
 }

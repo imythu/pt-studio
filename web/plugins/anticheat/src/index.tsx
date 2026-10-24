@@ -10,6 +10,15 @@ const zh: Record<string, string> = {
   'anticheat.ui.queue': '复核队列',
   'anticheat.ui.appeals': '申诉',
   'anticheat.ui.watchlist': '观察名单',
+  'anticheat.ui.torrent_view': '种子',
+  'anticheat.ui.torrents_hint': '交叉校验发现 swarm 上传明显多于下载的种子（基线确认之后的异常）。超额按小时去重累计，被归因用户按次数排序。',
+  'anticheat.ui.mismatch_hours': '异常小时',
+  'anticheat.ui.excess': '超额上传',
+  'anticheat.ui.attributed': '被归因用户',
+  'anticheat.ui.last_at': '最近',
+  'anticheat.ui.baseline': '确认基线',
+  'anticheat.ui.baseline_hint': '确认已复核此种子：之前的异常不再计入种子视角，之后的异常重新计数。不影响用户证据与评分。',
+  'anticheat.ui.baseline_note': '备注（可选）',
   'anticheat.ui.rulesets': '规则集',
   'anticheat.ui.stats': '规则统计',
   'anticheat.ui.user': '用户',
@@ -137,6 +146,15 @@ registerMessages('en', {
   'anticheat.ui.queue': 'Review queue',
   'anticheat.ui.appeals': 'Appeals',
   'anticheat.ui.watchlist': 'Watchlist',
+  'anticheat.ui.torrent_view': 'Torrents',
+  'anticheat.ui.torrents_hint': 'Torrents where cross-checks found swarm upload well above download (since the last confirmed baseline). Excess is summed once per hour; attributed users are ordered by hits.',
+  'anticheat.ui.mismatch_hours': 'Mismatch hours',
+  'anticheat.ui.excess': 'Excess upload',
+  'anticheat.ui.attributed': 'Attributed users',
+  'anticheat.ui.last_at': 'Latest',
+  'anticheat.ui.baseline': 'Confirm baseline',
+  'anticheat.ui.baseline_hint': 'Mark this torrent as reviewed: earlier mismatches stop counting here and later ones are counted afresh. User evidence and scores are not affected.',
+  'anticheat.ui.baseline_note': 'Note (optional)',
   'anticheat.ui.rulesets': 'Rulesets',
   'anticheat.ui.stats': 'Rule stats',
   'anticheat.ui.my_cases': 'My cases',
@@ -171,7 +189,7 @@ registerMessages('en', {
   'anticheat.transfer_blocked': 'Your account is under review; transfers are temporarily disabled',
 });
 
-const KINDS = ['warn', 'freeze_traffic', 'lock_wallet', 'adjust_traffic', 'disable_download', 'ban'] as const;
+const KINDS = ['warn', 'freeze_traffic', 'lock_wallet', 'adjust_traffic', 'reset_passkey', 'disable_download', 'ban'] as const;
 const BASE = '/api/p/anticheat/v1' as const;
 
 function errText(api: PluginApi, e: unknown): string {
@@ -489,7 +507,7 @@ function Decide({ api, c, open, onClose, done }: { api: PluginApi; c: CaseDetail
               return (
                 <div key={k} className="form-acts">
                   <Checkbox checked={v.on} onChange={(on) => set({ on })} label={kindLabel(api, k)} />
-                  {v.on && k !== 'adjust_traffic' && k !== 'lock_wallet' && (
+                  {v.on && k !== 'adjust_traffic' && k !== 'lock_wallet' && k !== 'reset_passkey' && (
                     <Input type="number" min={1} max={3650} placeholder={api.t('anticheat.ui.days')} value={v.days} onChange={(e) => set({ days: e.target.value })} aria-label={api.t('anticheat.ui.days')} />
                   )}
                   {v.on && k === 'adjust_traffic' && (
@@ -980,6 +998,121 @@ function Watchlist({ api }: { api: PluginApi }) {
   );
 }
 
+interface SuspiciousTorrent {
+  torrent: { id: number; title: string | null };
+  mismatch_hours: number;
+  excess_bytes: number;
+  last_at: string;
+  baseline_at: string | null;
+  user_count: number;
+  users: { id: number; username: string | null; hits: number; uploaded: number }[];
+}
+
+/** 种子视角（FR-ACH-042）：被刷种子与被归因用户，复核后确认基线 */
+function Torrents({ api }: { api: PluginApi }) {
+  const [days, setDays] = useState('30');
+  const [d, , reload] = useLoad<{ items: SuspiciousTorrent[] }>(api, `${BASE}/admin/torrents/suspicious?days=${days}`);
+  const [confirm, setConfirm] = useState<SuspiciousTorrent | null>(null);
+  const [note, setNote] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  async function submit() {
+    if (!confirm) return;
+    setMsg(null);
+    try {
+      await api.json(`${BASE}/admin/torrents/${confirm.torrent.id}/baselines`, { method: 'POST', json: note.trim() ? { note: note.trim() } : {}, idempotent: true });
+      setConfirm(null);
+      setNote('');
+      reload();
+    } catch (e) {
+      setMsg(errText(api, e));
+    }
+  }
+  return (
+    <div className="stack-s">
+      <div className="row">
+        <span className="small muted">{api.t('anticheat.ui.torrents_hint')}</span>
+        <Segmented label={api.t('anticheat.ui.days')} value={days} onChange={setDays} options={['7', '30', '90'].map((v) => ({ value: v, label: `${v}d` }))} />
+      </div>
+      {!d ? (
+        <SkeletonRows n={4} />
+      ) : (
+        <Table
+          rows={d.items}
+          rowKey={(r) => r.torrent.id}
+          empty={api.t('anticheat.ui.none')}
+          minWidth={820}
+          columns={[
+            {
+              key: 't',
+              header: api.t('anticheat.ui.torrent'),
+              render: (r) => (
+                <Link api={api} to={`/torrents/${r.torrent.id}`}>
+                  {r.torrent.title ?? `#${r.torrent.id}`}
+                </Link>
+              ),
+            },
+            { key: 'h', header: api.t('anticheat.ui.mismatch_hours'), right: true, render: (r) => <b className="num">{r.mismatch_hours}</b> },
+            { key: 'x', header: api.t('anticheat.ui.excess'), right: true, render: (r) => <span className="num">{bytes(r.excess_bytes)}</span> },
+            {
+              key: 'u',
+              header: api.t('anticheat.ui.attributed'),
+              render: (r) => (
+                <span className="small">
+                  {r.users.slice(0, 5).map((u, i) => (
+                    <Fragment key={u.id}>
+                      {i > 0 && '、'}
+                      <Link api={api} to={`/admin/users/${u.id}`}>
+                        {u.username ?? `#${u.id}`}
+                      </Link>
+                      <span className="muted num"> ×{u.hits}</span>
+                    </Fragment>
+                  ))}
+                  {r.user_count > 5 && <span className="muted"> +{r.user_count - 5}</span>}
+                </span>
+              ),
+            },
+            { key: 'l', header: api.t('anticheat.ui.last_at'), render: (r) => <span className="small muted">{when(r.last_at)}</span> },
+            {
+              key: 'a',
+              header: '',
+              right: true,
+              render: (r) => (
+                <Button size="sm" onClick={() => setConfirm(r)}>
+                  {api.t('anticheat.ui.baseline')}
+                </Button>
+              ),
+            },
+          ]}
+        />
+      )}
+      <Sheet
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        title={api.t('anticheat.ui.baseline')}
+        width={480}
+        footer={
+          <Foot api={api} onCancel={() => setConfirm(null)}>
+            <Button variant="primary" onClick={() => void submit()}>
+              {api.t('anticheat.ui.submit')}
+            </Button>
+          </Foot>
+        }
+      >
+        <div className="form">
+          <p>
+            <b>{confirm?.torrent.title ?? `#${confirm?.torrent.id ?? ''}`}</b>
+          </p>
+          <Note tone="info">{api.t('anticheat.ui.baseline_hint')}</Note>
+          <Field label={api.t('anticheat.ui.baseline_note')}>
+            <Textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+          {msg && <Note tone="bad">{msg}</Note>}
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
 function Stats({ api }: { api: PluginApi }) {
   const [d] = useLoad<{
     items: { rule_id: string; hits: number; cases_opened: number; confirmed: number; dismissed: number; overturned: number; precision: number | null; low_precision: boolean }[];
@@ -1186,7 +1319,7 @@ function RulesetEditor({ api, version }: { api: PluginApi; version: number }) {
   );
 }
 
-const ADMIN_TABS = ['queue', 'appeals', 'watchlist', 'rulesets', 'stats'];
+const ADMIN_TABS = ['queue', 'appeals', 'watchlist', 'torrent_view', 'rulesets', 'stats'];
 
 function AdminHome({ api }: { api: PluginApi }) {
   const initial = new URLSearchParams(window.location.search).get('tab') ?? 'queue';
@@ -1216,6 +1349,7 @@ function AdminHome({ api }: { api: PluginApi }) {
         {tab === 'queue' && <Queue api={api} />}
         {tab === 'appeals' && <Appeals api={api} />}
         {tab === 'watchlist' && <Watchlist api={api} />}
+        {tab === 'torrent_view' && <Torrents api={api} />}
         {tab === 'rulesets' && <Rulesets api={api} />}
         {tab === 'stats' && <Stats api={api} />}
       </Panel>

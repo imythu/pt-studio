@@ -163,6 +163,20 @@ impl on_event::Guest for TypeMovie {
     }
 }
 
+/// `Ok(None)`：元数据源未安装 / 未配置 / 未启用或无结果（不重试）
+fn lookup(source: &str, external: &str, locale: &str) -> Result<Option<Value>, PluginError> {
+    match svc(
+        "ctx.metadata",
+        "lookup",
+        &json!({ "source": source, "external_id": external, "locale": locale }),
+    ) {
+        Ok(r) if r.is_null() => Ok(None),
+        Ok(r) => Ok(Some(r["data"].clone())),
+        Err(e) if !e.retryable => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 impl on_cron::Guest for TypeMovie {
     fn run(job: on_cron::JobInvocation) -> Result<(), PluginError> {
         if job.name != "fetch_metadata" {
@@ -173,26 +187,24 @@ impl on_cron::Guest for TypeMovie {
         let g = svc("ctx.torrents", "get_group", &json!({ "id": gid }))?;
         let f = &g["fields"];
         let external = match (f["tmdb_id"].as_u64(), f["imdb_id"].as_str()) {
-            (Some(t), _) => format!("movie:{t}"),
-            (None, Some(i)) => format!("imdb:{i}"),
-            _ => return Ok(()),
+            (Some(t), _) => Some(format!("movie:{t}")),
+            (None, Some(i)) => Some(format!("imdb:{i}")),
+            _ => None,
         };
         let settings: Value = serde_json::from_str(&config::get_settings()).unwrap_or(Value::Null);
         let locale = settings["metadata_locale"].as_str().unwrap_or("zh-CN").to_owned();
-        let r = match svc(
-            "ctx.metadata",
-            "lookup",
-            &json!({ "source": "tmdb", "external_id": external, "locale": locale }),
-        ) {
-            Ok(r) => r,
-            // 未安装 / 未配置元数据源：不重试
-            Err(e) if !e.retryable => return Ok(()),
-            Err(e) => return Err(e),
+        // TMDB 优先；没有 TMDB / IMDb 编号、TMDB 未配置或查无结果时用豆瓣
+        let mut data = match &external {
+            Some(e) => lookup("tmdb", e, &locale)?,
+            None => None,
         };
-        if r.is_null() {
-            return Ok(());
+        if data.is_none()
+            && let Some(d) = f["douban_id"].as_str()
+        {
+            data = lookup("douban", d, "zh-CN")?;
         }
-        let patch = movie::metadata_patch(&r["data"], &locale);
+        let Some(data) = data else { return Ok(()) };
+        let patch = movie::metadata_patch(&data, &locale);
         svc(
             "ctx.torrents",
             "update_group",

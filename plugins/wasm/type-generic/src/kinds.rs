@@ -479,6 +479,7 @@ pub fn presets() -> Vec<KindDef> {
           { "key": "title", "type": "string", "required": true, "max_len": 300, "group_level": true, "search": "searchable", "label_zh": "书名", "label_en": "Title" },
           { "key": "authors", "type": "string", "max_len": 200, "group_level": true, "search": "searchable", "label_zh": "作者", "label_en": "Authors" },
           { "key": "isbn", "type": "string", "max_len": 17, "group_level": true, "search": "exact", "label_en": "ISBN" },
+          { "key": "douban_id", "type": "external_id", "source": "douban", "group_level": true, "search": "exact", "label_zh": "豆瓣", "label_en": "Douban" },
           { "key": "format", "type": "multi_enum", "filter": "facet", "label_zh": "格式", "label_en": "Format",
             "options": [ { "value": "epub" }, { "value": "pdf" }, { "value": "mobi" }, { "value": "azw3" }, { "value": "djvu" }, { "value": "cbz" } ] },
           { "key": "language", "type": "enum", "filter": "facet", "label_zh": "语言", "label_en": "Language",
@@ -505,9 +506,132 @@ pub fn presets() -> Vec<KindDef> {
     serde_json::from_value(v).unwrap_or_default()
 }
 
+/// 预设发布后新增的字段：已安装站点在 `init` 时补进对应的预设 kind（缺少时追加）
+pub const ADDED_PRESET_FIELDS: &[(&str, &str)] = &[("ebook", "douban_id")];
+
+/// 把 `ADDED_PRESET_FIELDS` 中缺少的字段补进已存的预设定义；有变化时返回新定义
+pub fn upgrade_preset(stored: &KindDef) -> Option<KindDef> {
+    let preset = presets().into_iter().find(|p| p.kind == stored.kind)?;
+    let mut d = stored.clone();
+    for (_, key) in ADDED_PRESET_FIELDS.iter().filter(|(k, _)| *k == stored.kind) {
+        if !d.fields.iter().any(|f| f.key == *key)
+            && let Some(f) = preset.fields.iter().find(|f| f.key == *key)
+        {
+            d.fields.push(f.clone());
+        }
+    }
+    (d.fields.len() != stored.fields.len()).then_some(d)
+}
+
+/// 电子书在豆瓣图书的查询键：豆瓣编号（纯数字按图书处理）优先，其次 ISBN
+pub fn book_lookup_key(fields: &Value) -> Option<String> {
+    if fields["kind"] != "ebook" {
+        return None;
+    }
+    let s = |k: &str| fields[k].as_str().map(str::trim).filter(|x| !x.is_empty());
+    if let Some(d) = s("douban_id") {
+        return Some(if d.bytes().all(|b| b.is_ascii_digit()) {
+            format!("book:{d}")
+        } else {
+            d.to_owned()
+        });
+    }
+    let isbn: String = s("isbn")?.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    matches!(isbn.len(), 10 | 13).then(|| format!("isbn:{isbn}"))
+}
+
+/// 豆瓣图书（统一模型，`kind = book`）→ Group 补丁；不是图书时为 None
+pub fn book_patch(data: &Value) -> Option<Value> {
+    if data["kind"] != "book" {
+        return None;
+    }
+    let mut p = Map::new();
+    let mut put = |k: &str, v: Option<Value>| {
+        if let Some(v) = v.filter(|v| !v.is_null()) {
+            p.insert(k.into(), v);
+        }
+    };
+    put("poster", data["images"]["poster"].as_str().map(|x| json!(x)));
+    put(
+        "overview",
+        data["overview"]["zh-CN"]
+            .as_str()
+            .filter(|x| !x.is_empty())
+            .map(|x| json!(x)),
+    );
+    put(
+        "rating",
+        data["ratings"]["douban"]["value"].as_f64().map(|x| json!(x)),
+    );
+    put("douban_id", data["ids"]["douban"].as_str().map(|x| json!(x)));
+    put("isbn", data["ids"]["isbn"].as_str().map(|x| json!(x)));
+    put(
+        "original_title",
+        data["titles"]["original"].as_str().map(|x| json!(x)),
+    );
+    let e = &data["extra"];
+    put(
+        "authors",
+        e["authors"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+            .map(|a| json!(a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" / "))),
+    );
+    for k in ["translators", "publisher", "pages", "series"] {
+        put(
+            k,
+            Some(e[k].clone()).filter(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty())),
+        );
+    }
+    Some(Value::Object(p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn book_metadata() {
+        assert_eq!(
+            book_lookup_key(&json!({ "kind": "ebook", "douban_id": "6082808", "isbn": "9787544253994" }))
+                .as_deref(),
+            Some("book:6082808")
+        );
+        assert_eq!(
+            book_lookup_key(
+                &json!({ "kind": "ebook", "douban_id": "https://book.douban.com/subject/6082808/" })
+            )
+            .as_deref(),
+            Some("https://book.douban.com/subject/6082808/")
+        );
+        assert_eq!(
+            book_lookup_key(&json!({ "kind": "ebook", "isbn": "978-7-5442-5399-4" })).as_deref(),
+            Some("isbn:9787544253994")
+        );
+        assert!(book_lookup_key(&json!({ "kind": "ebook", "title": "x" })).is_none());
+        assert!(book_lookup_key(&json!({ "kind": "game", "isbn": "9787544253994" })).is_none());
+        let d = json!({ "kind": "book", "titles": { "original": "Cien años de soledad" }, "ids": { "douban": "6082808", "isbn": "9787544253994" },
+                        "images": { "poster": "/media/metadata-douban/images/a.jpg" }, "overview": { "zh-CN": "简介" },
+                        "ratings": { "douban": { "value": 9.3, "votes": 1 } },
+                        "extra": { "authors": ["甲", "乙"], "translators": [], "publisher": "某出版社", "pages": 360, "series": null } });
+        assert_eq!(
+            book_patch(&d),
+            Some(
+                json!({ "poster": "/media/metadata-douban/images/a.jpg", "overview": "简介", "rating": 9.3, "douban_id": "6082808",
+                         "isbn": "9787544253994", "original_title": "Cien años de soledad", "authors": "甲 / 乙", "publisher": "某出版社", "pages": 360 })
+            )
+        );
+        assert!(book_patch(&json!({ "kind": "movie" })).is_none());
+        // 已安装站点的预设 ebook 补上 douban_id；已有时不变
+        let mut old = presets()
+            .into_iter()
+            .find(|p| p.kind == "ebook")
+            .unwrap_or_else(|| unreachable!());
+        assert!(upgrade_preset(&old).is_none());
+        old.fields.retain(|f| f.key != "douban_id");
+        let up = upgrade_preset(&old).unwrap_or_else(|| unreachable!());
+        assert_eq!(up.fields.last().map(|f| f.key.as_str()), Some("douban_id"));
+    }
 
     #[test]
     fn presets_validate_and_compile() {

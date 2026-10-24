@@ -267,12 +267,6 @@ pub fn resolve(case_id: i64, d: &Decision, actor: i64) -> R<Value> {
                         "protected users cannot receive this sanction",
                     ));
                 }
-                if act.kind == "reset_passkey" {
-                    return Err(err(
-                        "anticheat.action_unavailable",
-                        "passkey reset is not available",
-                    ));
-                }
                 if act.kind == "lock_wallet" && db::call("ctx.ledger", "currencies", &json!({})).is_err() {
                     return Err(err("anticheat.action_unavailable", "ledger is not available"));
                 }

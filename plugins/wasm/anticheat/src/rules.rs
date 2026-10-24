@@ -422,6 +422,14 @@ fn path_value(path: &str, e: Option<&Evidence>, ctx: &Ctx) -> Option<Value> {
     }
 }
 
+/// 证据 details 中带 `seedbox: true`（产生时来自盒子网段）的种子
+pub fn seedbox_from_evidence(ev: &[Evidence]) -> BTreeSet<i64> {
+    ev.iter()
+        .filter(|e| e.details["seedbox"] == json!(true))
+        .filter_map(|e| e.torrent_id)
+        .collect()
+}
+
 fn num(v: &Value) -> Option<f64> {
     v.as_f64()
 }
@@ -1456,6 +1464,26 @@ mod tests {
             false,
         );
         assert_eq!(boxed.score, 4);
+        // 证据 details 带 seedbox 标记时，同一种子的证据都按盒子计
+        let flagged = [
+            ev(
+                1,
+                "speed_exceeded",
+                Sev::Medium,
+                1,
+                json!({ "seedbox": true }),
+                0.0,
+            ),
+            ev(
+                2,
+                "speed_exceeded",
+                Sev::Medium,
+                3,
+                json!({ "seedbox": false }),
+                0.0,
+            ),
+        ];
+        assert_eq!(seedbox_from_evidence(&flagged), BTreeSet::from([1]));
         // 单种子上限 16、规则上限 24
         let many: Vec<Evidence> = (0..10)
             .map(|i| ev(i, "speed_exceeded", Sev::Medium, i % 2, json!({}), 0.0))

@@ -136,6 +136,7 @@ pub fn enqueue_for(sanction_id: i64, user: i64, kind: &str, params: &Value) -> R
             "adjust",
             &json!({ "up_bytes": params["up_bytes"] }),
         )?,
+        "reset_passkey" => enqueue(user, Some(sanction_id), None, "passkey_reset", &json!({}))?,
         _ => {}
     }
     Ok(())
@@ -455,6 +456,7 @@ fn kind_text(kind: &str) -> &'static str {
         "disable_download" => "禁止下载",
         "ban" => "封禁",
         "adjust_traffic" => "回收虚报流量",
+        "reset_passkey" => "重置 passkey（旧种子文件失效，请重新下载）",
         _ => "处置",
     }
 }
@@ -546,10 +548,14 @@ fn exec_op(id: i64, user: i64, op: &str, p: &Value, sanction: Option<i64>) -> R<
             let _ = sanction;
             Ok(json!({ "applied_up": r["applied_up"], "adjustment_id": r["adjustment_id"] }))
         }
-        "passkey_reset" => Err(err(
-            "anticheat.action_unavailable",
-            "passkey reset is not available",
-        )),
+        "passkey_reset" => {
+            let r = db::call(
+                "ctx.users",
+                "reset_passkey",
+                &json!({ "user": user, "idempotency_key": idem }),
+            )?;
+            Ok(json!({ "version": r["version"] }))
+        }
         _ => Err(err("kernel.internal", "unknown op")),
     }
 }
@@ -568,7 +574,7 @@ pub fn run_ops(user: i64) -> R<()> {
                     "UPDATE effect_ops SET state = 'done', result = $2, done_at = now(), last_error = NULL WHERE id = $1",
                     &[i(id), j(&v)],
                 )?;
-                if matches!(op.as_str(), "warn_notice" | "adjust")
+                if matches!(op.as_str(), "warn_notice" | "adjust" | "passkey_reset")
                     && let Some(s) = sid
                 {
                     let act = q(
@@ -581,6 +587,15 @@ pub fn run_ops(user: i64) -> R<()> {
                     )?;
                     for a in &act {
                         sanction_changed(s, user, a.on(1), &a.s(0), "applied", a.on(2))?;
+                        if op == "passkey_reset" {
+                            enqueue(
+                                user,
+                                Some(s),
+                                None,
+                                "sanction_notice",
+                                &json!({ "kind": "reset_passkey", "case_id": a.on(1) }),
+                            )?;
+                        }
                     }
                 }
             }

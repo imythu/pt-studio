@@ -673,9 +673,52 @@ pub fn check_files(f: &Value, files: &[(String, u64)]) -> Result<(), (&'static s
     Ok(())
 }
 
+/// MusicBrainz 发行组（统一模型）→ Group 补丁：封面、流派；原始年份与发行类型只在 Group 还没有时补上
+pub fn metadata_patch(data: &Value, group: &Value) -> Value {
+    let mut p = Map::new();
+    if data["kind"] != "music_release_group" {
+        return Value::Object(p);
+    }
+    if let Some(c) = data["images"]["cover"].as_str() {
+        p.insert("cover".into(), json!(c));
+        p.insert("poster".into(), json!(c));
+    }
+    if let Some(g) = data["genres"].as_array().filter(|g| !g.is_empty()) {
+        p.insert("genres".into(), json!(g));
+    }
+    if group["original_year"].is_null()
+        && let Some(y) = data["year"].as_i64()
+    {
+        p.insert("original_year".into(), json!(y));
+    }
+    if group["release_type"].is_null()
+        && let Some(t) = data["extra"]["release_type"]
+            .as_str()
+            .filter(|t| RELEASE_TYPES.contains(t))
+    {
+        p.insert("release_type".into(), json!(t));
+    }
+    Value::Object(p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn musicbrainz_patch() {
+        let d = json!({ "kind": "music_release_group", "year": 1997, "genres": ["alternative rock"],
+                        "images": { "cover": "/media/metadata-musicbrainz/images/a.jpg" }, "extra": { "release_type": "album" } });
+        assert_eq!(
+            metadata_patch(&d, &json!({ "original_year": 1998 })),
+            json!({ "cover": "/media/metadata-musicbrainz/images/a.jpg", "poster": "/media/metadata-musicbrainz/images/a.jpg",
+                    "genres": ["alternative rock"], "release_type": "album" })
+        );
+        assert_eq!(
+            metadata_patch(&json!({ "kind": "artist" }), &json!({})),
+            json!({})
+        );
+    }
 
     #[test]
     fn from_release_name() {

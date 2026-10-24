@@ -30,6 +30,62 @@ pub struct SignalCfg {
     pub cross_check_slack_bytes: u64,
     pub cross_check_top_k: i64,
     pub dedupe_secs: i64,
+    /// 客户端指纹检查（FR-ACC-019）：peer_id 前缀与 UA 不属同一客户端族、同一 peer 中途更换 UA 族时产生 `client_not_allowed`
+    pub client_fingerprint_check: bool,
+    /// 客户端族映射；配置后整体替换内置默认
+    pub client_families: Vec<ClientFamily>,
+}
+
+/// 客户端族：peer_id 前缀（如 `-qB`）与 User-Agent 前缀（如 `qBittorrent/`），均区分大小写的前缀匹配
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClientFamily {
+    pub family: String,
+    pub peer_id_prefixes: Vec<String>,
+    pub ua_prefixes: Vec<String>,
+}
+
+fn default_families() -> Vec<ClientFamily> {
+    [
+        ("qbittorrent", &["-qB"][..], &["qBittorrent"][..]),
+        ("transmission", &["-TR"], &["Transmission/"]),
+        ("deluge", &["-DE"], &["Deluge"]),
+        ("rtorrent", &["-lt"], &["rtorrent/"]),
+        ("libtorrent", &["-LT"], &["libtorrent/"]),
+        (
+            "utorrent",
+            &["-UT", "-UM"],
+            &["uTorrent/", "uTorrentMac/", "\u{b5}Torrent/"],
+        ),
+        ("bitcomet", &["-BC"], &["BitComet/"]),
+        ("biglybt", &["-BI"], &["BiglyBT/"]),
+        ("vuze", &["-AZ"], &["Azureus "]),
+    ]
+    .iter()
+    .map(|(f, p, u)| ClientFamily {
+        family: (*f).into(),
+        peer_id_prefixes: p.iter().map(|s| (*s).into()).collect(),
+        ua_prefixes: u.iter().map(|s| (*s).into()).collect(),
+    })
+    .collect()
+}
+
+impl SignalCfg {
+    /// peer_id 前缀所属的客户端族
+    pub fn pid_family(&self, client_prefix: &str) -> Option<&ClientFamily> {
+        self.client_families.iter().find(|f| {
+            f.peer_id_prefixes
+                .iter()
+                .any(|p| client_prefix.starts_with(p.as_str()))
+        })
+    }
+
+    /// UA 所属的客户端族名；不认识的为 `other`
+    pub fn ua_family(&self, ua: &str) -> &str {
+        self.client_families
+            .iter()
+            .find(|f| f.ua_prefixes.iter().any(|p| ua.starts_with(p.as_str())))
+            .map_or("other", |f| f.family.as_str())
+    }
 }
 
 impl Default for SignalCfg {
@@ -44,6 +100,8 @@ impl Default for SignalCfg {
             cross_check_slack_bytes: 1 << 30,
             cross_check_top_k: 3,
             dedupe_secs: 86_400,
+            client_fingerprint_check: false,
+            client_families: default_families(),
         }
     }
 }
@@ -166,6 +224,17 @@ pub fn evaluate(e: &Entry, cfg: &SignalCfg, sw: &Swarm<'_>) -> Vec<Sig> {
             "counter_jump",
             Severity::Medium,
             json!({ "kind": "out_of_range" }),
+        ));
+    }
+    // 客户端指纹：peer_id 前缀认得出客户端族，但 UA 不属于该族（伪造 peer_id 或 UA）
+    if cfg.client_fingerprint_check
+        && let (Some(fam), Some(ua)) = (cfg.pid_family(&e.client), &e.ua)
+        && !fam.ua_prefixes.iter().any(|p| ua.starts_with(p.as_str()))
+    {
+        out.push(sig(
+            "client_not_allowed",
+            Severity::Medium,
+            json!({ "kind": "fingerprint_mismatch", "peer_id_prefix": e.client, "ua_family": cfg.ua_family(ua) }),
         ));
     }
     if let Some(&size) = sw.sizes.get(&e.tid).filter(|s| **s > 0) {
@@ -318,8 +387,17 @@ pub async fn record(
     Ok(published)
 }
 
-/// 微批的条目级信号：种子体积与活跃 leecher 各一次查询（peers 已在本事务中写入本批）
-pub async fn for_batch(ctx: &Ctx, c: &mut PgConnection, cfg: &SignalCfg, entries: &[Entry]) -> PResult<()> {
+/// 微批的条目级信号：种子体积与活跃 leecher 各一次查询（peers 已在本事务中写入本批）。
+/// 条目 IP 命中该用户已批准的盒子网段时，信号 details 记 `seedbox: true`（IP 本身不入 details），供 anticheat 降权。
+/// `prev_ua`：本批 peer 在库中的 UA 族（开启指纹检查时），同一 peer 的 UA 族变化产生 `fingerprint_changed`。
+pub async fn for_batch(
+    ctx: &Ctx,
+    c: &mut PgConnection,
+    cfg: &SignalCfg,
+    entries: &[Entry],
+    boxes: &crate::seedbox::Ranges,
+    prev_ua: &HashMap<(u64, u64, [u8; 20]), String>,
+) -> PResult<()> {
     if !cfg.enabled || entries.is_empty() {
         return Ok(());
     }
@@ -371,7 +449,37 @@ pub async fn for_batch(ctx: &Ctx, c: &mut PgConnection, cfg: &SignalCfg, entries
         sizes: &sizes,
         leechers: &leechers,
     };
-    let sigs: Vec<Sig> = entries.iter().flat_map(|e| evaluate(e, cfg, &sw)).collect();
+    let mut last_ua = prev_ua.clone();
+    let sigs: Vec<Sig> = entries
+        .iter()
+        .flat_map(|e| {
+            let mut s = evaluate(e, cfg, &sw);
+            if cfg.client_fingerprint_check
+                && let Some(ua) = &e.ua
+            {
+                let fam = cfg.ua_family(ua);
+                if let Some(old) = last_ua.insert((e.uid, e.tid, e.pid), fam.to_owned())
+                    && old != fam
+                {
+                    s.push(Sig {
+                        uid: e.uid,
+                        tid: e.tid,
+                        signal: "client_not_allowed",
+                        severity: Severity::Medium,
+                        details: json!({ "kind": "fingerprint_changed", "peer_id_prefix": e.client,
+                                         "ua_family": fam, "previous_ua_family": old }),
+                        at: e.ts,
+                    });
+                }
+            }
+            if e.ip.as_ref().is_some_and(|ip| boxes.contains(e.uid, ip)) {
+                for x in &mut s {
+                    x.details["seedbox"] = json!(true);
+                }
+            }
+            s
+        })
+        .collect();
     if sigs.is_empty() {
         return Ok(());
     }
@@ -599,6 +707,7 @@ mod tests {
             xdown: 0,
             out_of_range: false,
             ip: None,
+            ua: Some("qBittorrent/5.1.2".into()),
         }
     }
 
@@ -695,6 +804,50 @@ mod tests {
             )),
             [("peer_not_in_swarm", Severity::Low, "no_leechers".into())]
         );
+    }
+
+    #[test]
+    fn client_fingerprint() {
+        let mut cfg = SignalCfg::default();
+        let sizes = HashMap::new();
+        let leechers = HashSet::new();
+        let sw = Swarm {
+            sizes: &sizes,
+            leechers: &leechers,
+        };
+        let mut e = entry(1, 5);
+        e.ua = Some("Transmission/4.0.6".into());
+        // 默认关闭
+        assert!(evaluate(&e, &cfg, &sw).is_empty());
+        cfg.client_fingerprint_check = true;
+        let s = evaluate(&e, &cfg, &sw);
+        assert_eq!(
+            kinds(&s),
+            [(
+                "client_not_allowed",
+                Severity::Medium,
+                "fingerprint_mismatch".into()
+            )]
+        );
+        assert_eq!(s[0].details["peer_id_prefix"], "-qB5120-");
+        assert_eq!(s[0].details["ua_family"], "transmission");
+        assert!(
+            !s[0].details.to_string().contains("4.0.6"),
+            "UA text must not be stored"
+        );
+        // 同族、未知前缀、无 UA 都不报
+        e.ua = Some("qBittorrent/5.1.2".into());
+        assert!(evaluate(&e, &cfg, &sw).is_empty());
+        e.ua = Some("qBittorrent Enhanced/5.0.0".into());
+        assert!(evaluate(&e, &cfg, &sw).is_empty());
+        e.client = "-XX0100-".into();
+        e.ua = Some("Whatever/1.0".into());
+        assert!(evaluate(&e, &cfg, &sw).is_empty());
+        e.client = "-TR4060-".into();
+        e.ua = None;
+        assert!(evaluate(&e, &cfg, &sw).is_empty());
+        assert_eq!(cfg.ua_family("µTorrent/3.6"), "utorrent");
+        assert_eq!(cfg.ua_family("RatioMaster"), "other");
     }
 
     #[test]

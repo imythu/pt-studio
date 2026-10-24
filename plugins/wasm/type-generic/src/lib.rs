@@ -2,7 +2,9 @@
 //!
 //! 本版本实现：kind 定义（预设：游戏、软件、电子书、课程；后台新增 / 修改 / 停用）、编译为 JSON Schema（`info()` 为按 kind 判别的
 //! `oneOf`）、规范化（含旧值映射）、分组键、规范标题、`torrents` 索引的 `generic_kind` 与 `generic_<kind>_<field>` 字段。
-//! 文件规则钩子、去重、元数据绑定、词表管理接口在后续迭代实现。
+//! 电子书元数据：`group.created` / `torrent.created` → `fetch_metadata` 延迟任务 → 豆瓣图书（`douban_id` 或 ISBN）→
+//! `ctx.torrents.update_group`（封面、简介、评分、作者、出版社……）。
+//! 文件规则钩子、去重、词表管理接口在后续迭代实现。
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -12,11 +14,12 @@ pub mod kinds;
 
 use std::collections::BTreeMap;
 
-use exports::pt::plugin::{content_type, http_handler, lifecycle, search_contributor};
+use exports::pt::plugin::{content_type, http_handler, lifecycle, on_cron, on_event, search_contributor};
 use kinds::KindDef;
 use pt_plugin_sdk::{
-    config,
+    config, jobs, services,
     sql::{self, SqlValue},
+    time,
     types::PluginError,
 };
 use serde_json::{Value, json};
@@ -119,6 +122,16 @@ impl lifecycle::Guest for TypeGeneric {
         if sql::query("SELECT 1 FROM kinds LIMIT 1", &[])?.rows.is_empty() {
             for p in kinds::presets() {
                 upsert(&p, true)?;
+            }
+        }
+        let presets = sql::query("SELECT definition::text FROM kinds WHERE preset", &[])?;
+        for row in &presets.rows {
+            if let Some(d) = serde_json::from_str::<KindDef>(&text(&row[0]))
+                .ok()
+                .as_ref()
+                .and_then(kinds::upgrade_preset)
+            {
+                upsert(&d, true)?;
             }
         }
         Ok(())
@@ -351,6 +364,83 @@ impl http_handler::Guest for TypeGeneric {
             }
             _ => Err(err("kernel.not_found", "no such route", None)),
         }
+    }
+}
+
+// ---------------- 元数据联动（content-types-common §8）：电子书 ← 豆瓣图书 ----------------
+
+fn svc(service: &str, method: &str, args: &Value) -> R<Value> {
+    let out = services::call(service, method, &args.to_string())?;
+    serde_json::from_str(&out).map_err(|_| {
+        err(
+            "type-generic.bad_service_reply",
+            "invalid JSON from service",
+            None,
+        )
+    })
+}
+
+impl on_event::Guest for TypeGeneric {
+    fn handle(evt: on_event::EventEnvelope, _d: on_event::DeliveryInfo) -> R<()> {
+        let p: Value = serde_json::from_str(&evt.payload).unwrap_or(Value::Null);
+        let fresh_torrent = evt.event_type == "torrent.created" && p["group_id"].as_i64().is_some();
+        // kind 只在种子字段中，任务里再判断是否为电子书
+        if (evt.event_type == "group.created" || fresh_torrent) && p["type_id"] == "generic" {
+            let gid = p["group_id"].as_i64().unwrap_or(0);
+            jobs::schedule_once(
+                "fetch_metadata",
+                time::now(),
+                &json!({ "group_id": gid }).to_string(),
+                Some(&match p["torrent_id"].as_i64() {
+                    Some(tid) if fresh_torrent => format!("meta:{gid}:t{tid}"),
+                    _ => format!("meta:{gid}"),
+                }),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl on_cron::Guest for TypeGeneric {
+    fn run(job: on_cron::JobInvocation) -> R<()> {
+        if job.name != "fetch_metadata" {
+            return Err(err("kernel.not_found", "unknown job", None));
+        }
+        let p: Value = serde_json::from_str(&job.payload).unwrap_or(Value::Null);
+        let gid = p["group_id"].as_i64().unwrap_or(0);
+        // Group 不保存通用类型的字段，从组内最新的种子取豆瓣编号 / ISBN
+        let rows = sql::query(
+            "SELECT fields::text FROM torrent.v_torrent_fields WHERE group_id = $1 AND type_id = 'generic' ORDER BY id DESC LIMIT 20",
+            &[SqlValue::Int(gid)],
+        )?;
+        let Some(key) = rows
+            .rows
+            .iter()
+            .find_map(|r| kinds::book_lookup_key(&serde_json::from_str(&text(&r[0])).unwrap_or(Value::Null)))
+        else {
+            return Ok(());
+        };
+        // 豆瓣未安装 / 未启用 / 查无结果：不重试
+        let data = match svc(
+            "ctx.metadata",
+            "lookup",
+            &json!({ "source": "douban", "external_id": key, "locale": "zh-CN" }),
+        ) {
+            Ok(r) if r.is_null() => return Ok(()),
+            Ok(r) => r["data"].clone(),
+            Err(e) if !e.retryable => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        let Some(patch) = kinds::book_patch(&data) else {
+            return Ok(());
+        };
+        let g = svc("ctx.torrents", "get_group", &json!({ "id": gid }))?;
+        let mut args = json!({ "id": gid, "fields": patch });
+        if g["year"].is_null() {
+            args["year"] = data["year"].clone();
+        }
+        svc("ctx.torrents", "update_group", &args)?;
+        Ok(())
     }
 }
 

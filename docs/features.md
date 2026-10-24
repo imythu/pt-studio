@@ -15,7 +15,7 @@
 | Tracker | 🟡 | `pt-tracker`、`tracker-bridge` |
 | 账号与安全 | ✅ | `identity`、`captcha`、`registration-policy`、`invite` |
 | 种子与资源类型 | ✅ | `torrent`、`type-movie` / `tv` / `anime` / `music` / `generic`、`mediainfo`、`dupe`、`subtitles` |
-| 元数据 | 🟡 | `metadata-tmdb`、`metadata-douban` ✅；IMDb、MusicBrainz、Bangumi、IGDB 📐 |
+| 元数据 | 🟡 | `metadata-tmdb`、`metadata-douban`、`metadata-bangumi`、`metadata-musicbrainz` ✅；IMDb、IGDB 📐 |
 | 记账与经济 | ✅ | `accounting`、`ledger`、`bonus`、`seeding-bonus`、`promotion`、`shop`、`lottery`、`medals`、`donations`、`checkin` |
 | 规则与考核 | ✅ | `levels`、`hnr`、`ratio-policy`、`newbie-exam`、`seedbox`、`claims` |
 | 反作弊 | 🟡 | `anticheat` |
@@ -46,8 +46,10 @@
 - 自研 HTTP tracker（独立程序，AGPL-3.0-only）：announce / scrape、紧凑与非紧凑响应、IPv4 / IPv6（BEP 7）。
 - swarm 与会话状态全部存于 Redis（Lua 原子脚本），**无状态、可多节点**。
 - 增量计算（基线、回退、截断、首次完成）、首报 `started` 不计流量、超速截断。
-- `tracker-bridge` 同步 passkey、种子与客户端白名单（全量 + 实时）。
-- 实测：Transmission 4.1、qBittorrent 5.1 双向真实传输与记账正确；同机压测约 1.05 万次 / 秒（p99 13 ms）。
+- `tracker-bridge` 同步 passkey、种子、客户端规则与运行参数（全量 + 实时）。
+- 客户端规则：有序的放行 / 拒绝规则，按 peer_id 前缀或正则（可限最低 / 最高版本）与 User-Agent 匹配，默认动作可选；后台编辑、预设模板、规则测试，保存后 1 秒内各节点生效；被拒客户端按日排行（保留 8 天），可一键生成放行规则。
+- 节点状态与告警：各节点每 10 秒上报，后台「Tracker」页显示版本、同步落后、缓存规模与 announce 速率；节点落后超过 5 秒或停止上报时发 `tracker.inconsistency_detected` 事件并在后台提示。
+- 实测：Transmission 4.1、qBittorrent 5.1、Deluge 2.1 双向真实传输与记账正确（Deluge 另验证了拒绝规则与被拒统计）；同机压测约 1.05 万次 / 秒（p99 13 ms）。
 
 ### 账号与安全
 
@@ -64,7 +66,7 @@
 
 - 种子解析（v1 / v2 / hybrid）、规范化、上传、下载（passkey 注入）、编辑、审核状态、软删除、置顶。
 - **资源类型插件**驱动的发布表单与作品（Group）页：电影、剧集（季集范围检查）、动漫（字幕组风格发布名）、音乐（艺人与版本、抓轨日志评分）、通用类型（游戏 / 软件 / 电子书 / 课程，后台可自定义）。
-- 元数据：TMDB（电影 / 剧集 / 季、海报转存）、豆瓣（代理或 PT-Gen 兼容端点、PT-Gen 版式简介）。
+- 元数据：TMDB（电影 / 剧集 / 季、海报与背景图转存、翻译标题、过期自动刷新）、豆瓣（直连、代理或 PT-Gen 兼容端点、PT-Gen 版式简介；只有豆瓣编号的电影 / 剧集也能自动补全；图书按豆瓣编号或 ISBN 查询，电子书自动补全封面、简介、作者与出版社）、Bangumi（动漫条目、关联条目；type-anime 优先使用）、MusicBrainz（发行组 / 发行 / 艺人、Cover Art Archive 封面；音乐作品按发行组补全封面、流派与年份）；Bangumi 与 MusicBrainz 为公开 API，无需申请凭证；上游限速与熔断，上游故障时返回缓存。
 - MediaInfo / BDInfo 解析与脱敏、与种子声明规格比对。
 - 去重与替代（trump）、字幕区、图片上传（去除 EXIF）、种子简介 BBCode 渲染。
 
@@ -84,8 +86,9 @@
 
 ### 反作弊
 
-- 记账信号（速度、负增量、计数异常、无对端）与每小时交叉校验。
-- 规则集 DSL、评分与衰减、案件工作台、复核与四眼封禁、自动处置与熔断、申诉、回测。
+- 记账信号（速度、负增量、计数异常、无对端、客户端指纹，盒子来源标记）与每小时交叉校验。
+- 规则集 DSL、评分与衰减、案件工作台、复核与四眼封禁、自动处置与熔断、申诉、回测、种子视角、同 IP 对端关联（需授权 `peer.ip`）。
+- 处置：警告、冻结流量、锁钱包、回收流量、重置 passkey、禁止下载、封禁。
 
 ### 社区
 
@@ -134,7 +137,7 @@
 | [`webhook`](plugins/webhook/) | 站外 Webhook 推送 |
 | [`crossseed-api`](plugins/crossseed-api/) | 辅种接口（兼容 IYUU） |
 | [`llm-openai-compat`](plugins/llm-openai-compat/) | OpenAI 兼容的大模型接入（vLLM、Ollama 等本地模型） |
-| [`metadata-imdb`](plugins/metadata-imdb/) / [`metadata-musicbrainz`](plugins/metadata-musicbrainz/) / [`metadata-bangumi`](plugins/metadata-bangumi/) / [`metadata-igdb`](plugins/metadata-igdb/) | 其他元数据源 |
+| [`metadata-imdb`](plugins/metadata-imdb/) / [`metadata-igdb`](plugins/metadata-igdb/) | 其他元数据源（IGDB 需要 Twitch 开发者凭证） |
 
 ### 平台与内核
 
@@ -148,18 +151,19 @@
 
 ### Tracker
 
-- UDP（💤 设计上只做 HTTP(S)）、节点心跳与后台 peer 查询、客户端白名单的后台编辑。
+- UDP（💤 设计上只做 HTTP(S)，UDP 无法带 passkey 鉴权）；请求头检查（要求 UA、拒绝浏览器 UA、异常请求头、端口黑名单）。
+- 节点告警只发事件与指标，不直接通知管理员（可用 webhook 插件转发事件）。
 - 限制类变化（如 H&R 限制下载）的实时同步，目前靠每 10 分钟全量同步兜底。
-- tracker 与 Redis 分开部署的压测（目标平均 1.7 万次 / 秒）；Deluge、µTorrent 实测。
+- tracker 与 Redis 分开部署的压测（目标平均 1.7 万次 / 秒）；µTorrent 实测（只有 Windows / macOS 版本）。
 
 ### 各功能的后续项
 
 - **账号**：改名、改邮箱、UTS #39 混淆字符检查、GeoIP。
-- **种子与资源类型**：元数据字段锁定、缺集列表、艺人页、MusicBrainz 封面、抓轨日志签名验证、NFO 解析、批量下载。
+- **种子与资源类型**：元数据字段锁定、缺集列表、艺人页、抓轨日志签名验证、NFO 解析、批量下载。
 - **搜索**：语义 / 混合搜索、多实例、同义词管理、一致性巡检。
 - **记账与经济**：日对账、月结余快照、归档、重算；魔力规则的编辑与回放；改名卡、个人促销、竞猜。
-- **规则**：等级 / H&R / 邀请规则的编辑接口与模拟评估、批量操作、盒子 ASN 自动识别并接入 H&R 与魔力规则。
-- **反作弊**：盒子识别、同 IP 对端关联、客户端指纹信号，详见 [anticheat 后续工作](plugins/anticheat/05-后续工作.md)。
+- **规则**：等级 / H&R / 邀请规则的编辑接口与模拟评估、批量操作、盒子 ASN 自动识别、盒子接入魔力规则。
+- **反作弊**：多账号关联，详见 [anticheat 后续工作](plugins/anticheat/05-后续工作.md)。
 - **社区**：表情、@提醒通知、合并 / 拆分主题、批量审核、通配符敏感词。
 - **通知**：Telegram / Discord 渠道、合并通知、服务端模板渲染、mailgun / SES。
 - **AI**：上传预审接入 MediaInfo 比对与疑似重复、助手的检索增强与流式输出、MCP 工具目录缓存与按 token 限流。

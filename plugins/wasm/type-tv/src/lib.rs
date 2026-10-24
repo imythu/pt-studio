@@ -176,15 +176,42 @@ impl on_cron::Guest for TypeTv {
         let gid = p["group_id"].as_i64().unwrap_or(0);
         let g = svc("ctx.torrents", "get_group", &json!({ "id": gid }))?;
         let f = &g["fields"];
-        let Some(id) = f["tmdb_tv_id"].as_u64() else {
-            // 只有 IMDb：先换算成 TMDB 剧 ID
-            return match f["imdb_id"].as_str() {
-                Some(i) => enrich(gid, &format!("imdb:{i}"), f["season"].as_i64()),
-                None => Ok(()),
-            };
+        // 只有 IMDb：先换算成 TMDB 剧 ID
+        let external = match (f["tmdb_tv_id"].as_u64(), f["imdb_id"].as_str()) {
+            (Some(id), _) => Some(format!("tv:{id}")),
+            (None, Some(i)) => Some(format!("imdb:{i}")),
+            _ => None,
         };
-        enrich(gid, &format!("tv:{id}"), f["season"].as_i64())
+        let done = match &external {
+            Some(e) => enrich(gid, e, f["season"].as_i64())?,
+            None => false,
+        };
+        // TMDB 不可用或查无结果时用豆瓣（豆瓣条目即一季）
+        match f["douban_id"].as_str() {
+            Some(d) if !done => enrich_douban(gid, d),
+            _ => Ok(()),
+        }
     }
+}
+
+fn enrich_douban(gid: i64, id: &str) -> Result<(), PluginError> {
+    let Some(d) = lookup_from("douban", id, "zh-CN")? else {
+        return Ok(());
+    };
+    if d["kind"] != "tv" {
+        return Ok(());
+    }
+    let mut patch = tv::metadata_patch(&d, None, "zh-CN");
+    // 豆瓣季条目的 IMDb 编号常是单集或某一季，不覆盖剧的 IMDb
+    if let Some(o) = patch.as_object_mut() {
+        o.remove("imdb_id");
+    }
+    svc(
+        "ctx.torrents",
+        "update_group",
+        &json!({ "id": gid, "fields": patch }),
+    )?;
+    Ok(())
 }
 
 fn locale() -> String {
@@ -194,10 +221,14 @@ fn locale() -> String {
 
 /// `Ok(None)`：元数据源未安装 / 未配置或无结果（不重试）
 fn lookup(external: &str, locale: &str) -> Result<Option<Value>, PluginError> {
+    lookup_from("tmdb", external, locale)
+}
+
+fn lookup_from(source: &str, external: &str, locale: &str) -> Result<Option<Value>, PluginError> {
     match svc(
         "ctx.metadata",
         "lookup",
-        &json!({ "source": "tmdb", "external_id": external, "locale": locale }),
+        &json!({ "source": source, "external_id": external, "locale": locale }),
     ) {
         Ok(r) if r.is_null() => Ok(None),
         Ok(r) => Ok(Some(r["data"].clone())),
@@ -206,14 +237,15 @@ fn lookup(external: &str, locale: &str) -> Result<Option<Value>, PluginError> {
     }
 }
 
-fn enrich(gid: i64, external: &str, season: Option<i64>) -> Result<(), PluginError> {
+/// 返回是否已补全
+fn enrich(gid: i64, external: &str, season: Option<i64>) -> Result<bool, PluginError> {
     let locale = locale();
     let Some(mut show) = lookup(external, &locale)? else {
-        return Ok(());
+        return Ok(false);
     };
     // imdb:tt… 可能换算成电影；剧集只认 tv
     if show["kind"] != "tv" {
-        return Ok(());
+        return Ok(false);
     }
     if external.starts_with("imdb:")
         && let Some(id) = show["ids"]["tmdb"].as_u64()
@@ -231,7 +263,7 @@ fn enrich(gid: i64, external: &str, season: Option<i64>) -> Result<(), PluginErr
         "update_group",
         &json!({ "id": gid, "fields": patch }),
     )?;
-    Ok(())
+    Ok(true)
 }
 
 // ---------------- 上传钩子：文件列表与范围（type-tv LLD §1.2） ----------------

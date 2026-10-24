@@ -298,7 +298,11 @@ pub fn metadata_patch(data: &Value, locale: &str) -> Value {
     if let Some(v) = data["runtime_min"].as_i64() {
         p.insert("runtime_min".into(), json!(v));
     }
-    if let Some(v) = data["ratings"]["tmdb"]["value"].as_f64() {
+    // TMDB 评分优先，豆瓣条目补全时用豆瓣评分
+    if let Some(v) = data["ratings"]["tmdb"]["value"]
+        .as_f64()
+        .or_else(|| data["ratings"]["douban"]["value"].as_f64())
+    {
         p.insert("rating".into(), json!(v));
     }
     if let Some(v) = data["ids"]["tmdb"].as_u64() {

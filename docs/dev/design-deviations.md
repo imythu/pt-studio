@@ -28,7 +28,7 @@
 - **种子可见性映射（搜索）**：approved → member；candidate / pending → staff（上传者本人可见，匿名发布不写 `vis_owner_id`）；rejected / disabled / deleted 不进索引。
 - **invite 实现取舍**：持有者规范化只做去空白与小写（WASM 中无 NFC 库；identity 在钩子与事件中给出同一显示形用户名，两处一致）；HMAC / HKDF / base64 在插件内用 `sha2` 自行实现（RFC 4231 / 5869 向量测试）；服务方法 `issue` 的来源记为 `api`；连坐的 `notify` 动作在 notify 插件接入前不执行。
 - **identity 限制**：本版本以“同用户同类型同来源只有一条生效限制”的 upsert 保证幂等，不建 `restriction_requests` 表；不发布 `user.restriction_changed`；到期由每分钟的 `restriction_sweep` cron 处理（不调度逐条延迟任务）。
-- **hnr 种子标签**：豁免谓词的 `tags` 字段在 torrent 提供标签前恒为空数组；`is_seedbox` 恒为 false。
+- **hnr 种子标签**：豁免谓词的 `tags` 字段在 torrent 提供标签前恒为空数组。`is_seedbox` 经 optional `ctx.seedbox.is_seedbox` 取得（seedbox 未安装时为 false）。
 - **钩子超时倍数**：`[kernel] hook_timeout_factor`（只在 dev 模式生效）放大钩子目录给出的超时，供调试构建与并行测试使用；生产保持目录预算。
 - **已知限制：嵌套调用占用连接**：服务调用与钩子处理者各自开独立工作单元（各占一个连接），调用方的连接在等待期间不释放；连接池须不小于“并发请求 × 嵌套深度”（测试配置用 20）。后续考虑同插件链路复用或为嵌套调用预留连接。
 - **前端选型调整**：构建用 esbuild（而非 Vite；内核直接提供构建产物，不需要开发服务器）；路由用 React Router 7（而非 TanStack Router）；包管理用 npm workspaces（而非 pnpm）；schema 表单校验用自写的无 eval 子集校验器（Ajv 依赖代码生成，严格 CSP 不允许 `unsafe-eval`）。
@@ -42,10 +42,14 @@
 - **改密码的再认证**：设计要求 reauth；本版本以“校验当前密码”代替，成功后撤销除当前外的全部会话。
 - **元数据服务的形态**：`ctx.metadata` 作为多实现 JSON 服务（`MULTI_SERVICES`），元数据插件以 `service-provider` 导出 `info / lookup / search`，调用方传 `source`（路由到 `metadata-<source>`）；未使用 WIT 的 `metadata-provider` 导出（wasmtime 49 bindgen 对其 `lookup` 函数生成有误，见 plugin-api.md §2.0）。
 - **出站的测试方式**：元数据插件的 API 与图片地址经静态配置（`config:api_base_url`，`allow_private`）指向本地模拟服务；生产默认 `api.themoviedb.org` / `image.tmdb.org`。
+- **Bangumi / MusicBrainz 的 User-Agent 联系方式**：设计要求 `project_url` / `contact` 必填、未配置时插件不可用；实现中两者可选，默认用 PT Studio 项目地址（两家的 User-Agent 规范都接受项目网址），站点可在设置中改为本站地址或邮箱，所以没有 `metadata-bangumi.not_configured` / `metadata-musicbrainz.not_configured`。MusicBrainz 等待限速时返回可重试的 `metadata-musicbrainz.upstream_error`（SDK `upstream`），不单设 `rate_limited`。
+- **Bangumi 封面同时写 `images.poster`**：统一模型按 LLD 写 `images.cover`，另写一份 `images.poster`，作品页与类型插件的补丁沿用海报字段；MusicBrainz 的封面同样处理。Bangumi 的 `extra.air_end`（播放结束日期）用于判断连载中（缓存 7 天）。
+- **MusicBrainz 的发行与艺人**：`release:` 与 `artist:` 的统一模型 kind 为 `music_release` / `artist`（共用设计 §2 已补充）；发行组至少缓存 90 天按 `external_id` 前缀判断，表中没有 `volatile` 列。
+- **豆瓣图书的编号**：缓存键区分影视与图书（`book:<编号>`、`isbn:<ISBN>`），直连模式需要知道去 book 子域取数；代理模式请求 `/subject/<id>?type=book`。电子书（type-generic）的 Group 不保存通用类型字段，补全任务从组内种子字段读取豆瓣编号 / ISBN；预设 ebook 新增 `douban_id` 字段，已安装站点在 `init` 时补进预设定义（`kinds::ADDED_PRESET_FIELDS`）。
 - **钩子输入带已有 Group**：钩子处理者不能回调 `ctx.torrents`（调用链重入），所以 torrent 在 `torrent.before_upload` 输入中直接带上已有 Group 的 `group_id` 与 `group_fields`（catalog/hooks.md 已补充）。
 - **作品标题由类型给出**：规范化结果中的 `group_title` 作为新建 Group 的标题（剧集带季），不进入 Group 字段，作品页不显示。
 - **测试种子的子目录**：`fixtures::sample_v1` 的文件路径用 `/` 分隔子目录（用于 sample 目录等场景）。
-- **音乐艺人字段**：LLD 为 `artists[]` 对象数组（`{name, role, mbid?}`）；表单与搜索更适合字符串数组，本版本按角色分为 `artists`、`guest_artists`、`composers` 等字符串数组，规范化仍接受对象形态；MBID 留待 MusicBrainz 元数据接入。
+- **音乐艺人字段**：LLD 为 `artists[]` 对象数组（`{name, role, mbid?}`）；表单与搜索更适合字符串数组，本版本按角色分为 `artists`、`guest_artists`、`composers` 等字符串数组，规范化仍接受对象形态；MusicBrainz 元数据只按发行组补全 Group（封面、流派、原始年份、发行类型），艺人 MBID 暂不写入艺人字段。
 - **log 存放位置**：按 LLD 放在种子字段 `logs[]`（作品页不显示）；种子字段整体受 torrent 表 64 KiB 约束，所以随种子保存的 log 总量上限为 56 KiB（LLD 为 5 个各 512 KiB；预检接口仍接受 512 KiB）。大 log 的独立存储（blob）留待后续。评分写回由 `ctx.torrents.update_fields` 完成，编辑字段后由 `torrent.updated` 重新评分（检查任务幂等，分数不变不写回，不会循环）。
 - **`ctx.llm` 的形态**：v0.1 与其他业务服务一致，用 JSON 分派（请求 / 响应字段与 `pt:llm@0.1.0` WIT 一一对应，内容块以 `type` 区分：`text`、`untrusted`、`tool_call`、`tool_result`）；类型化 WIT 推迟到 0.2。
 - **llm-claude 用量汇总**：每次调用在同一工作单元内直接累加 `usage_daily`（设计为自订阅 `llm.usage_recorded` 后累加），事件仍照常发布。
@@ -72,6 +76,8 @@
 - **第三方钩子点与错误码**：钩子点原本只能来自 catalog/hooks.md（内核编译时生成）；为了让第三方插件定义钩子点，目录之外、以 `<id>.` 开头的钩子点按清单中的参数登记（不受 `strict_catalog` 限制）。错误码同理，清单 `[error_codes]` 补充目录之外的 HTTP 状态。
 - **模板仓库**：设计为独立的模板仓库；本版本放在本仓库 `templates/` 下（带独立 `[workspace]` 与 WIT 副本，可直接复制到仓库外），独立发布留到开源发布时。
 - **pt-tracker 的实现方式**（决策 D20，取代 D9 / D14）：不使用 torrust，协议、准入、增量与事件出口自研；swarm 与会话状态全部存在 Redis（每个种子的做种 / 下载 ZSET + 会话 HASH，键带 Cluster 哈希标签 `{info_hash}`），每次 announce 一个 Lua 脚本完成 CAS、清理超时 peer、更新与抽取 peer，tracker 无状态、可多节点。会话值用 JSON（设计为紧凑二进制）；announce 在请求内同步写 Redis（设计为异步 worker 队列 + 背压）。已用 Transmission 4.1 真实传输与压测验证（见 crates/pt-tracker/README.md）。
+- **pt-tracker 节点状态**：`trk:stats:node:<id>` 不写 `peers` / `torrents`（swarm 在 Redis 中，单个节点没有本地 swarm 规模），`ver` 只有 crate 版本（不使用 torrust）；每分钟的 `node_health` 任务发 `tracker.inconsistency_detected`（`node_lag` / `node_lost`，进入告警状态时各一次）并写指标，但不经 `ctx.notify` 通知管理员（内核没有“按权限列出用户”的接口）；失联节点状态存在插件 KV `node_health`。
+- **tracker-bridge 客户端规则**：规则测试接口为 `POST …/client-rules:test`；`If-Match` 不匹配返回 `kernel.precondition_failed`（412，`details.current_rev`），设计写的是 `kernel.conflict`；后台规则列表用“上移 / 下移”按钮代替拖动排序；pt-tracker 与 tracker-bridge 各自实现匹配（pt-tracker 不链接站点代码），共用测试向量 `docs/plugins/tracker-bridge/client-rules-vectors.json`；升级时把旧设置 `clients` / `allow_unknown_clients` 迁移为规则（规则集版本为 0 时），这两个设置项已从设置表单移除。请求头检查（`require_ua`、浏览器 UA、异常请求头、端口黑名单）未实现。
 - **tracker-bridge 的 `ver`**：设计为“先取 ver 再读源”并在脚本中比较；本版本由 `trk:ver` 计数器在写入脚本内生成，快照总是被最新一次写覆盖。限制类变化（H&R 限制下载等）没有事件，由每 10 分钟的全量同步兜底。
 - **开发站点的数据库**：`run-site.sh` 使用库 `ptsite` 与角色前缀 `ptsite_`（端到端测试会删除 `pt_plugin_*` 角色，同一 PostgreSQL 集群中不能共用）。
 - **通知模板不单独登记**：类别、链接随每次发送给出；模板键前缀必须是调用方插件 ID。

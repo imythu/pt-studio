@@ -4,15 +4,71 @@
 
 use pt_plugin_sdk::serde_json::{self, Value, json};
 
-/// 豆瓣条目 ID：纯数字，或 movie / book 子域的条目链接
+/// 豆瓣条目 ID（即缓存键）：影视为纯数字或 movie 子域链接；图书为 `book:<数字>` 或 book 子域链接；
+/// 也可用 ISBN 查图书：`isbn:<ISBN>`，或以 978 / 979 开头的 13 位数字
 pub fn parse_id(s: &str) -> Option<String> {
     let s = s.trim();
-    if !s.is_empty() && s.len() <= 12 && s.bytes().all(|b| b.is_ascii_digit()) {
-        return Some(s.to_owned());
+    let digits = |x: &str| {
+        (!x.is_empty() && x.len() <= 12 && x.bytes().all(|b| b.is_ascii_digit())).then(|| x.to_owned())
+    };
+    if let Some(id) = digits(s) {
+        return Some(id);
+    }
+    if let Some(isbn) = s
+        .strip_prefix("isbn:")
+        .or_else(|| s.strip_prefix("ISBN:"))
+        .map(str::trim)
+        .or_else(|| (s.len() == 13 && (s.starts_with("978") || s.starts_with("979"))).then_some(s))
+    {
+        return parse_isbn(isbn).map(|i| format!("isbn:{i}"));
+    }
+    if let Some(id) = s.strip_prefix("book:") {
+        return digits(id).map(|id| format!("book:{id}"));
     }
     let rest = s.split("douban.com/subject/").nth(1)?;
-    let id: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    (!id.is_empty() && id.len() <= 12).then_some(id)
+    let id = digits(&rest.chars().take_while(char::is_ascii_digit).collect::<String>())?;
+    Some(if s.contains("book.douban.com/") {
+        format!("book:{id}")
+    } else {
+        id
+    })
+}
+
+/// ISBN-10 / ISBN-13（可带连字符），校验位正确才接受
+pub fn parse_isbn(s: &str) -> Option<String> {
+    let c: String = s
+        .chars()
+        .filter(|c| *c != '-' && *c != ' ')
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    let d: Vec<u32> = c
+        .chars()
+        .map(|ch| {
+            if ch == 'X' {
+                10
+            } else {
+                ch.to_digit(10).unwrap_or(99)
+            }
+        })
+        .collect();
+    let ok = match d.len() {
+        13 => {
+            d.iter().all(|x| *x < 10)
+                && d.iter()
+                    .enumerate()
+                    .map(|(i, x)| if i % 2 == 0 { *x } else { x * 3 })
+                    .sum::<u32>()
+                    % 10
+                    == 0
+        }
+        10 => {
+            d[..9].iter().all(|x| *x < 10)
+                && d[9] <= 10
+                && d.iter().zip((1..=10).rev()).map(|(x, w)| x * w).sum::<u32>() % 11 == 0
+        }
+        _ => false,
+    };
+    ok.then_some(c)
 }
 
 pub fn genre_key(zh: &str) -> &'static str {
@@ -248,6 +304,79 @@ pub fn from_ptgen(id: &str, v: &Value) -> Value {
     data
 }
 
+/// `2011-6` / `2011-6-1` / `2011年6月` → (年, 完整日期)
+fn pub_date(s: &str) -> (Option<i64>, Option<String>) {
+    let n: Vec<u32> = s
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|x| !x.is_empty())
+        .filter_map(|x| x.parse().ok())
+        .collect();
+    let year = n
+        .first()
+        .copied()
+        .filter(|y| (1000..=2200).contains(y))
+        .map(i64::from);
+    let date = match (year, n.get(1), n.get(2)) {
+        (Some(y), Some(m @ 1..=12), Some(d @ 1..=31)) => Some(format!("{y:04}-{m:02}-{d:02}")),
+        _ => None,
+    };
+    (year, date)
+}
+
+/// 图书（`scrape::book_from_rexxar` / `scrape::book_page` 的中间格式，代理模式同名字段）→ 统一模型
+pub fn from_book(id: &str, b: &Value) -> Value {
+    let s = |k: &str| {
+        b[k].as_str()
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(str::to_owned)
+    };
+    let title = s("title");
+    let (year, date) = s("pubdate").map_or((None, None), |p| pub_date(&p));
+    let mut people: Vec<Value> = strs(&b["authors"])
+        .into_iter()
+        .map(|n| json!({ "name": n, "role": "writer" }))
+        .collect();
+    people.extend(
+        strs(&b["translators"])
+            .into_iter()
+            .map(|n| json!({ "name": n, "role": "translator" })),
+    );
+    if let Some(p) = s("publisher") {
+        people.push(json!({ "name": p, "role": "publisher" }));
+    }
+    let mut localized = serde_json::Map::new();
+    if let Some(t) = &title {
+        localized.insert("zh-CN".into(), json!(t));
+    }
+    let rating = &b["rating"];
+    let summary = s("intro").or_else(|| s("summary"));
+    json!({
+        "kind": "book",
+        "titles": { "original": s("original_title").or_else(|| title.clone()), "localized": localized, "aliases": [] },
+        "year": year,
+        "release_date": date,
+        "ids": { "douban": id, "isbn": s("isbn").and_then(|i| parse_isbn(&i)) },
+        "genres": [],
+        "countries": [],
+        "languages": [],
+        "people": people.into_iter().take(50).collect::<Vec<_>>(),
+        "runtime_min": null,
+        "episode_count": null,
+        "ratings": rating["value"].as_f64().filter(|x| *x > 0.0)
+            .map_or_else(|| json!({}), |v| json!({ "douban": { "value": v, "votes": rating["count"].as_i64().unwrap_or(0) } })),
+        "images": {},
+        "overview": summary.map_or_else(|| json!({}), |x| json!({ "zh-CN": strip_tags(&x) })),
+        "extra": {
+            "subtitle": s("subtitle"), "authors": strs(&b["authors"]), "translators": strs(&b["translators"]),
+            "publisher": s("publisher"), "producer": s("producer"), "pubdate": s("pubdate"),
+            "pages": b["pages"].as_i64(), "price": s("price"), "binding": s("binding"), "series": s("series"),
+            "author_intro": s("author_intro").map(|x| strip_tags(&x)),
+        },
+        "attribution": { "source": "douban", "url": format!("https://book.douban.com/subject/{id}/"), "license_note": "数据来源：豆瓣" },
+    })
+}
+
 fn join(v: &Value, key: &str, sep: &str) -> String {
     strs(&v[key]).join(sep)
 }
@@ -258,6 +387,10 @@ pub fn intro(data: &Value, poster: Option<&str>, markdown: bool) -> String {
     if let Some(p) = poster {
         lines.push(if markdown { format!("![poster]({p})") } else { format!("[img]{p}[/img]") });
         lines.push(String::new());
+    }
+    if data["kind"] == "book" {
+        book_lines(data, &mut lines);
+        return finish(&lines, markdown);
     }
     let mut row = |label: &str, value: String| {
         if !value.trim().is_empty() {
@@ -302,14 +435,7 @@ pub fn intro(data: &Value, poster: Option<&str>, markdown: bool) -> String {
             lines.push(format!("　　　　　　{c}"));
         }
     }
-    if let Some(s) = data["overview"]["zh-CN"].as_str().filter(|s| !s.is_empty()) {
-        lines.push(String::new());
-        lines.push("◎简　　介".into());
-        lines.push(String::new());
-        for p in s.lines().map(str::trim).filter(|p| !p.is_empty()) {
-            lines.push(format!("　　{p}"));
-        }
-    }
+    paragraphs(&mut lines, "简　　介", data["overview"]["zh-CN"].as_str());
     if let Some(a) = data["extra"]["awards"].as_str() {
         lines.push(String::new());
         lines.push("◎获奖情况".into());
@@ -318,12 +444,76 @@ pub fn intro(data: &Value, poster: Option<&str>, markdown: bool) -> String {
             lines.push(if p.is_empty() { String::new() } else { format!("　　{p}") });
         }
     }
+    finish(&lines, markdown)
+}
+
+fn finish(lines: &[String], markdown: bool) -> String {
     if markdown {
         // Markdown 中每行之间需要硬换行
         lines.iter().map(|l| if l.is_empty() { String::new() } else { format!("{l}  ") }).collect::<Vec<_>>().join("\n")
     } else {
         lines.join("\n")
     }
+}
+
+fn paragraphs(lines: &mut Vec<String>, label: &str, text: Option<&str>) {
+    if let Some(s) = text.filter(|s| !s.trim().is_empty()) {
+        lines.push(String::new());
+        lines.push(format!("◎{label}"));
+        lines.push(String::new());
+        for p in s.lines().map(str::trim).filter(|p| !p.is_empty()) {
+            lines.push(format!("　　{p}"));
+        }
+    }
+}
+
+/// 图书版式：书名、作者、出版信息、ISBN、评分、内容简介、作者简介
+fn book_lines(data: &Value, lines: &mut Vec<String>) {
+    let e = &data["extra"];
+    let mut row = |label: &str, value: String| {
+        if !value.trim().is_empty() {
+            lines.push(format!("◎{label}　{value}"));
+        }
+    };
+    let s = |v: &Value| v.as_str().unwrap_or("").to_owned();
+    let title = s(&data["titles"]["localized"]["zh-CN"]);
+    row("书　　名", title.clone());
+    row("副 标 题", s(&e["subtitle"]));
+    let original = s(&data["titles"]["original"]);
+    row(
+        "原 作 名",
+        if original == title {
+            String::new()
+        } else {
+            original
+        },
+    );
+    row("作　　者", join(e, "authors", " / "));
+    row("译　　者", join(e, "translators", " / "));
+    row("出 版 社", s(&e["publisher"]));
+    row("出 品 方", s(&e["producer"]));
+    row("出 版 年", s(&e["pubdate"]));
+    row(
+        "页　　数",
+        e["pages"].as_i64().map(|p| p.to_string()).unwrap_or_default(),
+    );
+    row("定　　价", s(&e["price"]));
+    row("装　　帧", s(&e["binding"]));
+    row("丛　　书", s(&e["series"]));
+    row("ＩＳＢＮ", s(&data["ids"]["isbn"]));
+    if let Some(r) = data["ratings"]["douban"].as_object() {
+        row(
+            "豆瓣评分",
+            format!(
+                "{}/10 from {} users",
+                r.get("value").and_then(Value::as_f64).unwrap_or(0.0),
+                r.get("votes").and_then(Value::as_i64).unwrap_or(0)
+            ),
+        );
+    }
+    row("豆瓣链接", s(&data["attribution"]["url"]));
+    paragraphs(lines, "内容简介", data["overview"]["zh-CN"].as_str());
+    paragraphs(lines, "作者简介", e["author_intro"].as_str());
 }
 
 #[cfg(test)]
@@ -333,8 +523,19 @@ mod tests {
     #[test]
     fn ids() {
         assert_eq!(parse_id("1292052").as_deref(), Some("1292052"));
-        assert_eq!(parse_id("https://movie.douban.com/subject/1292052/").as_deref(), Some("1292052"));
-        assert_eq!(parse_id("https://book.douban.com/subject/1084336/?from=x").as_deref(), Some("1084336"));
+        assert_eq!(
+            parse_id("https://movie.douban.com/subject/1292052/").as_deref(),
+            Some("1292052")
+        );
+        assert_eq!(
+            parse_id("https://book.douban.com/subject/1084336/?from=x").as_deref(),
+            Some("book:1084336")
+        );
+        assert_eq!(parse_id("book:1084336").as_deref(), Some("book:1084336"));
+        assert_eq!(parse_id("9787544253994").as_deref(), Some("isbn:9787544253994"));
+        assert_eq!(parse_id("isbn:7-5442-5399-6").as_deref(), Some("isbn:7544253996"));
+        assert!(parse_id("9787544253995").is_none());
+        assert!(parse_id("book:x").is_none());
         assert!(parse_id("https://example.com/1").is_none());
         assert!(parse_id("12a").is_none());
     }

@@ -299,6 +299,188 @@ pub fn rexxar_search(body: &[u8]) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// h5 简介页的表格（图书：作者、出版社、ISBN、原作名……）：每个 `<tr>` 取前两个 `<td>`
+pub fn h5_table(html: &str) -> Vec<(String, String)> {
+    html.split("<tr")
+        .skip(1)
+        .filter_map(|row| {
+            let cells = all_between(row.split("</tr>").next().unwrap_or(row), "<td>", "</td>");
+            let (k, v) = (text(cells.first()?), text(cells.get(1)?));
+            (!k.is_empty() && !v.is_empty()).then_some((k, v.replace('\n', " ")))
+        })
+        .collect()
+}
+
+fn first_num(s: &str) -> Option<i64> {
+    s.split(|c: char| !c.is_ascii_digit())
+        .find(|x| !x.is_empty())?
+        .parse()
+        .ok()
+}
+
+/// 图书的 `#info` / h5 表格字段（两处键名相同）→ 图书中间格式（`mapper::from_book` 的输入）
+fn book_fields(info: &[(String, String)]) -> Value {
+    let field = |k: &str| info.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
+    let list = |k: &str| field(k).map(split_slash).unwrap_or_default();
+    let isbn: Option<String> =
+        field("ISBN").map(|i| i.chars().filter(|c| c.is_ascii_digit() || *c == 'X').collect());
+    json!({
+        "subtitle": field("副标题"),
+        "original_title": field("原作名"),
+        "authors": list("作者"),
+        "translators": list("译者"),
+        "publisher": field("出版社"),
+        "producer": field("出品方"),
+        "pubdate": field("出版年"),
+        "pages": field("页数").and_then(first_num),
+        "price": field("定价"),
+        "binding": field("装帧"),
+        "series": field("丛书"),
+        "isbn": isbn.filter(|i| i.len() == 10 || i.len() == 13),
+    })
+}
+
+/// 与 `fallback` 合并：`v` 中为空的字段用 `fallback` 的
+fn merge(mut v: Value, fallback: Value) -> Value {
+    if let (Some(o), Value::Object(f)) = (v.as_object_mut(), fallback) {
+        for (k, x) in f {
+            let empty = match o.get(&k) {
+                None | Some(Value::Null) => true,
+                Some(Value::String(s)) => s.is_empty(),
+                Some(Value::Array(a)) => a.is_empty(),
+                _ => false,
+            };
+            if empty {
+                o.insert(k, x);
+            }
+        }
+    }
+    v
+}
+
+/// 移动端图书接口（`/rexxar/api/v2/book/<id>`，没有 ISBN 与原作名）+ h5 简介页表格（可缺）
+pub fn book_from_rexxar(v: &Value, desc: &[(String, String)]) -> Value {
+    let strs = |k: &str| -> Vec<Value> {
+        v[k].as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| json!(s))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let first = |k: &str| {
+        v[k].as_array()
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    let subtitle = v["book_subtitle"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| first("subtitle"));
+    let own = json!({
+        "title": v["title"].as_str().unwrap_or("").trim(),
+        "subtitle": subtitle,
+        "authors": strs("author"),
+        "translators": strs("translator"),
+        "publisher": first("press"),
+        "producer": first("producers"),
+        "pubdate": first("pubdate"),
+        "pages": first("pages").and_then(first_num),
+        "price": first("price"),
+        "series": v["book_series"]["title"].as_str(),
+        "rating": v["rating"]["value"].as_f64().filter(|x| *x > 0.0).map(|x| json!({ "value": x, "count": v["rating"]["count"] })),
+        "poster": v["pic"]["large"].as_str().or(v["cover_url"].as_str()),
+        "intro": v["intro"].as_str().map(text).unwrap_or_default(),
+        "author_intro": v["author_intro"].as_str().map(text).unwrap_or_default(),
+    });
+    merge(own, book_fields(desc))
+}
+
+/// 图书简介区块（“内容简介” / “作者简介”）：展开后的全文优先，去掉内嵌样式
+fn book_section(html: &str, heading: &str) -> String {
+    let Some(rest) = html.split(&format!("<span>{heading}</span>")).nth(1) else {
+        return String::new();
+    };
+    let rest = rest.split("<h2").next().unwrap_or(rest);
+    let rest = rest.split("<span class=\"all hidden\">").nth(1).unwrap_or(rest);
+    let mut s = between(rest, "<div class=\"intro\">", "</div>")
+        .unwrap_or("")
+        .to_owned();
+    while let (Some(i), Some(j)) = (s.find("<style"), s.find("</style>")) {
+        if j < i {
+            break;
+        }
+        s.replace_range(i..j + "</style>".len(), "");
+    }
+    text(&s)
+}
+
+/// 解析图书条目页（`book.douban.com/subject/<id>/`）
+pub fn book_page(html: &str) -> Page {
+    if html.contains("检测到有异常请求")
+        || (html.contains("sec.douban.com") && !html.contains("v:itemreviewed"))
+    {
+        return Page::Blocked;
+    }
+    if html.contains("你想访问的页面不存在") || !html.contains("v:itemreviewed") {
+        return Page::NotFound;
+    }
+    let ld: Value = between(html, "<script type=\"application/ld+json\">", "</script>")
+        .map(|s| s.replace(['\r', '\n', '\t'], ""))
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null);
+    let mut v = book_fields(&info_fields(html));
+    let rating = between(html, "property=\"v:average\">", "<")
+        .map(|r| r.trim().to_owned())
+        .and_then(|r| r.parse::<f64>().ok())
+        .filter(|x| *x > 0.0);
+    let votes = between(html, "property=\"v:votes\">", "<")
+        .and_then(|n| n.trim().parse::<i64>().ok())
+        .unwrap_or(0);
+    let poster = between(html, "<div id=\"mainpic\"", "</div>")
+        .and_then(|m| between(m, "href=\"", "\""))
+        .filter(|p| p.contains("doubanio.com"))
+        .or_else(|| between(html, "<meta property=\"og:image\" content=\"", "\""));
+    v["title"] = json!(
+        between(html, "property=\"v:itemreviewed\">", "</span>")
+            .map(text)
+            .unwrap_or_default()
+    );
+    if v["isbn"].is_null() {
+        v["isbn"] = ld["isbn"].clone();
+    }
+    v["rating"] = rating.map_or(Value::Null, |x| json!({ "value": x, "count": votes }));
+    v["poster"] = json!(poster);
+    v["intro"] = json!(book_section(html, "内容简介"));
+    v["author_intro"] = json!(book_section(html, "作者简介"));
+    Page::Ok(v)
+}
+
+/// 移动端图书搜索（`/rexxar/api/v2/search/book?q=`），年份取自卡片副标题
+pub fn rexxar_book_search(body: &[u8]) -> Vec<Value> {
+    let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    v["items"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|x| x["target_type"] == "book")
+                .filter_map(|x| {
+                    let t = &x["target"];
+                    let sub = t["card_subtitle"].as_str().unwrap_or("");
+                    let year = sub.split(" / ").find_map(|p| p.trim().get(..4).filter(|y| y.bytes().all(|b| b.is_ascii_digit())).and_then(|y| y.parse::<i64>().ok()));
+                    Some(json!({ "external_id": format!("book:{}", t["id"].as_str()?), "title": t["title"], "subtitle": sub, "year": year, "kind": "book" }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// 获奖页（`/subject/<id>/awards/`）：每个奖项一段，标题一行、各奖项一行
 pub fn awards(html: &str) -> String {
     let Some(article) = html.split("<div class=\"article\">").nth(1) else { return String::new() };
@@ -314,17 +496,22 @@ pub fn awards(html: &str) -> String {
         .join("\n\n")
 }
 
-/// 搜索建议接口（`/j/subject_suggest?q=`）→ 统一的搜索结果
+/// 搜索建议接口（movie / book 子域的 `/j/subject_suggest?q=`）→ 统一的搜索结果
 pub fn suggest(body: &[u8]) -> Vec<Value> {
     let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
     v.as_array()
         .map(|a| {
             a.iter()
-                .filter(|x| x["type"] == "movie" && x["id"].as_str().is_some())
+                .filter(|x| matches!(x["type"].as_str(), Some("movie" | "b")) && x["id"].as_str().is_some())
                 .map(|x| {
+                    let year = x["year"].as_str().and_then(|y| y.parse::<i64>().ok());
+                    if x["type"] == "b" {
+                        return json!({ "external_id": format!("book:{}", x["id"].as_str().unwrap_or("")), "title": x["title"],
+                                       "subtitle": x["author_name"], "year": year, "kind": "book" });
+                    }
                     let tv = x["episode"].as_str().is_some_and(|e| !e.is_empty());
                     json!({ "external_id": x["id"], "title": x["title"], "original_title": x["sub_title"],
-                            "year": x["year"].as_str().and_then(|y| y.parse::<i64>().ok()), "kind": if tv { "tv" } else { "movie" } })
+                            "year": year, "kind": if tv { "tv" } else { "movie" } })
                 })
                 .collect()
         })
@@ -447,6 +634,154 @@ mod tests {
         assert_eq!(h5_imdb("<tr><td>IMDb</td>\n   <td>tt0111161</td></tr>").as_deref(), Some("tt0111161"));
         let s = br#"{"items":[{"target_type":"tv","target":{"id":"37040714","title":"t","year":"2026","card_subtitle":"x"}},{"target_type":"doulist","target":{"id":"1"}}]}"#;
         assert_eq!(rexxar_search(s), vec![json!({ "external_id": "37040714", "title": "t", "subtitle": "x", "year": 2026, "kind": "tv" })]);
+    }
+
+    const BOOK_PAGE: &str = r#"<html><head><title>示例之书 (豆瓣)</title>
+<script type="application/ld+json">
+{
+  "@context":"http://schema.org",
+  "@type":"Book",
+  "name" : "示例之书",
+  "author": [ { "@type": "Person", "name": "[英] 某作者" } ],
+  "url" : "https://book.douban.com/subject/1000001/",
+  "isbn" : "9787111111115"
+}
+</script>
+<meta property="og:image" content="https://img1.doubanio.com/view/subject/l/public/s1.jpg" />
+</head><body>
+<h1><span property="v:itemreviewed">示例之书</span></h1>
+<div id="mainpic">
+  <a class="nbg"
+      href="https://img1.doubanio.com/view/subject/l/public/s1.jpg" title="示例之书">
+    <img src="https://img1.doubanio.com/view/subject/s/public/s1.jpg" /></a>
+</div>
+<div id="info">
+    <span>
+      <span class="pl"> 作者</span>:
+            <a href="/author/1">[英] 某作者</a>
+            /
+            <a href="/author/2">另一位</a>
+    </span><br/>
+    <span class="pl">出版社:</span>
+      <a href="https://book.douban.com/press/1">示例出版社</a>
+    <br>
+    <span class="pl">原作名:</span> An Example Book<br/>
+    <span>
+      <span class="pl"> 译者</span>:
+        <a href="/search/x">某译者</a>
+    </span><br/>
+    <span class="pl">出版年:</span> 2011-6<br/>
+      <span class="pl">ISBN:</span> 9787111111115<br/>
+    <span class="pl">页数:</span> 360<br/>
+    <span class="pl">定价:</span> 39.50元<br/>
+    <span class="pl">装帧:</span> 精装<br/>
+    <span class="pl">丛书:</span>&nbsp;<a href="https://book.douban.com/series/1">示例文库</a><br>
+</div>
+<strong class="ll rating_num" property="v:average"> 9.1 </strong>
+<a href="comments" class="rating_people"><span property="v:votes">1234</span>人评价</a>
+<h2><span>内容简介</span>&nbsp;&middot;</h2>
+<div class="indent" id="link-report">
+  <span class="short"><div class="intro"><p>短的……</p></div></span>
+  <span class="all hidden">
+    <div class="intro">
+<style type="text/css" media="screen">
+.intro p{text-indent:2em;}
+</style>
+    <p>第一段&middot;全文。</p><p>第二段。</p></div>
+  </span>
+</div>
+<h2><span>作者简介</span>&nbsp;&middot;</h2>
+<div class="indent "><div class="intro"><p>某作者，生于某地。</p></div></div>
+<h2><span>目录</span></h2>
+</body></html>"#;
+
+    #[test]
+    fn parses_book_page() {
+        let Page::Ok(v) = book_page(BOOK_PAGE) else {
+            panic!("not parsed")
+        };
+        assert_eq!(v["title"], "示例之书");
+        assert_eq!(v["authors"], json!(["[英] 某作者", "另一位"]));
+        assert_eq!(v["translators"], json!(["某译者"]));
+        assert_eq!(v["publisher"], "示例出版社");
+        assert_eq!(v["original_title"], "An Example Book");
+        assert_eq!(v["pubdate"], "2011-6");
+        assert_eq!(v["isbn"], "9787111111115");
+        assert_eq!(v["pages"], 360);
+        assert_eq!(v["binding"], "精装");
+        assert_eq!(v["series"], "示例文库");
+        assert_eq!(v["rating"], json!({ "value": 9.1, "count": 1234 }));
+        assert_eq!(
+            v["poster"],
+            "https://img1.doubanio.com/view/subject/l/public/s1.jpg"
+        );
+        assert_eq!(v["intro"], "第一段·全文。\n第二段。");
+        assert_eq!(v["author_intro"], "某作者，生于某地。");
+        assert!(matches!(
+            book_page("<html>你想访问的页面不存在</html>"),
+            Page::NotFound
+        ));
+    }
+
+    #[test]
+    fn maps_book_rexxar_and_search() {
+        let v = json!({ "id": "1000001", "title": "示例之书", "book_subtitle": "", "subtitle": [], "author": ["[英] 某作者"], "translator": ["某译者"],
+                        "press": ["示例出版社"], "producers": ["示例文化"], "pubdate": ["2011-6"], "pages": ["360页"], "price": ["39.50元"],
+                        "book_series": { "title": "示例文库" }, "rating": { "count": 1234, "value": 9.1 },
+                        "pic": { "large": "https://img1.doubanio.com/view/subject/l/public/s1.jpg" }, "intro": "第一段。\n第二段。", "author_intro": "某作者。" });
+        let desc = h5_table(
+            "<table><tr>\n <td>作者</td>\n <td>[英] 某作者</td></tr><tr><td>ISBN</td>\n<td>9787111111115</td></tr>\
+                             <tr><td>原作名</td><td>An Example Book</td></tr><tr><td>装帧</td><td>精装</td></tr></table>",
+        );
+        assert_eq!(desc.len(), 4);
+        let b = book_from_rexxar(&v, &desc);
+        assert_eq!(
+            (
+                b["isbn"].clone(),
+                b["original_title"].clone(),
+                b["binding"].clone()
+            ),
+            (json!("9787111111115"), json!("An Example Book"), json!("精装"))
+        );
+        assert_eq!(
+            (b["pages"].clone(), b["producer"].clone(), b["subtitle"].clone()),
+            (json!(360), json!("示例文化"), Value::Null)
+        );
+        // 移动端接口没有 ISBN 时仍可用
+        assert!(book_from_rexxar(&v, &[])["isbn"].is_null());
+        let s = r#"{"items":[{"target_type":"book","target":{"id":"1000001","title":"t","year":null,"card_subtitle":"[英] 某作者 / 2011 / 示例出版社"}},
+                              {"target_type":"movie","target":{"id":"2"}}]}"#;
+        assert_eq!(
+            rexxar_book_search(s.as_bytes()),
+            vec![
+                json!({ "external_id": "book:1000001", "title": "t", "subtitle": "[英] 某作者 / 2011 / 示例出版社", "year": 2011, "kind": "book" })
+            ]
+        );
+        let r = suggest(br#"[{"title":"t","author_name":"a","year":"2011","type":"b","id":"1000001"}]"#);
+        assert_eq!(r[0]["external_id"], "book:1000001");
+        let d = crate::mapper::from_book("1000001", &b);
+        assert_eq!(d["kind"], "book");
+        assert_eq!(d["year"], 2011);
+        assert!(d["release_date"].is_null());
+        assert_eq!(d["ids"], json!({ "douban": "1000001", "isbn": "9787111111115" }));
+        assert_eq!(d["titles"]["original"], "An Example Book");
+        assert_eq!(d["people"][1], json!({ "name": "某译者", "role": "translator" }));
+        assert_eq!(d["ratings"]["douban"], json!({ "value": 9.1, "votes": 1234 }));
+        assert_eq!(
+            d["attribution"]["url"],
+            "https://book.douban.com/subject/1000001/"
+        );
+        let t = crate::mapper::intro(&d, Some("/media/b.jpg"), false);
+        assert!(t.starts_with("[img]/media/b.jpg[/img]\n\n◎书　　名　示例之书\n◎原 作 名　An Example Book\n◎作　　者　[英] 某作者"), "{t}");
+        assert!(t.contains("◎ＩＳＢＮ　9787111111115"), "{t}");
+        assert!(
+            t.contains("◎豆瓣链接　https://book.douban.com/subject/1000001/"),
+            "{t}"
+        );
+        assert!(
+            t.ends_with("◎内容简介\n\n　　第一段。\n　　第二段。\n\n◎作者简介\n\n　　某作者。"),
+            "{t}"
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! - 宿主接口 `pt:plugin@1.0.0` 的绑定在本 crate 中生成一次（`pt_plugin_sdk::sql`、`pt_plugin_sdk::kv` …），插件用
 //!   [`world!`] 生成自己的导出绑定并复用这些导入，不必各自生成宿主接口。
 //! - 便捷封装：错误构造（[`err`]）、SQL 参数与结果读取（[`SqlValue`] 的 `From` 实现、[`RowExt`]）、调用上下文
-//!   （[`ctx`]）、业务服务（[`ctx::call`]）、事件、钩子、延迟任务、日志（[`logging`]）、HTTP 应答（[`http`]）。
+//!   （[`ctx`]）、业务服务（[`ctx::call`]）、事件、钩子、延迟任务、日志（[`logging`]）、HTTP 应答（[`http`]）、上游限速与熔断（[`upstream`]）。
 //!
 //! 最小插件：
 //!
@@ -50,6 +50,7 @@ pub use types::PluginError;
 pub mod ctx;
 pub mod http;
 pub mod logging;
+pub mod upstream;
 mod values;
 
 pub use values::RowExt;

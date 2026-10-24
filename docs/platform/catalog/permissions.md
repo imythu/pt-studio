@@ -46,8 +46,8 @@
 | `torrent.tags.manage` | torrent | 设置官方 / 置顶 / 禁转等标签 | moderator |
 | `torrent.groups.manage` | torrent | 编辑、合并 Group | moderator |
 | `torrent.anonymous.reveal` | torrent | 查看匿名发布者 | admin |
-| `tracker-bridge.clients.manage` | tracker-bridge | 客户端白名单 | admin |
-| `tracker-bridge.peers.read` | tracker-bridge | 查看 peer 列表 | moderator |
+| `tracker-bridge.clients.manage` | tracker-bridge | 客户端规则（读取 / 替换 / 测试 / 预设）与被拒客户端排行 | admin |
+| `tracker-bridge.peers.read` | tracker-bridge | 查看 peer 列表与 tracker 节点状态 | moderator |
 | `tracker-bridge.resync` | tracker-bridge | 全量重建同步 | sysop |
 | `accounting.stats.read` | accounting | 查看他人流量明细 | moderator |
 | `accounting.traffic.adjust` | accounting | 手工调整上传 / 下载量 | admin |

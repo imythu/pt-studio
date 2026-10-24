@@ -1,0 +1,74 @@
+{
+  "description": "客户端规则匹配的共用测试向量（tracker-bridge LLD §1.5、pt-tracker LLD §1.5.4）：tracker-bridge 的规则测试接口与 pt-tracker 的准入必须给出相同结果。peer_id 用 %XX 表示任意字节。",
+  "groups": [
+    {
+      "name": "presets",
+      "rules": {
+        "default": "deny",
+        "rules": [
+          { "id": 5, "name": "qBittorrent 4.6.0（有缺陷）", "action": "deny", "pid_prefix": "-qB4600-" },
+          { "id": 3, "name": "qBittorrent ≥ 4.3", "action": "allow", "pid_regex": "^-qB(?P<ver>[0-9A-Z]{4})-", "min_ver": "4.3", "ua_prefix": "qBittorrent/" },
+          { "id": 4, "name": "Transmission ≥ 3.0", "action": "allow", "pid_regex": "^-TR(?P<ver>[0-9]{3})[0-9Z]-", "min_ver": "3.0" },
+          { "id": 6, "name": "rTorrent ≥ 0.13.8", "action": "allow", "pid_regex": "^-lt(?P<ver>[0-9A-Z]{3})", "min_ver": "0.13.8" },
+          { "id": 7, "name": "迅雷", "action": "deny", "pid_prefix": "-XL" },
+          { "id": 8, "name": "Deluge 2.x", "action": "allow", "ua_regex": "^Deluge/2\\." },
+          { "id": 9, "name": "µTorrent ≤ 3.5.5", "action": "allow", "pid_regex": "^-UT(?P<ver>[0-9A-Z]{3})", "max_ver": "3.5.5" }
+        ]
+      },
+      "cases": [
+        { "peer_id": "-qB4630-a1b2c3d4e5f6", "ua": "qBittorrent/4.6.3", "action": "allow", "rule_id": 3 },
+        { "peer_id": "-qB5120-a1b2c3d4e5f6", "ua": "qBittorrent/5.1.2", "action": "allow", "rule_id": 3 },
+        { "peer_id": "-qB4600-a1b2c3d4e5f6", "ua": "qBittorrent/4.6.0", "action": "deny", "rule_id": 5 },
+        { "peer_id": "-qB4250-a1b2c3d4e5f6", "ua": "qBittorrent/4.2.5", "action": "deny", "rule_id": null },
+        { "peer_id": "-qB4300-a1b2c3d4e5f6", "ua": "qBittorrent/4.3.0", "action": "allow", "rule_id": 3 },
+        { "peer_id": "-qB4630-a1b2c3d4e5f6", "ua": "", "action": "deny", "rule_id": null },
+        { "peer_id": "-TR4060-a1b2c3d4e5f6", "ua": "Transmission/4.0.6", "action": "allow", "rule_id": 4 },
+        { "peer_id": "-TR300Z-a1b2c3d4e5f6", "ua": "Transmission/3.00", "action": "allow", "rule_id": 4 },
+        { "peer_id": "-TR2940-a1b2c3d4e5f6", "ua": "Transmission/2.94", "action": "deny", "rule_id": null },
+        { "peer_id": "-lt0D80-a1b2c3d4e5f6", "ua": "rtorrent/0.9.8/0.13.8", "action": "allow", "rule_id": 6 },
+        { "peer_id": "-lt0D70-a1b2c3d4e5f6", "ua": "rtorrent/0.9.7/0.13.7", "action": "deny", "rule_id": null },
+        { "peer_id": "-XL0012-a1b2c3d4e5f6", "ua": "Xunlei 0.0.1.2", "action": "deny", "rule_id": 7 },
+        { "peer_id": "-DE2110-a1b2c3d4e5f6", "ua": "Deluge/2.1.1 libtorrent/2.0.9.0", "action": "allow", "rule_id": 8 },
+        { "peer_id": "-DE13F0-a1b2c3d4e5f6", "ua": "Deluge 1.3.15", "action": "deny", "rule_id": null },
+        { "peer_id": "-DE212s-a1b2c3d4e5f6", "ua": "Deluge/2.1.2.dev0 libtorrent/2.0.10.0", "action": "allow", "rule_id": 8 },
+        { "peer_id": "-UT355W-a1b2c3d4e5f6", "ua": "uTorrent/355(46154)", "action": "allow", "rule_id": 9 },
+        { "peer_id": "-UT360B-a1b2c3d4e5f6", "ua": "uTorrent/360(46430)", "action": "deny", "rule_id": null }
+      ]
+    },
+    {
+      "name": "bytes_and_default_allow",
+      "rules": {
+        "default": "allow",
+        "rules": [
+          { "id": 1, "name": "escaped prefix", "action": "deny", "pid_prefix": "-UT%32%32" },
+          { "id": 2, "name": "binary prefix", "action": "deny", "pid_prefix": "%00%FF" },
+          { "id": 3, "name": "version chars must be base36", "action": "deny", "pid_regex": "^-ZZ(?P<ver>..)", "min_ver": "1" },
+          { "id": 4, "name": "latin-1 regex", "action": "deny", "pid_regex": "^\\xFF" },
+          { "id": 5, "name": "lowercase base36", "action": "deny", "pid_regex": "^-LC(?P<ver>[0-9a-z]{2})", "min_ver": "1.21" }
+        ]
+      },
+      "cases": [
+        { "peer_id": "-UT2210-a1b2c3d4e5f6", "ua": "", "action": "deny", "rule_id": 1 },
+        { "peer_id": "%00%FFa1b2c3d4e5f6a1b2", "ua": "", "action": "deny", "rule_id": 2 },
+        { "peer_id": "-ZZ1--a1b2c3d4e5f6a", "ua": "", "action": "allow", "rule_id": null },
+        { "peer_id": "-ZZ12-a1b2c3d4e5f6a", "ua": "", "action": "deny", "rule_id": 3 },
+        { "peer_id": "-ZZ01-a1b2c3d4e5f6a", "ua": "", "action": "allow", "rule_id": null },
+        { "peer_id": "%FFa1b2c3d4e5f6a1b2c", "ua": "", "action": "deny", "rule_id": 4 },
+        { "peer_id": "-LC1k-a1b2c3d4e5f6a", "ua": "", "action": "allow", "rule_id": null },
+        { "peer_id": "-LC1z-a1b2c3d4e5f6a", "ua": "", "action": "deny", "rule_id": 5 },
+        { "peer_id": "-AB1234-a1b2c3d4e5f6", "ua": "Anything/1.0", "action": "allow", "rule_id": null }
+      ]
+    }
+  ],
+  "invalid": [
+    { "name": "regex syntax", "rules": { "default": "deny", "rules": [{ "id": 1, "action": "allow", "pid_regex": "^-qB(" }] } },
+    { "name": "ua regex syntax", "rules": { "default": "deny", "rules": [{ "id": 1, "action": "allow", "ua_regex": "[" }] } },
+    { "name": "version format", "rules": { "default": "deny", "rules": [{ "id": 1, "action": "allow", "pid_regex": "^-qB(?P<ver>.{4})", "min_ver": "4.x" }] } },
+    { "name": "version too long", "rules": { "default": "deny", "rules": [{ "id": 1, "action": "allow", "pid_regex": "^-qB(?P<ver>.{4})", "max_ver": "1.2.3.4.5" }] } },
+    { "name": "bad escape", "rules": { "default": "deny", "rules": [{ "id": 1, "action": "allow", "pid_prefix": "-UT%G1" }] } },
+    { "name": "prefix over 20 bytes", "rules": { "default": "deny", "rules": [{ "id": 1, "action": "allow", "pid_prefix": "-qB4630-a1b2c3d4e5f6x" }] } },
+    { "name": "unknown action", "rules": { "default": "deny", "rules": [{ "id": 1, "action": "maybe", "pid_prefix": "-qB" }] } },
+    { "name": "unknown default", "rules": { "default": "maybe", "rules": [] } },
+    { "name": "missing default", "rules": { "rules": [] } }
+  ]
+}

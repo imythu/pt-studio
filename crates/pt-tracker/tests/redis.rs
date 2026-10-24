@@ -1,6 +1,6 @@
 //! 集成测试（真实 Redis；`PT_TRACKER_TEST_REDIS`，默认 redis://127.0.0.1:56379/13，测试会清空该库；不可达时跳过）：
 //! 两个 tracker 节点共用 Redis（无状态）、swarm 内容与人数、做种者只拿下载者、完成计数与 scrape、准入拒绝、
-//! 非紧凑格式、流量事件、CAS 冲突、变更流实时生效。
+//! 非紧凑格式、流量事件、CAS 冲突、变更流实时生效、节点状态心跳、客户端规则更新与被拒客户端统计。
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -364,4 +364,88 @@ async fn tracker_against_redis() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     assert!(banned, "ban did not propagate through trk:sync");
+
+    // 节点状态：每个节点写 trk:stats:node:<id>（带 TTL），同步位置为最近应用的 trk:sync 条目
+    let mut c = r.clone();
+    let mut ok = false;
+    for _ in 0..30 {
+        let h: HashMap<String, String> = redis::cmd("HGETALL")
+            .arg("trk:stats:node:n1")
+            .query_async(&mut c)
+            .await
+            .unwrap();
+        if h.get("sid").is_some_and(|s| !s.is_empty()) {
+            assert_eq!(h["ver"], env!("CARGO_PKG_VERSION"));
+            assert!(h.contains_key("boot") && h.contains_key("rps") && h.contains_key("lag_ms"));
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(ok, "node status not written");
+    let ttl: i64 = redis::cmd("TTL")
+        .arg("trk:stats:node:n2")
+        .query_async(&mut c)
+        .await
+        .unwrap();
+    assert!((1..=30).contains(&ttl), "ttl {ttl}");
+
+    // 被拒客户端随心跳写入当天的 trk:stats:denied（member 为 peer_id 前 8 字节 | UA）
+    let day = format!("trk:stats:denied:{}", pt_tracker::clients::utc_day(pt_tracker::now()));
+    let mut n = None;
+    for _ in 0..30 {
+        n = redis::cmd("ZSCORE")
+            .arg(&day)
+            .arg("-ZZ0001-|qBittorrent/5.1.0")
+            .query_async::<Option<f64>>(&mut c)
+            .await
+            .unwrap();
+        if n.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert_eq!(n, Some(1.0), "denied client not counted");
+    let ttl: i64 = redis::cmd("TTL").arg(&day).query_async(&mut c).await.unwrap();
+    assert!(ttl > 7 * 86_400, "ttl {ttl}");
+
+    // 规则变更经 trk:sync 生效：带最低版本的规则拒绝旧版本
+    cmd(
+        &mut r,
+        &[
+            "SET",
+            "trk:clients",
+            r#"{"ver":20,"default":"deny","rules":[{"id":1,"action":"allow","pid_regex":"^-qB(?P<ver>[0-9A-Z]{4})-","min_ver":"4.3","ua_prefix":"qBittorrent/"}]}"#,
+        ],
+    )
+    .await;
+    cmd(
+        &mut r,
+        &["XADD", "trk:sync", "*", "kind", "clients", "key", "clients", "op", "upsert", "ver", "20"],
+    )
+    .await;
+    let q = "port=6890&uploaded=0&downloaded=0&left=100";
+    let mut applied = false;
+    for _ in 0..50 {
+        if announce(n1, PK_B, &pid("-qB4250-"), q).await.contains("client not allowed") {
+            applied = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(applied, "client rules did not propagate through trk:sync");
+    assert!(!announce(n1, PK_B, &pid("-qB4630-"), q).await.contains("failure"));
+    // 无效的规则集不生效（保留上一版）
+    cmd(
+        &mut r,
+        &["SET", "trk:clients", r#"{"ver":21,"default":"allow","rules":[{"id":1,"action":"allow","pid_regex":"("}]}"#],
+    )
+    .await;
+    cmd(
+        &mut r,
+        &["XADD", "trk:sync", "*", "kind", "clients", "key", "clients", "op", "upsert", "ver", "21"],
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    assert!(announce(n1, PK_B, &pid("-qB4250-"), q).await.contains("client not allowed"));
 }

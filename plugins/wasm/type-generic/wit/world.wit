@@ -6,4 +6,6 @@ world type-generic {
   export pt:plugin/content-type@1.0.0;
   export pt:plugin/search-contributor@1.0.0;
   export pt:plugin/http-handler@1.0.0;
+  export pt:plugin/on-event@1.0.0;
+  export pt:plugin/on-cron@1.0.0;
 }

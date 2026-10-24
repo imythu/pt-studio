@@ -39,6 +39,11 @@ pub fn event(ev: &'static str) {
     }
 }
 
+/// 已处理的 announce 总数（节点状态的 announce 速率）
+pub fn announces_total() -> u64 {
+    M.lock().map_or(0, |g| g.count)
+}
+
 pub fn announce_latency(secs: f64) {
     if let Ok(mut g) = M.lock() {
         for (i, b) in BUCKETS.iter().enumerate() {

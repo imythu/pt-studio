@@ -83,8 +83,31 @@ function safeJson(text: string): unknown {
   }
 }
 
-export async function api<T = unknown>(path: Path, opts?: RequestOptions): Promise<T> {
-  return parse<T>(await apiFetch(path, opts));
+/** 重新验证处理器：弹出密码 / 第二因素对话框，验证成功返回 true，用户取消返回 false */
+export type ReauthHandler = () => Promise<boolean>;
+
+let reauthHandler: ReauthHandler | null = null;
+let reauthPending: Promise<boolean> | null = null;
+
+/** 由应用外壳注册（插件不调用）；之后任何 `api()` 收到 `identity.reauth_required` 都先重新验证再重试一次 */
+export function setReauthHandler(h: ReauthHandler | null): void {
+  reauthHandler = h;
+}
+
+export async function api<T = unknown>(path: Path, opts: RequestOptions = {}): Promise<T> {
+  // 重试复用同一个幂等键；流式请求体无法重放，不重试
+  const o = opts.idempotent === true ? { ...opts, idempotent: idempotencyKey() } : opts;
+  try {
+    return await parse<T>(await apiFetch(path, o));
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.code !== 'identity.reauth_required' || !reauthHandler || (typeof ReadableStream !== 'undefined' && o.body instanceof ReadableStream)) throw e;
+    // 并发请求共用一次验证
+    reauthPending ??= reauthHandler().finally(() => {
+      reauthPending = null;
+    });
+    if (!(await reauthPending)) throw e;
+    return parse<T>(await apiFetch(path, o));
+  }
 }
 
 // ---------------- 常用接口的类型 ----------------

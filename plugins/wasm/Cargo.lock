@@ -375,7 +375,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-wasm-metadata-bangumi"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+ "sha2",
+]
+
+[[package]]
 name = "pt-wasm-metadata-douban"
+version = "0.1.0"
+dependencies = [
+ "pt-plugin-sdk",
+ "sha2",
+]
+
+[[package]]
+name = "pt-wasm-metadata-musicbrainz"
 version = "0.1.0"
 dependencies = [
  "pt-plugin-sdk",

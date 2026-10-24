@@ -92,12 +92,29 @@
 | `metadata-tmdb.id_invalid` | 422 | metadata-tmdb | ID 格式错误 |
 | `metadata-tmdb.not_found` | 404 | metadata-tmdb | TMDB 条目不存在 |
 | `metadata-tmdb.upstream_error` | 502 | metadata-tmdb | TMDB 上游错误 |
+| `metadata-douban.not_enabled` | 503 | metadata-douban | 豆瓣数据源未启用 |
+| `metadata-douban.not_configured` | 503 | metadata-douban | 代理 / PT-Gen 模式未配置地址 |
+| `metadata-douban.id_invalid` | 422 | metadata-douban | 不是豆瓣条目编号、条目链接、`book:<编号>` 或有效 ISBN |
+| `metadata-douban.not_found` | 404 | metadata-douban | 条目不存在 |
+| `metadata-douban.upstream_error` | 502 | metadata-douban | 豆瓣 / 代理 / PT-Gen 上游错误 |
+| `metadata-douban.search_unsupported` | 501 | metadata-douban | 所配置的上游不支持搜索 |
+| `metadata-douban.unsupported` | 501 | metadata-douban | 所配置的上游不支持该查询（PT-Gen 模式不提供图书） |
+| `metadata-douban.blocked` | 503 | metadata-douban | 被豆瓣拦截（限流），可在设置中填 Cookie |
+| `metadata-bangumi.id_invalid` | 422 | metadata-bangumi | 不是 Bangumi 条目编号或链接 |
+| `metadata-bangumi.not_found` | 404 | metadata-bangumi | 条目不存在，或为未允许的 NSFW 条目 |
+| `metadata-bangumi.upstream_error` | 502 | metadata-bangumi | Bangumi 上游错误（限速 / 熔断时可重试） |
+| `metadata-musicbrainz.id_invalid` | 422 | metadata-musicbrainz | 不是 `release-group:` / `release:` / `artist:` 加 MBID 或对应链接 |
+| `metadata-musicbrainz.not_found` | 404 | metadata-musicbrainz | 条目不存在 |
+| `metadata-musicbrainz.upstream_error` | 502 | metadata-musicbrainz | MusicBrainz 上游错误（限速 / 熔断时可重试） |
 | `type-tv.scope_invalid` | 422 | type-tv | 范围（单集 / 多集 / 季包 / 全集）与季集字段组合不合法 |
 | `type-tv.external_id_required` | 422 | type-tv | 标题与外部 ID 至少填一项 |
 | `type-tv.scope_mismatch` | 422 | type-tv | 种子文件列表与声明的范围不符（集号越界、季包缺集等） |
 | `type-anime.scope_invalid` | 422 | type-anime | 范围与季集字段组合不合法 |
 | `type-anime.external_id_required` | 422 | type-anime | 标题与外部 ID 至少填一项 |
 | `type-anime.subtitle_invalid` | 422 | type-anime | 字幕语言 / 方式无法识别 |
+| `tracker-bridge.rules_invalid` | 422 | tracker-bridge | 客户端规则校验失败；`errors[]` 逐条定位（`/rules/<下标>/<字段>`） |
+| `tracker-bridge.invalid_peer_id` | 422 | tracker-bridge | 规则测试的 peer_id 无法解码为 ≤ 20 字节 |
+| `tracker-bridge.redis_unavailable` | 503 | tracker-bridge | tracker 用的 Redis 不可用 |
 | `type-anime.scope_mismatch` | 422 | type-anime | 种子文件列表与声明的范围不符 |
 | `type-music.format_encoding_invalid` | 422 | type-music | 格式与编码组合不合法 |
 | `type-music.no_audio_files` | 422 | type-music | 种子中没有与格式对应的音频文件 |

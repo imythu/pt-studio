@@ -75,6 +75,34 @@ fn genre(id: i64) -> Option<&'static str> {
     })
 }
 
+/// 保留的翻译标题（站点界面语言与常用中文变体）
+const TITLE_LOCALES: [&str; 5] = ["zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP"];
+
+/// 缓存时长：近 90 天上映 / 首播或仍在连载的剧集变化快，用短 TTL（LLD §1.4）
+/// `today` 为 [`day_of`] 的结果
+pub fn volatile(data: &Value, today: i64) -> bool {
+    if data["extra"]["status"] == "returning" {
+        return true;
+    }
+    data["release_date"]
+        .as_str()
+        .and_then(days)
+        .is_some_and(|d| (today - 90..=today + 365).contains(&d))
+}
+
+/// Unix 毫秒 → 与 [`days`] 同一坐标的天数
+pub fn day_of(ms: i64) -> i64 {
+    days("1970-01-01").unwrap_or(0) + ms.div_euclid(86_400_000)
+}
+
+/// `YYYY-MM-DD` → 自 0000-03-01 起的天数（只用于比较远近）
+fn days(d: &str) -> Option<i64> {
+    let mut it = d.get(..10)?.split('-').map(|x| x.parse::<i64>().ok());
+    let (y, m, dd) = (it.next()??, it.next()??, it.next()??);
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    Some(365 * y + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + dd - 1)
+}
+
 fn s(v: &Value) -> Option<String> {
     v.as_str().filter(|x| !x.is_empty()).map(str::to_owned)
 }
@@ -91,6 +119,19 @@ pub fn map(kind: &str, r: &Value, locale: &str) -> Value {
         .and_then(|d| d.get(..4))
         .and_then(|y| y.parse::<i64>().ok());
     let mut localized = Map::new();
+    // `append_to_response=translations`：其他语言的标题；当前语言以主体字段为准
+    for t in r["translations"]["translations"].as_array().into_iter().flatten() {
+        let (Some(lang), Some(region)) = (t["iso_639_1"].as_str(), t["iso_3166_1"].as_str()) else {
+            continue;
+        };
+        let tag = format!("{lang}-{region}");
+        if let (true, Some(v)) = (
+            TITLE_LOCALES.contains(&tag.as_str()),
+            s(&t["data"][if movie { "title" } else { "name" }]),
+        ) {
+            localized.insert(tag, json!(v));
+        }
+    }
     if let Some(t) = &title {
         localized.insert(locale.into(), json!(t));
     }
@@ -247,5 +288,47 @@ mod tests {
         );
         assert_eq!(m["extra"]["status"], "ended");
         assert_eq!(m["ids"]["tvdb"], 121361);
+    }
+
+    #[test]
+    fn translated_titles() {
+        let r = json!({ "id": 1, "title": "黑客帝国", "translations": { "translations": [
+            { "iso_639_1": "zh", "iso_3166_1": "TW", "data": { "title": "駭客任務" } },
+            { "iso_639_1": "zh", "iso_3166_1": "CN", "data": { "title": "旧译名" } },
+            { "iso_639_1": "en", "iso_3166_1": "US", "data": { "title": "The Matrix" } },
+            { "iso_639_1": "fr", "iso_3166_1": "FR", "data": { "title": "Matrix" } },
+            { "iso_639_1": "ja", "iso_3166_1": "JP", "data": { "title": "" } },
+        ] } });
+        let m = map("movie", &r, "zh-CN");
+        assert_eq!(
+            m["titles"]["localized"],
+            json!({ "zh-CN": "黑客帝国", "zh-TW": "駭客任務", "en-US": "The Matrix" })
+        );
+    }
+
+    #[test]
+    fn volatility() {
+        // 2026-10-24T00:00:00Z
+        let today = day_of(1_792_800_000_000);
+        assert_eq!(Some(today), days("2026-10-24"));
+        let ended = json!({ "release_date": "1999-03-30", "extra": {} });
+        assert!(!volatile(&ended, today));
+        assert!(volatile(
+            &json!({ "release_date": "2026-08-01", "extra": {} }),
+            today
+        ));
+        assert!(volatile(
+            &json!({ "release_date": "2027-03-01", "extra": {} }),
+            today
+        ));
+        assert!(!volatile(
+            &json!({ "release_date": "2026-07-01", "extra": {} }),
+            today
+        ));
+        assert!(volatile(
+            &json!({ "release_date": "2011-04-17", "extra": { "status": "returning" } }),
+            today
+        ));
+        assert!(!volatile(&json!({ "release_date": null, "extra": {} }), today));
     }
 }

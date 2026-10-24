@@ -7,18 +7,40 @@
 //!   `image_hosts` 中，类型与大小校验）、`metadata.fetched`。
 //! - `GET /v1/ptgen?id=&markup=`：按 PT-Gen 版式生成简介（BBCode / Markdown / 纯文本），海报使用转存后的站内地址。
 //!
-//! 偏差：速率限制与熔断沿用 metadata-tmdb 的待办；`refresh_stale` 未实现。
+//! - 上游保护：条目获取与搜索每秒最多 1 次（LLD §1）；连续 5 次失败（5xx、429、被豆瓣拦截、连接失败）熔断 10 分钟，期间有缓存就降级返回。
+//! - 每小时 `refresh_stale`：重新获取近 90 天用过的过期条目（每次最多 60 个，熔断打开时停止）。
 
 pt_plugin_sdk::world!("metadata-douban", http);
 
 pub mod mapper;
 pub mod scrape;
 
-use exports::pt::plugin::{http_handler, service_provider};
-use pt_plugin_sdk::{blob, config, http_client, kv, prelude::*, redis, serde_json, sql};
+use exports::pt::plugin::{http_handler, on_cron, service_provider};
+use pt_plugin_sdk::{
+    blob, config, http_client, kv, prelude::*, redis, serde_json, sql, time, upstream::Upstream,
+};
 use sha2::{Digest, Sha256};
 
 struct Douban;
+
+/// 豆瓣（或所配置的 PT-Gen / 代理）：按“一次条目获取 / 一次搜索”计数，图片不计
+const UPSTREAM: Upstream = Upstream::new("douban", "metadata-douban.upstream_error")
+    .per_sec(1)
+    .breaker(5, 600);
+const REFRESH_BATCH: i64 = 60;
+const REFRESH_BUDGET_MS: i64 = 8 * 60 * 1000;
+
+/// 经限速与熔断执行一次上游操作；可重试的错误（5xx、429、被拦截、连接失败）计为失败
+fn guarded<T>(f: impl FnOnce() -> R<T>) -> R<T> {
+    UPSTREAM.acquire()?;
+    let r = f();
+    match &r {
+        Ok(_) => UPSTREAM.record(true),
+        Err(e) if e.retryable => UPSTREAM.record(false),
+        Err(_) => {}
+    }
+    r
+}
 
 struct Cfg {
     mode: String,
@@ -68,6 +90,7 @@ fn cfg() -> Cfg {
 }
 
 const DOUBAN: &str = "https://movie.douban.com";
+const BOOK: &str = "https://book.douban.com";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 /// 设置中的启用开关；旧版本在后台页确认过的风险声明（kv `consent`）在设置未写入该键前继续有效
@@ -146,6 +169,11 @@ fn rehost(c: &Cfg, url: &str) -> Option<String> {
 
 /// 直连豆瓣：浏览器 UA（与可选 Cookie）请求页面；被拦截时提示在设置中填 Cookie
 fn douban_get(c: &Cfg, url: &str, html: bool) -> R<(u16, Vec<u8>)> {
+    douban_req(c, url, html).map(|(s, b, _)| (s, b))
+}
+
+/// 同 `douban_get`，另返回 Location（不跟随重定向）
+fn douban_req(c: &Cfg, url: &str, html: bool) -> R<(u16, Vec<u8>, Option<String>)> {
     let mut headers = vec![
         http_client::Header { name: "user-agent".into(), value: UA.into() },
         http_client::Header {
@@ -157,8 +185,41 @@ fn douban_get(c: &Cfg, url: &str, html: bool) -> R<(u16, Vec<u8>)> {
     if let Some(k) = &c.cookie {
         headers.push(http_client::Header { name: "cookie".into(), value: k.clone() });
     }
-    let (status, body, _) = send(url, headers, None, Some("https://movie.douban.com/"))?;
-    Ok((status, body))
+    let referer = if url.starts_with(BOOK) {
+        "https://book.douban.com/"
+    } else {
+        "https://movie.douban.com/"
+    };
+    headers.push(http_client::Header {
+        name: "referer".into(),
+        value: referer.into(),
+    });
+    let r = http_client::send(&http_client::OutboundRequest {
+        method: "GET".into(),
+        url: url.into(),
+        headers,
+        body: None,
+        timeout_ms: 10_000,
+    })?;
+    let loc = r
+        .headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case("location"))
+        .map(|h| h.value.clone());
+    Ok((r.status, r.body, loc))
+}
+
+/// 条目页的状态：200 → true，404 → false，跳到验证页（sec.douban.com）等 → 被拦截
+fn page_status(status: u16) -> R<bool> {
+    match status {
+        200 => Ok(true),
+        404 => Ok(false),
+        301 | 302 | 403 | 418 | 429 => Err(blocked()),
+        s => Err(PluginError {
+            retryable: s >= 500,
+            ..err("metadata-douban.upstream_error", &format!("Douban returned {s}"))
+        }),
+    }
 }
 
 fn blocked() -> PluginError {
@@ -234,12 +295,8 @@ fn direct(c: &Cfg, id: &str) -> R<Option<Value>> {
         Err(_) => {}
     }
     let (status, body) = douban_get(c, &format!("{DOUBAN}/subject/{id}/"), true)?;
-    match status {
-        200 => {}
-        404 => return Ok(None),
-        // 跳到 sec.douban.com 等验证页
-        301 | 302 | 403 | 418 | 429 => return Err(blocked()),
-        s => return Err(PluginError { retryable: s >= 500, ..err("metadata-douban.upstream_error", &format!("Douban returned {s}")) }),
+    if !page_status(status)? {
+        return Ok(None);
     }
     let html = String::from_utf8_lossy(&body);
     let mut v = match scrape::subject(&html) {
@@ -257,9 +314,107 @@ fn direct(c: &Cfg, id: &str) -> R<Option<Value>> {
     Ok(Some(v))
 }
 
+/// 图书：移动端接口 + h5 简介页（ISBN、原作名、装帧），不可用时解析桌面条目页
+fn book_direct(c: &Cfg, id: &str) -> R<Option<Value>> {
+    match rexxar_get(c, &format!("{REXXAR}/book/{id}")) {
+        Ok((200, body, _)) => {
+            if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+                let desc = match douban_get(
+                    c,
+                    &format!("https://www.douban.com/doubanapp//h5/book/{id}/desc"),
+                    true,
+                ) {
+                    Ok((200, b)) => scrape::h5_table(&String::from_utf8_lossy(&b)),
+                    _ => Vec::new(),
+                };
+                return Ok(Some(scrape::book_from_rexxar(&v, &desc)));
+            }
+        }
+        Ok((404, _, _)) => return Ok(None),
+        Err(e) if e.code != "kernel.capability_denied" => return Err(e),
+        _ => {}
+    }
+    let (status, body) = douban_get(c, &format!("{BOOK}/subject/{id}/"), true)?;
+    if !page_status(status)? {
+        return Ok(None);
+    }
+    match scrape::book_page(&String::from_utf8_lossy(&body)) {
+        scrape::Page::Ok(v) => Ok(Some(v)),
+        scrape::Page::NotFound => Ok(None),
+        scrape::Page::Blocked => Err(blocked()),
+    }
+}
+
+/// ISBN → 豆瓣图书 ID：直连时 `book.douban.com/isbn/<ISBN>/` 重定向到条目页；代理为 `/isbn/<ISBN>`（返回图书字段与 `id`）
+fn fetch_book(c: &Cfg, key: &str) -> R<Option<(String, Value)>> {
+    let (num, isbn) = match key.strip_prefix("isbn:") {
+        Some(isbn) => (None, Some(isbn)),
+        None => (key.strip_prefix("book:"), None),
+    };
+    match c.mode.as_str() {
+        "direct" => {
+            let id = match (num, isbn) {
+                (Some(n), _) => n.to_owned(),
+                (None, Some(i)) => {
+                    let (status, _, loc) = douban_req(c, &format!("{BOOK}/isbn/{i}/"), true)?;
+                    let found = loc
+                        .filter(|_| matches!(status, 301 | 302))
+                        .and_then(|l| mapper::parse_id(&l))
+                        .and_then(|k| k.strip_prefix("book:").map(str::to_owned));
+                    match found {
+                        Some(n) => n,
+                        // 不认识的 ISBN：404 或停留在搜索页
+                        None if matches!(status, 200 | 404) => return Ok(None),
+                        None => return Err(page_status(status).err().unwrap_or_else(blocked)),
+                    }
+                }
+                (None, None) => return Ok(None),
+            };
+            Ok(book_direct(c, &id)?.map(|v| (id, v)))
+        }
+        "proxy" => {
+            let url = match (num, isbn) {
+                (Some(n), _) => format!("{}/subject/{n}?type=book", c.base),
+                (None, Some(i)) => format!("{}/isbn/{i}", c.base),
+                (None, None) => return Ok(None),
+            };
+            let Some(mut v) = upstream(c, &url)? else {
+                return Ok(None);
+            };
+            let id = num
+                .map(str::to_owned)
+                .or_else(|| v["id"].as_str().map(str::to_owned))
+                .unwrap_or_default();
+            if v["poster"].is_null() {
+                v["poster"] = v["poster_url"].clone();
+            }
+            Ok(Some((id, v)))
+        }
+        _ => Err(err(
+            "metadata-douban.unsupported",
+            "the PT-Gen upstream does not provide Douban books; use direct or proxy mode",
+        )),
+    }
+}
+
 fn fetch(c: &Cfg, id: &str) -> R<Option<Value>> {
     if c.base.is_empty() {
         return Err(err("metadata-douban.not_configured", "no Douban proxy or PT-Gen endpoint is configured"));
+    }
+    if id.starts_with("book:") || id.starts_with("isbn:") {
+        let Some((num, v)) = fetch_book(c, id)? else {
+            return Ok(None);
+        };
+        let mut data = mapper::from_book(&num, &v);
+        if data["ids"]["isbn"].is_null()
+            && let Some(i) = id.strip_prefix("isbn:")
+        {
+            data["ids"]["isbn"] = json!(i);
+        }
+        if let Some(p) = v["poster"].as_str().and_then(|u| rehost(c, u)) {
+            data["images"]["poster"] = json!(p);
+        }
+        return Ok(Some(data));
     }
     let (mut data, poster) = if c.mode == "direct" {
         let Some(v) = direct(c, id)? else { return Ok(None) };
@@ -286,8 +441,8 @@ fn fetch(c: &Cfg, id: &str) -> R<Option<Value>> {
     Ok(Some(data))
 }
 
-/// 返回 (数据, 是否过期降级)
-fn lookup(raw: &str) -> R<Option<(String, Value, bool)>> {
+/// 返回 (数据, 是否过期降级)；`refresh` 为后台刷新：忽略缓存新鲜度，不更新 `last_used_at`
+fn lookup(raw: &str, refresh: bool) -> R<Option<(String, Value, bool)>> {
     if !enabled() {
         return Err(err("metadata-douban.not_enabled", "the Douban source is not enabled"));
     }
@@ -304,14 +459,16 @@ fn lookup(raw: &str) -> R<Option<(String, Value, bool)>> {
         &[SqlValue::Text(id.clone()), SqlValue::Int(c.cache_days)],
     )?;
     let hit = cached.rows.first().map(|r| (r.text(0), r.bool(1).unwrap_or(false), r.bool(2).unwrap_or(false)));
-    if let Some((data, not_found, true)) = &hit {
+    if let Some((data, not_found, true)) = &hit
+        && !refresh
+    {
         if *not_found {
             return Ok(None);
         }
         sql::execute("UPDATE cache SET last_used_at = now() WHERE external_id = $1 AND locale = 'zh-CN'", &[SqlValue::Text(id.clone())])?;
         return Ok(Some((id, serde_json::from_str(data.as_deref().unwrap_or("null")).unwrap_or(Value::Null), false)));
     }
-    let fetched = match fetch(&c, &id) {
+    let fetched = match guarded(|| fetch(&c, &id)) {
         Ok(f) => f,
         Err(e) => {
             if let Some((Some(data), false, _)) = hit {
@@ -335,8 +492,8 @@ fn lookup(raw: &str) -> R<Option<(String, Value, bool)>> {
             sql::execute(
                 "INSERT INTO cache (external_id, locale, data, not_found, content_hash, fetched_at) VALUES ($1, 'zh-CN', $2, false, $3, now())
                  ON CONFLICT (external_id, locale) DO UPDATE SET data = EXCLUDED.data, not_found = false, content_hash = EXCLUDED.content_hash,
-                        fetched_at = now(), last_used_at = now()",
-                &[SqlValue::Text(id.clone()), SqlValue::Json(data.to_string()), SqlValue::Text(hash)],
+                        fetched_at = now(), last_used_at = CASE WHEN $4 THEN cache.last_used_at ELSE now() END",
+                &[SqlValue::Text(id.clone()), SqlValue::Json(data.to_string()), SqlValue::Text(hash), SqlValue::Boolean(refresh)],
             )?;
             if changed {
                 ctx::publish(
@@ -359,15 +516,35 @@ fn search(query: &str, type_id: &str, limit: u32) -> R<Vec<Value>> {
     if q.is_empty() || q.chars().count() > 100 {
         return Err(err("kernel.validation_failed", "query must be 1..=100 characters"));
     }
+    guarded(|| search_upstream(&c, q, type_id, limit))
+}
+
+fn search_upstream(c: &Cfg, q: &str, type_id: &str, limit: u32) -> R<Vec<Value>> {
     if c.mode == "direct" {
         let n = usize::try_from(limit.clamp(1, 20)).unwrap_or(10);
-        if let Ok((200, body, _)) = rexxar_get(&c, &format!("{REXXAR}/search/movie?q={}&count={n}", enc(q))) {
+        if type_id == "book" {
+            if let Ok((200, body, _)) = rexxar_get(c, &format!("{REXXAR}/search/book?q={}&count={n}", enc(q)))
+            {
+                let items = scrape::rexxar_book_search(&body);
+                if !items.is_empty() {
+                    return Ok(items.into_iter().take(n).collect());
+                }
+            }
+            let (status, body) = douban_get(c, &format!("{BOOK}/j/subject_suggest?q={}", enc(q)), false)?;
+            page_status(status)?;
+            return Ok(scrape::suggest(&body)
+                .into_iter()
+                .filter(|x| x["kind"] == "book")
+                .take(n)
+                .collect());
+        }
+        if let Ok((200, body, _)) = rexxar_get(c, &format!("{REXXAR}/search/movie?q={}&count={n}", enc(q))) {
             let items = scrape::rexxar_search(&body);
             if !items.is_empty() {
                 return Ok(items.into_iter().take(n).collect());
             }
         }
-        let (status, body) = douban_get(&c, &format!("{DOUBAN}/j/subject_suggest?q={}", enc(q)), false)?;
+        let (status, body) = douban_get(c, &format!("{DOUBAN}/j/subject_suggest?q={}", enc(q)), false)?;
         return match status {
             200 => Ok(scrape::suggest(&body).into_iter().take(n).collect()),
             301 | 302 | 403 | 418 | 429 => Err(blocked()),
@@ -383,14 +560,17 @@ fn search(query: &str, type_id: &str, limit: u32) -> R<Vec<Value>> {
         _ => "movie",
     };
     let url = format!("{}/search?q={}&type={kind}&limit={}", c.base, enc(q), limit.clamp(1, 20));
-    match upstream(&c, &url)? {
+    match upstream(c, &url)? {
         None => Err(err("metadata-douban.search_unsupported", "the proxy does not support search")),
         Some(v) => Ok(v["items"]
             .as_array()
             .map(|a| {
                 a.iter()
                     .take(usize::try_from(limit.clamp(1, 20)).unwrap_or(10))
-                    .map(|x| json!({ "external_id": x["id"], "title": x["title"], "year": x["year"], "kind": x["type"] }))
+                    .map(|x| {
+                        let id = if x["type"] == "book" { json!(format!("book:{}", x["id"].as_str().unwrap_or(""))) } else { x["id"].clone() };
+                        json!({ "external_id": id, "title": x["title"], "year": x["year"], "kind": x["type"] })
+                    })
                     .collect()
             })
             .unwrap_or_default()),
@@ -405,8 +585,8 @@ impl service_provider::Guest for Douban {
         let a: Value = serde_json::from_str(&args).unwrap_or(Value::Null);
         let out = match method.as_str() {
             "info" => json!({ "source": "douban", "type_ids": ["movie", "tv", "generic"],
-                              "id_pattern": "^\\d{1,12}$|douban\\.com/subject/\\d+", "enabled": enabled() }),
-            "lookup" => match lookup(a["external_id"].as_str().unwrap_or(""))? {
+                              "id_pattern": "^\\d{1,12}$|^book:\\d{1,12}$|^isbn:[0-9Xx-]{10,17}$|^97[89]\\d{10}$|douban\\.com/subject/\\d+", "enabled": enabled() }),
+            "lookup" => match lookup(a["external_id"].as_str().unwrap_or(""), false)? {
                 Some((id, data, stale)) => json!({ "source": "douban", "external_id": id, "data": data, "stale": stale }),
                 None => Value::Null,
             },
@@ -424,13 +604,13 @@ impl service_provider::Guest for Douban {
 impl http_handler::Guest for Douban {
     fn handle(req: http_handler::Request) -> R<http_handler::Response> {
         let reply = match req.route() {
-            "lookup" => match lookup(req.query("id").unwrap_or(""))? {
+            "lookup" => match lookup(req.query("id").unwrap_or(""), false)? {
                 Some((id, data, stale)) => http::Reply::ok(&json!({ "external_id": id, "data": data, "stale": stale })),
                 None => return Err(err("metadata-douban.not_found", "subject not found")),
             },
             "search" => http::Reply::ok(&json!({ "items": search(req.query("q").unwrap_or(""), req.query("type").unwrap_or("movie"), 10)? })),
             "ptgen" => {
-                let Some((id, data, stale)) = lookup(req.query("id").unwrap_or(""))? else {
+                let Some((id, data, stale)) = lookup(req.query("id").unwrap_or(""), false)? else {
                     return Err(err("metadata-douban.not_found", "subject not found"));
                 };
                 // markup：bbcode（默认）/ markdown / text（纯文本，不含海报图片）
@@ -451,6 +631,52 @@ impl http_handler::Guest for Douban {
             _ => return Err(err("kernel.not_found", "no such route")),
         };
         Ok(reply.into())
+    }
+}
+
+/// 过期且近 90 天用过的条目逐个重新获取；未启用、熔断打开或超出时长时停止，下次运行继续
+fn refresh_stale() -> R<()> {
+    if !enabled() {
+        return Ok(());
+    }
+    let started = time::now();
+    let rows = sql::query(
+        "SELECT external_id FROM cache
+          WHERE NOT not_found AND locale = 'zh-CN' AND last_used_at > now() - interval '90 days'
+            AND fetched_at < now() - make_interval(days => $1::int)
+          ORDER BY last_used_at DESC LIMIT $2",
+        &[SqlValue::Int(cfg().cache_days), SqlValue::Int(REFRESH_BATCH)],
+    )?;
+    let (mut ok, mut failed) = (0u32, 0u32);
+    for r in &rows.rows {
+        if time::now() - started > REFRESH_BUDGET_MS || UPSTREAM.is_open() {
+            break;
+        }
+        match lookup(r.text(0).as_deref().unwrap_or(""), true) {
+            Ok(_) => ok += 1,
+            Err(e) if e.code == "metadata-douban.not_configured" => return Ok(()),
+            Err(_) => failed += 1,
+        }
+        // 每条单独提交：中途超时也保留已刷新的结果
+        sql::commit()?;
+    }
+    logging::info(
+        "refresh_stale finished",
+        &[
+            ("refreshed", &ok.to_string()),
+            ("failed", &failed.to_string()),
+            ("stale", &rows.rows.len().to_string()),
+        ],
+    );
+    Ok(())
+}
+
+impl on_cron::Guest for Douban {
+    fn run(job: on_cron::JobInvocation) -> R<()> {
+        match job.name.as_str() {
+            "refresh_stale" => refresh_stale(),
+            _ => Err(err("kernel.not_found", "unknown job")),
+        }
     }
 }
 

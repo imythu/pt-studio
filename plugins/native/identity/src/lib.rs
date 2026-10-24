@@ -67,6 +67,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0010_anime_avatars.sql",
         include_str!("../migrations/0010_anime_avatars.sql"),
     ),
+    (
+        "0011_passkey_reset_requests.sql",
+        include_str!("../migrations/0011_passkey_reset_requests.sql"),
+    ),
 ];
 
 #[derive(Debug, Default)]
@@ -403,6 +407,18 @@ impl pt_plugin_api::JsonService for Svc {
                 )
                 .await?;
                 Ok(serde_json::json!({ "restriction_id": rid }))
+            }
+            // ctx.users.reset_passkey：作用域 write:passkey（anticheat 处置）
+            "reset_passkey" => {
+                if !ctx.invocation.has_scope("write:passkey") {
+                    return Err(PluginError::forbidden("scope write:passkey required"));
+                }
+                let uid = i64::try_from(id("user")?).map_err(|_| PluginError::bad_request("bad user id"))?;
+                let idem = a["idempotency_key"]
+                    .as_str()
+                    .filter(|k| !k.is_empty() && k.len() <= 200)
+                    .ok_or_else(|| PluginError::validation("idempotency_key"))?;
+                settings::service_reset_passkey(&self.0, ctx, uid, idem).await
             }
             // ctx.users.restrictions：某用户的限制（含已解除，最近 200 条）；作用域 write:status 或 read:restrictions
             "restrictions" => {

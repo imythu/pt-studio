@@ -117,6 +117,7 @@ export!(Notes);
 | 日志 | `logging::info("msg", &[("k", "v")])` |
 | HTTP 请求 | `req.query("limit")`、`req.param("id")` / `param_i64`、`req.header("user-agent")`、`req.body_json::<T>()` / `body_value()` |
 | HTTP 应答 | `http::Reply::ok / created / json(status, &v) / no_content / bytes(status, ct, body)`，可链式 `.header(k, v)` |
+| 上游限速与熔断 | `const API: Upstream = Upstream::new("api", "my-plugin.upstream_error").per_sec(10).breaker(5, 600);` 请求前 `API.acquire()?`（熔断打开或限速等待 2 次仍超限时返回可重试错误），请求后 `API.record(ok)`；`upstream::retry_after(header, cap)` 解析 `Retry-After`。状态在插件 Redis（需 `redis = true`），不随事务回滚 |
 | 其他宿主接口 | 原样导出：`pt_plugin_sdk::{kv, redis, blob, http_client, time, random, audit, metrics, terms, metadata}` |
 
 不在 SDK 中的事：线程、文件系统、环境变量、直接网络访问（运行时不提供）。出站 HTTP 只能经 `http_client::send`，

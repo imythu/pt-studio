@@ -226,9 +226,18 @@ fn exempt_ctx(uid: i64, tid: i64) -> R<Option<Value>> {
     let promo = svc("ctx.promotions", "current", &json!({ "torrent_id": tid }))
         .ok()
         .and_then(|v| v["primary"]["kind"].as_str().map(str::to_owned));
+    // 盒子（可选依赖）：该用户在该种子上有来自已批准盒子网段的活跃 peer
+    let seedbox = svc(
+        "ctx.seedbox",
+        "is_seedbox",
+        &json!({ "user": uid, "torrent": tid }),
+    )
+    .ok()
+    .and_then(|v| v.as_bool())
+    .unwrap_or(false);
     Ok(Some(json!({
         "size": size, "type_id": text(&tr[1]), "tags": [], "promotion_kind": promo,
-        "class_id": u.first().map(|r| int(&r[0])), "is_uploader": oint(&tr[2]) == Some(uid), "is_seedbox": false,
+        "class_id": u.first().map(|r| int(&r[0])), "is_uploader": oint(&tr[2]) == Some(uid), "is_seedbox": seedbox,
         "downloaded_pct": if size > 0 { downloaded as f64 / size as f64 } else { 0.0 },
         "account_age_days": u.first().and_then(|r| num(&r[1])).map(f64::floor),
     })))

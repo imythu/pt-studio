@@ -295,6 +295,33 @@ fn nonce(ctx: &Ctx) -> [u8; 12] {
     n
 }
 
+/// 换发 passkey 并发布 `user.passkey_reset`（tracker-bridge 订阅后删旧键）；返回新 passkey 与版本号
+async fn rotate_passkey(id: &Identity, ctx: &Ctx, uid: i64, source: &str) -> PResult<(String, i32)> {
+    let keys = id.keys()?;
+    let passkey = hex::encode(ctx.random.bytes(16));
+    let mut c = ctx.sql.conn().await?;
+    let version: i32 = sqlx::query_scalar(
+        "INSERT INTO passkeys (user_id, passkey_enc, passkey_mac) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE SET passkey_enc = EXCLUDED.passkey_enc, passkey_mac = EXCLUDED.passkey_mac,
+                version = passkeys.version + 1, revoked_at = NULL, updated_at = now()
+         RETURNING version",
+    )
+    .bind(uid)
+    .bind(keys.passkey_seal(uid, &passkey, nonce(ctx))?)
+    .bind(keys.passkey_mac(&passkey))
+    .fetch_one(&mut *c)
+    .await?;
+    drop(c);
+    ctx.events
+        .publish(NewEvent::v1(
+            "user.passkey_reset",
+            format!("user:{uid}"),
+            json!({ "user_id": uid, "source": source }),
+        ))
+        .await?;
+    Ok((passkey, version))
+}
+
 /// 重置 passkey：旧 passkey 立即失效（tracker-bridge 订阅 `user.passkey_reset` 后刷新缓存）
 pub async fn reset_passkey(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> PResult<Response> {
     if current_session(&ctx).is_none() {
@@ -303,31 +330,69 @@ pub async fn reset_passkey(State(id): State<Arc<Identity>>, ctx: RequestCtx) -> 
         ));
     }
     let uid = uid_of(&ctx)?;
-    let keys = id.keys()?;
-    let passkey = hex::encode(ctx.random.bytes(16));
-    let mut c = ctx.sql.conn().await?;
-    sqlx::query(
-        "INSERT INTO passkeys (user_id, passkey_enc, passkey_mac) VALUES ($1, $2, $3)
-         ON CONFLICT (user_id) DO UPDATE SET passkey_enc = EXCLUDED.passkey_enc, passkey_mac = EXCLUDED.passkey_mac,
-                version = passkeys.version + 1, revoked_at = NULL, updated_at = now()",
-    )
-    .bind(uid)
-    .bind(keys.passkey_seal(uid, &passkey, nonce(&ctx))?)
-    .bind(keys.passkey_mac(&passkey))
-    .execute(&mut *c)
-    .await?;
-    drop(c);
-    ctx.events
-        .publish(NewEvent::v1(
-            "user.passkey_reset",
-            format!("user:{uid}"),
-            json!({ "user_id": uid }),
-        ))
-        .await?;
+    let (passkey, _) = rotate_passkey(&id, &ctx, uid, "self").await?;
     let mut resp = Json(json!({ "passkey": passkey })).into_response();
     resp.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(resp)
+}
+
+/// `ctx.users.reset_passkey`（作用域 `write:passkey`）：插件处置（如 anticheat）重置他人 passkey。
+/// 不返回新 passkey；同一调用方同一幂等键只重置一次，重放返回首次的版本号。
+pub async fn service_reset_passkey(
+    id: &Identity,
+    ctx: &Ctx,
+    uid: i64,
+    idem: &str,
+) -> PResult<serde_json::Value> {
+    let source = ctx.invocation.caller_plugin.clone();
+    let mut c = ctx.sql.conn().await?;
+    let prev: Option<(i64, i32)> = sqlx::query_as(
+        "SELECT user_id, version FROM passkey_reset_requests WHERE source = $1 AND idempotency_key = $2",
+    )
+    .bind(&source)
+    .bind(idem)
+    .fetch_optional(&mut *c)
+    .await?;
+    if let Some((u, v)) = prev {
+        if u != uid {
+            return Err(PluginError::new(
+                "kernel.idempotency_key_reused",
+                "idempotency key was used for another user",
+            ));
+        }
+        return Ok(json!({ "reset": true, "version": v, "replayed": true }));
+    }
+    let alive: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)")
+            .bind(uid)
+            .fetch_one(&mut *c)
+            .await?;
+    drop(c);
+    if !alive {
+        return Err(PluginError::not_found("user not found"));
+    }
+    status::check_protected(ctx, uid, &source).await?;
+    let (_, version) = rotate_passkey(id, ctx, uid, &source).await?;
+    let mut c = ctx.sql.conn().await?;
+    sqlx::query(
+        "INSERT INTO passkey_reset_requests (source, idempotency_key, user_id, version) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(&source)
+    .bind(idem)
+    .bind(uid)
+    .bind(version)
+    .execute(&mut *c)
+    .await?;
+    drop(c);
+    ctx.audit
+        .write(AuditEntry {
+            action: "identity.passkey_reset".into(),
+            target: format!("user:{uid}"),
+            details: json!({ "source": source, "version": version }),
+        })
+        .await?;
+    Ok(json!({ "reset": true, "version": version, "replayed": false }))
 }
 
 // ---------------- 后台 ----------------

@@ -1,0 +1,109 @@
+id = "metadata-bangumi"
+name = "元数据：Bangumi"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "Bangumi 番组计划（bgm.tv）元数据：条目查询、搜索、关联条目、归一化、缓存、封面转存；公开 API，无需申请凭证"
+summary = "动漫资源按 Bangumi 条目补全中文名、封面、简介、话数和评分"
+category = "metadata"
+
+provides = ["ctx.metadata@0.1.0"]
+publishes = ["metadata.fetched"]
+
+[capabilities]
+sql = true
+blob = true
+redis = true
+# 封面在 lain.bgm.tv；site.toml [plugin.metadata-bangumi] api_base_url 可指向内网镜像（测试用）
+http_outbound = [
+  "api.bgm.tv",
+  "lain.bgm.tv",
+  { setting = "api_base_url" },
+  { config = "api_base_url", allow_private = true },
+]
+
+[[http.routes]]
+id = "lookup"
+method = "GET"
+path = "/v1/lookup"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "search"
+method = "GET"
+path = "/v1/search"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "related"
+method = "GET"
+path = "/v1/related"
+auth = "user"
+rate_limit = "user:30/m"
+
+# 刷新近 90 天用过的过期缓存（逐条提交，熔断打开时提前结束）
+[[cron]]
+name = "refresh_stale"
+schedule = "27 * * * *"
+timeout_secs = 600
+tx = "manual"
+
+[error_codes]
+"metadata-bangumi.id_invalid" = 422
+"metadata-bangumi.not_found" = 404
+"metadata-bangumi.upstream_error" = 502
+
+[wasm]
+memory_mb = 64
+default_timeout_ms = 20000
+
+[database]
+migrations = "migrations"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["project_url", "access_token", "allow_nsfw", "rate_per_sec", "cache_days", "api_base_url"]
+
+[settings_schema.properties.project_url]
+type = "string"
+title = "User-Agent 中的项目地址（可选）"
+description = "Bangumi 要求请求带有能联系到使用者的 User-Agent；默认是 PT Studio 项目地址，可改成本站地址"
+
+[settings_schema.properties.access_token]
+type = "string"
+title = "访问令牌（可选）"
+description = "公开条目不需要；只有要查询 NSFW 条目时才需要（在 next.bgm.tv/demo/access-token 生成）"
+x-pt-secret = true
+
+[settings_schema.properties.allow_nsfw]
+type = "boolean"
+title = "允许 NSFW 条目"
+description = "需同时填写访问令牌；关闭时 NSFW 条目按不存在处理"
+default = false
+
+[settings_schema.properties.rate_per_sec]
+type = "integer"
+title = "每秒请求上限"
+minimum = 1
+maximum = 20
+default = 5
+
+[settings_schema.properties.cache_days]
+type = "integer"
+title = "缓存天数"
+description = "连载中的条目最多缓存 7 天"
+minimum = 1
+maximum = 365
+default = 30
+
+[settings_schema.properties.api_base_url]
+type = "string"
+title = "API 地址（可选）"
+description = "默认 https://api.bgm.tv；服务器访问不畅时可填反向代理地址（须为公网 https）"
+
+[terms]
+"metadata-bangumi.name" = { zh-CN = "Bangumi", en = "Bangumi" }

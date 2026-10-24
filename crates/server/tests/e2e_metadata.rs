@@ -1,5 +1,5 @@
 //! 端到端：元数据（metadata-tmdb，WASM）—— 内核出站 HTTP（allowlist、config 主机、allow_private）、ctx.metadata 多实现路由、
-//! lookup（imdb 换算、归一化、缓存）、search、海报转存与 /media 访问、type-movie 新 Group 自动补全元数据。
+//! lookup（imdb 换算、归一化、翻译标题、缓存）、search、海报与背景图转存与 /media 访问、重试与熔断、refresh_stale、type-movie 新 Group 自动补全元数据。
 //! 上游为本地模拟的 TMDB。
 
 #![allow(clippy::unwrap_used)]
@@ -65,6 +65,14 @@ async fn metadata_end_to_end() {
     assert_eq!(d["ids"], json!({ "tmdb": 603, "imdb": "tt0133093" }));
     assert_eq!(d["genres"], json!(["action", "scifi"]));
     assert_eq!(d["attribution"]["source"], "tmdb");
+    // 翻译标题与背景图
+    assert_eq!(d["titles"]["localized"]["zh-TW"], "駭客任務");
+    assert!(
+        d["images"]["backdrop"]
+            .as_str()
+            .is_some_and(|b| b.starts_with("/media/metadata-tmdb/images/")),
+        "{d}"
+    );
     let poster = d["images"]["poster"].as_str().unwrap().to_owned();
     assert!(
         poster.starts_with("/media/metadata-tmdb/images/") && poster.ends_with(".jpg"),
@@ -121,6 +129,84 @@ async fn metadata_end_to_end() {
     )
     .await;
     assert_eq!(r.body["code"], "metadata-tmdb.id_invalid");
+
+    // 上游 5xx：每次请求重试 2 次；连续 10 次失败后熔断，不再请求上游，已缓存的条目照常返回
+    let uhs = u.headers();
+    let uh = hv(&uhs);
+    let lookup_500 = || {
+        call(
+            &app,
+            "GET",
+            "/api/p/metadata-tmdb/v1/lookup?id=movie:500",
+            None,
+            &uh,
+        )
+    };
+    let before = hits.load(Ordering::SeqCst);
+    let r = lookup_500().await;
+    assert_eq!(r.body["code"], "metadata-tmdb.upstream_error", "{:?}", r.body);
+    assert_eq!(hits.load(Ordering::SeqCst) - before, 3, "2 retries");
+    for _ in 0..3 {
+        lookup_500().await;
+    }
+    let before = hits.load(Ordering::SeqCst);
+    let r = lookup_500().await;
+    assert_eq!(
+        (r.body["code"].as_str(), hits.load(Ordering::SeqCst)),
+        (Some("metadata-tmdb.upstream_error"), before),
+        "circuit must be open: {:?}",
+        r.body
+    );
+    let r = call(
+        &app,
+        "GET",
+        "/api/p/metadata-tmdb/v1/lookup?id=imdb:tt0133093&locale=zh-CN",
+        None,
+        &hv(&u.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+
+    // refresh_stale：过期条目重新获取（熔断打开时不动），且不改变 last_used_at
+    sqlx::query(
+        "UPDATE metadata_tmdb.cache SET fetched_at = now() - interval '40 days', last_used_at = now() - interval '1 day'
+          WHERE external_id = 'imdb:tt0133093'",
+    )
+    .execute(&mut db)
+    .await
+    .unwrap();
+    let mut r = redis::Client::open(env("PT_TEST_REDIS_URL", "redis://127.0.0.1:56379/15"))
+        .unwrap()
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+    let before = hits.load(Ordering::SeqCst);
+    kernel
+        .run_job_now("metadata-tmdb", "refresh_stale", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(hits.load(Ordering::SeqCst), before, "breaker open: no refresh");
+    let keys: Vec<String> = redis::cmd("KEYS")
+        .arg("p:metadata-tmdb:cb:*")
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    for k in keys {
+        let _: i64 = redis::cmd("DEL").arg(k).query_async(&mut r).await.unwrap();
+    }
+    kernel
+        .run_job_now("metadata-tmdb", "refresh_stale", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(hits.load(Ordering::SeqCst), before + 1);
+    let (fresh, used_recently): (bool, bool) = sqlx::query_as(
+        "SELECT fetched_at > now() - interval '1 minute', last_used_at > now() - interval '1 hour'
+           FROM metadata_tmdb.cache WHERE external_id = 'imdb:tt0133093'",
+    )
+    .fetch_one(&mut db)
+    .await
+    .unwrap();
+    assert_eq!((fresh, used_recently), (true, false));
     // search
     let r = call(
         &app,

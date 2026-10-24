@@ -10,6 +10,7 @@ summary = "音乐类资源：按艺人与专辑归组，记录格式和版本"
 category = "content"
 
 requires = ["ctx.torrents@^0.1"]
+optional_requires = ["ctx.metadata@^0.1"]
 
 [capabilities]
 sql = true
@@ -18,7 +19,7 @@ search_contributor = true
 views = ["torrent.v_torrent_fields"]
 
 [capabilities.scopes]
-"ctx.torrents" = ["write:fields"]
+"ctx.torrents" = ["write:fields", "write:group"]
 
 [[hooks]]
 hook = "torrent.before_upload"
@@ -33,6 +34,10 @@ rate_limit = "user:30/m"
 max_body_kb = 600
 
 [[subscriptions]]
+name = "on_group_created"
+event = "group.created"
+
+[[subscriptions]]
 name = "on_torrent_created"
 event = "torrent.created"
 
@@ -42,6 +47,11 @@ event = "torrent.updated"
 
 [[jobs]]
 name = "check_logs"
+timeout_secs = 60
+
+# 按 MusicBrainz 发行组补全 Group（需安装 metadata-musicbrainz）
+[[jobs]]
+name = "fetch_metadata"
 timeout_secs = 60
 
 [database]

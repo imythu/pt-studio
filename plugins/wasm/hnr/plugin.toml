@@ -11,7 +11,7 @@ category = "users"
 
 provides = ["ctx.hnr@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1"]
-optional_requires = ["ctx.promotions@^0.1"]
+optional_requires = ["ctx.promotions@^0.1", "ctx.seedbox@^0.1"]
 publishes = ["hnr.recorded", "hnr.exempted", "hnr.prewarned", "hnr.satisfied", "hnr.failed", "hnr.forgiven"]
 
 [capabilities]

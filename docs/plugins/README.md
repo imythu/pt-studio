@@ -23,17 +23,17 @@ PT Studio 的站点功能全部由插件提供。下表列出全部官方插件�
 | 插件 | 类型 | 状态 | 说明 | 文档 |
 |---|---|:-:|---|---|
 | `torrent` | Native | ✅ | 种子解析、上传下载、Group、审核状态、置顶 | [设计](./torrent/) |
-| `tracker-bridge` | Native | ✅ | 向 pt-tracker 同步 passkey、种子与客户端白名单 | [设计](./tracker-bridge/) |
+| `tracker-bridge` | Native | ✅ | 向 pt-tracker 同步 passkey、种子与客户端规则；客户端规则后台、被拒客户端排行、节点状态与告警 | [设计](./tracker-bridge/) |
 | `type-movie` | WASM | ✅ | 电影 | [设计](./type-movie/) |
 | `type-tv` | WASM | ✅ | 剧集：季集与范围检查 | [设计](./type-tv/) |
 | `type-anime` | WASM | ✅ | 动漫：字幕组风格发布名 | [设计](./type-anime/) |
 | `type-music` | WASM | ✅ | 音乐：艺人与版本、抓轨日志评分 | [设计](./type-music/) |
 | `type-generic` | WASM | ✅ | 通用类型（游戏、软件、电子书、课程…），后台可自定义 | [设计](./type-generic/) |
 | `metadata-tmdb` | WASM | ✅ | TMDB 元数据与海报 | [设计](./metadata-tmdb/) |
-| `metadata-douban` | WASM | ✅ | 豆瓣元数据、PT-Gen 版式简介 | [设计](./metadata-douban/) |
+| `metadata-douban` | WASM | ✅ | 豆瓣元数据（电影 / 剧集 / 图书）、PT-Gen 版式简介 | [设计](./metadata-douban/) |
 | `metadata-imdb` | WASM | 📐 | IMDb 元数据 | [设计](./metadata-imdb/) |
-| `metadata-musicbrainz` | WASM | 📐 | MusicBrainz 元数据 | [设计](./metadata-musicbrainz/) |
-| `metadata-bangumi` | WASM | 📐 | Bangumi 元数据 | [设计](./metadata-bangumi/) |
+| `metadata-musicbrainz` | WASM | ✅ | MusicBrainz 元数据与 Cover Art Archive 封面 | [设计](./metadata-musicbrainz/) |
+| `metadata-bangumi` | WASM | ✅ | Bangumi 动漫元数据、关联条目 | [设计](./metadata-bangumi/) |
 | `metadata-igdb` | WASM | 📐 | IGDB 游戏元数据 | [设计](./metadata-igdb/) |
 | `mediainfo` | WASM | ✅ | MediaInfo / BDInfo 解析与规格比对 | [设计](./mediainfo/) |
 | `dupe` | WASM | ✅ | 去重与替代（trump） | [设计](./dupe/README.md) |

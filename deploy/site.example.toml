@@ -68,6 +68,12 @@ instances = [{ id = "m1", url = "http://127.0.0.1:7700", api_key = "@MEILI_MASTE
 # [plugin.metadata-tmdb]
 # api_key = "..."
 
+# 可选：Bangumi / MusicBrainz 元数据（公开 API，无需凭证；建议把 User-Agent 里的联系方式改为本站地址）
+# [plugin.metadata-bangumi]
+# project_url = "https://pt.example.com"
+# [plugin.metadata-musicbrainz]
+# contact = "https://pt.example.com"
+
 # 可选：邮件通知（http_relay / postmark / sendgrid / resend）
 # [plugin.notify]
 # email_provider = "postmark"

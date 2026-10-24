@@ -12,6 +12,23 @@
 - VIP 等覆盖等级显示有效期（个人页、等级说明页、首页与侧栏用户卡片；新增 `GET /v1/users/{id}/class`）
 - 新增主题「修道院 · 白玉京」；主题插件可覆盖术语
 - 站点名与字标改为后台可改（外观 → 站点信息），插件与前端即时生效
+- 反作弊：处置新增“重置 passkey”（复核时可选，旧种子文件立即失效并通知用户）；identity 新增服务方法 `ctx.users.reset_passkey`（作用域 `write:passkey`，幂等）
+- 盒子接入反作弊与 H&R：记账信号记录是否来自已批准的盒子网段，反作弊超速等证据按默认规则减半；H&R 豁免规则可用 `is_seedbox`
+- 敏感操作统一重新验证：任何页面（含插件页）遇到“需要重新验证”时弹出密码 / 两步验证码对话框，验证后自动重试原操作；反作弊的处理案件、批准封禁、复核申诉、激活规则集要求 15 分钟内验证过
+- 客户端指纹信号（默认关闭，`[plugin.accounting.signals] client_fingerprint_check = true` 开启）：peer_id 与 User-Agent 不属同一客户端、同一 peer 中途换客户端时产生信号，反作弊按 `client_spoof` / `client_changed` 规则计分；建议先把这两条规则设为影子模式观察误判
+- 反作弊新增“种子”标签页（种子视角）：列出交叉校验发现上传明显多于下载的种子与被归因用户，复核后可确认基线重新计数
+- 反作弊同 IP 对端关联：tracker-bridge 新增 `ctx.tracker.peers`（读取 tracker 的在线 peer）；站点在 `[grants.anticheat] sensitive = ["peer.ip"]` 授权后，案件补全时发现与其他用户同网段（IPv4 /24、IPv6 /48）会写入证据（默认影子规则，不计分）；IP 不落库
+- Tracker 节点状态：pt-tracker 每 10 秒上报版本、同步位置与延迟、缓存规模、announce 速率；后台新增「Tracker」页（tracker-bridge），节点落后、announce 间隔不小于节点 peer 超时或没有在线节点时提示
+- Tracker 客户端规则：后台「Tracker → 客户端规则」按顺序编辑放行 / 拒绝规则（peer_id 前缀或正则，可限最低 / 最高版本；User-Agent 前缀或正则），默认动作可选，内置 qBittorrent、Transmission、Deluge、rTorrent、迅雷等预设，可对未保存的草稿测试任意 peer_id / UA；保存后 1 秒内各 tracker 节点生效。原设置里的客户端白名单在升级后自动迁移为规则
+- 被拒客户端统计：pt-tracker 记录因规则被拒的客户端（peer_id 前缀 + UA），后台按日排行（保留 8 天），可一键生成放行规则
+- Tracker 节点告警：每分钟检查节点，同步落后超过 5 秒或停止上报 2 分钟以上时发 `tracker.inconsistency_detected` 事件，后台节点页提示失联节点
+- 实测 Deluge 2.1（libtorrent 2.0）双向传输与记账正确，并验证拒绝规则即时生效（`web/tests/bt-deluge.mjs`）
+- 元数据：TMDB 与豆瓣加入限速与熔断（上游故障时返回缓存、不再反复请求），每小时自动刷新近期用过的过期条目；TMDB 增加翻译标题与背景图，近期上映或连载中的条目缓存 7 天；只有豆瓣编号的电影 / 剧集发布后也会自动补全海报、简介与评分
+- 豆瓣图书：按豆瓣图书编号、图书链接或 ISBN 查询（直连或自建代理），PT-Gen 版式的图书简介；通用类型的电子书新增“豆瓣”字段，发布后按豆瓣编号或 ISBN 自动补全封面、简介、评分、作者与出版社
+- 新增 Bangumi 元数据源（metadata-bangumi）：条目查询、搜索、关联条目，封面转存；动漫发布填了 Bangumi 编号时优先用它补全中文名、封面、简介、话数与评分
+- 新增 MusicBrainz 元数据源（metadata-musicbrainz）：发行组 / 发行 / 艺人查询、发行组搜索、Cover Art Archive 封面；音乐作品填了发行组编号时自动补全封面、流派、原始年份与发行类型
+- 插件 SDK：新增 `upstream` 模块（外部 API 限速与熔断）
+- 修复：反作弊案件补全（swarm 快照）一直失败（查询返回了宿主不支持的 NUMERIC 列）
 - 修复：后台用户详情页签标题显示为术语键；修道院主题下描边等级标签看不见
 
 ## 0.5.5 · 2026-10-21

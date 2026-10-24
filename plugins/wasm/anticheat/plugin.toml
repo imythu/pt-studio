@@ -11,16 +11,18 @@ category = "users"
 
 provides = ["ctx.anticheat@0.1.0"]
 requires = ["ctx.users@^0.1", "ctx.rbac@^0.1", "ctx.accounting@^0.1"]
-optional_requires = ["ctx.ledger@^0.1", "ctx.messages@^0.1", "ctx.notify@^0.1", "ctx.llm@^0.1"]
+optional_requires = ["ctx.ledger@^0.1", "ctx.messages@^0.1", "ctx.notify@^0.1", "ctx.llm@^0.1", "ctx.tracker@^0.1"]
 publishes = ["anticheat.case_opened", "anticheat.case_resolved", "anticheat.sanction_changed", "anticheat.appeal_submitted", "anticheat.appeal_decided"]
 
 [capabilities]
 kv = true
 sql = true
 views = ["identity.v_user_public", "accounting.v_user_daily", "accounting.v_swarm_peers", "torrent.v_torrent_public"]
+# 同 IP 对端关联（FR-ACH-041）：站点在 site.toml [grants.anticheat] sensitive = ["peer.ip"] 授权后启用
+sensitive_optional = ["peer.ip"]
 
 [capabilities.scopes]
-"ctx.users" = ["write:status"]
+"ctx.users" = ["write:status", "write:passkey"]
 "ctx.accounting" = ["read", "read:signals", "write:rates", "write:adjust"]
 "ctx.ledger" = ["lock"]
 "ctx.messages" = ["send"]
@@ -146,13 +148,13 @@ input_schema = { type = "object", additionalProperties = false, required = ["cas
 [[mcp.tools]]
 name = "admin_resolve_anticheat_case"
 title = "处理反作弊案件"
-description = "管理员：对反作弊案件作出决定。decision 为 dismiss（误判，可附 false_positive_evidence_ids）、no_action（成立但不处置）或 sanction（附 actions：warn / freeze_traffic / lock_wallet / adjust_traffic / disable_download / ban，可带 days 与 up_bytes）。note 必填。"
+description = "管理员：对反作弊案件作出决定。decision 为 dismiss（误判，可附 false_positive_evidence_ids）、no_action（成立但不处置）或 sanction（附 actions：warn / freeze_traffic / lock_wallet / adjust_traffic / reset_passkey / disable_download / ban，可带 days 与 up_bytes）。note 必填。"
 audience = "admin"
 write = true
 confirm_locked = true
 destructive = true
 permission = "anticheat.cases.moderate"
-input_schema = { type = "object", additionalProperties = false, required = ["case_id", "decision", "note"], properties = { case_id = { type = "integer", minimum = 1 }, decision = { type = "string", enum = ["dismiss", "no_action", "sanction"] }, actions = { type = "array", maxItems = 6, items = { type = "object", additionalProperties = false, required = ["kind"], properties = { kind = { type = "string", enum = ["warn", "freeze_traffic", "lock_wallet", "disable_download", "ban", "adjust_traffic"] }, days = { type = "integer", minimum = 1, maximum = 3650 }, up_bytes = { type = "integer", minimum = 1 } } } }, false_positive_evidence_ids = { type = "array", items = { type = "integer" } }, note = { type = "string", minLength = 1, maxLength = 2000 } } }
+input_schema = { type = "object", additionalProperties = false, required = ["case_id", "decision", "note"], properties = { case_id = { type = "integer", minimum = 1 }, decision = { type = "string", enum = ["dismiss", "no_action", "sanction"] }, actions = { type = "array", maxItems = 6, items = { type = "object", additionalProperties = false, required = ["kind"], properties = { kind = { type = "string", enum = ["warn", "freeze_traffic", "lock_wallet", "disable_download", "ban", "adjust_traffic", "reset_passkey"] }, days = { type = "integer", minimum = 1, maximum = 3650 }, up_bytes = { type = "integer", minimum = 1 } } } }, false_positive_evidence_ids = { type = "array", items = { type = "integer" } }, note = { type = "string", minLength = 1, maxLength = 2000 } } }
 
 # ---------- 用户 ----------
 
@@ -254,6 +256,7 @@ path = "/v1/admin/cases/{id}/resolutions"
 auth = "admin"
 permission = "anticheat.cases.moderate"
 idempotent = true
+reauth_secs = 900
 
 [[http.routes]]
 id = "admin_create_explanation"
@@ -277,6 +280,7 @@ path = "/v1/admin/sanctions/{id}/approvals"
 auth = "admin"
 permission = "anticheat.sanctions.manage"
 idempotent = true
+reauth_secs = 900
 
 [[http.routes]]
 id = "admin_lift_sanction"
@@ -322,6 +326,23 @@ path = "/v1/admin/watchlist"
 auth = "admin"
 permission = "anticheat.cases.read"
 
+# ---------- 后台：种子视角 ----------
+
+[[http.routes]]
+id = "admin_list_suspicious_torrents"
+method = "GET"
+path = "/v1/admin/torrents/suspicious"
+auth = "admin"
+permission = "anticheat.cases.read"
+
+[[http.routes]]
+id = "admin_confirm_torrent_baseline"
+method = "POST"
+path = "/v1/admin/torrents/{id}/baselines"
+auth = "admin"
+permission = "anticheat.cases.moderate"
+idempotent = true
+
 # ---------- 后台：申诉 ----------
 
 [[http.routes]]
@@ -345,6 +366,7 @@ path = "/v1/admin/appeals/{id}/decisions"
 auth = "admin"
 permission = "anticheat.appeals.moderate"
 idempotent = true
+reauth_secs = 900
 
 # ---------- 后台：规则集 ----------
 
@@ -394,6 +416,7 @@ path = "/v1/admin/rulesets/{version}/activations"
 auth = "admin"
 permission = "anticheat.rules.manage"
 idempotent = true
+reauth_secs = 900
 
 [[http.routes]]
 id = "admin_create_simulation"

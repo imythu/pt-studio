@@ -3,8 +3,8 @@
 //!
 //! 本版本实现：字段与 Group schema（艺人按角色分列）、规范化（同义词、格式与编码组合、MusicBrainz 链接、发布名补全）、
 //! 分组键（MusicBrainz 发行组 > 主艺人 + 专辑 + 原始年份）、版本键、作品标题、规范标题、文件检查（音频 / log / cue /
-//! 可执行文件）、log 基础评分（`log_results` 表，分数写回种子字段 `log_score`）、`music_*` 搜索字段。去重与替代、
-//! MusicBrainz 元数据、艺人页在后续迭代实现。
+//! 可执行文件）、log 基础评分（`log_results` 表，分数写回种子字段 `log_score`）、`music_*` 搜索字段、MusicBrainz 元数据
+//! （有发行组编号的 Group 补全封面、流派、原始年份、发行类型）。去重与替代、艺人页在后续迭代实现。
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -233,6 +233,21 @@ impl on_event::Guest for TypeMusic {
             }
             _ => false,
         };
+        // Group 建立或新种子进入 Group 时按 MusicBrainz 发行组补全
+        let fresh_torrent = evt.event_type == "torrent.created" && p["group_id"].as_i64().is_some();
+        if (evt.event_type == "group.created" || fresh_torrent) && p["type_id"] == "music" {
+            let gid = p["group_id"].as_i64().unwrap_or(0);
+            jobs::schedule_once(
+                "fetch_metadata",
+                time::now(),
+                &json!({ "group_id": gid }).to_string(),
+                Some(&if fresh_torrent {
+                    format!("meta:{gid}:t{id}")
+                } else {
+                    format!("meta:{gid}")
+                }),
+            )?;
+        }
         if relevant && settings()["log_check_enabled"].as_bool() != Some(false) {
             jobs::schedule_once(
                 "check_logs",
@@ -293,12 +308,40 @@ fn check_logs(id: i64) -> Result<(), PluginError> {
 
 impl on_cron::Guest for TypeMusic {
     fn run(job: on_cron::JobInvocation) -> Result<(), PluginError> {
-        if job.name != "check_logs" {
-            return Err(err("kernel.not_found", "unknown job", None));
-        }
         let p: Value = serde_json::from_str(&job.payload).unwrap_or(Value::Null);
-        check_logs(p["torrent_id"].as_i64().unwrap_or(0))
+        match job.name.as_str() {
+            "check_logs" => check_logs(p["torrent_id"].as_i64().unwrap_or(0)),
+            "fetch_metadata" => fetch_metadata(p["group_id"].as_i64().unwrap_or(0)),
+            _ => Err(err("kernel.not_found", "unknown job", None)),
+        }
     }
+}
+
+/// 有 MusicBrainz 发行组编号的 Group：查询后补全；元数据源未安装、无结果或不可重试的错误时跳过
+fn fetch_metadata(gid: i64) -> Result<(), PluginError> {
+    let g = svc("ctx.torrents", "get_group", &json!({ "id": gid }))?;
+    let Some(mbid) = g["fields"]["mb_release_group_id"].as_str() else {
+        return Ok(());
+    };
+    let data = match svc(
+        "ctx.metadata",
+        "lookup",
+        &json!({ "source": "musicbrainz", "external_id": format!("release-group:{mbid}") }),
+    ) {
+        Ok(r) if r.is_null() => return Ok(()),
+        Ok(r) => r["data"].clone(),
+        Err(e) if !e.retryable => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let patch = music::metadata_patch(&data, &g["fields"]);
+    if patch.as_object().is_some_and(|o| !o.is_empty()) {
+        svc(
+            "ctx.torrents",
+            "update_group",
+            &json!({ "id": gid, "fields": patch }),
+        )?;
+    }
+    Ok(())
 }
 
 export!(TypeMusic);

@@ -84,7 +84,7 @@ JSON 示例：
 | `user.password_changed` | identity | `user:<id>` | `user_id` |
 | `user.email_changed` | identity | `user:<id>` | `user_id`（不含邮箱） |
 | `user.two_factor_changed` | identity | `user:<id>` | `user_id, kind(totp/webauthn), enabled: bool` |
-| `user.passkey_reset` | identity | `user:<id>` | `user_id`（不含 passkey） |
+| `user.passkey_reset` | identity | `user:<id>` | `user_id, source`（`self` 或调用插件 ID；不含 passkey） |
 | `user.status_changed` | identity | `user:<id>` | `user_id, from, to, reason, until?` |
 | `user.restriction_changed` | identity | `user:<id>` | `user_id, restriction_id, kind(ban/leech_disabled/pending), source, op(applied/lifted/expired), reason_code, until?, lifted_by?`（解除方：插件 ID、`admin` 或 `identity`；anticheat 据此识别外部解除） |
 | `user.class_changed` | identity | `user:<id>` | `user_id, from_class, to_class, reason, by_plugin` |
@@ -114,6 +114,7 @@ JSON 示例：
 | `group.deleted` | torrent | `group:<id>` | `group_id` |
 | `tracker.client_rules_changed` | tracker-bridge | `global` | `version, rule_count` |
 | `tracker.resynced` | tracker-bridge | `global` | `scope(full/user/torrent), count` |
+| `tracker.inconsistency_detected` | tracker-bridge | `global` | `kind(users/torrents/clients/cfg/node_lag/node_lost/rebuild_failed), count, repaired, check_id?, node_id?, behind_ms?`（本版本只发 `node_lag` / `node_lost`，由每分钟的 `node_health` 任务在进入告警状态时各发一次） |
 
 ### 4.4 记账与账本
 

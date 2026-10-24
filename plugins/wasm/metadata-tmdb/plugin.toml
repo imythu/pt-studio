@@ -16,6 +16,7 @@ publishes = ["metadata.fetched"]
 sql = true
 kv = true
 blob = true
+redis = true
 http_outbound = [
   "api.themoviedb.org",
   "image.tmdb.org",
@@ -38,6 +39,13 @@ method = "GET"
 path = "/v1/search"
 auth = "user"
 rate_limit = "user:30/m"
+
+# 刷新近 90 天用过的过期缓存（逐条提交，熔断打开时提前结束）
+[[cron]]
+name = "refresh_stale"
+schedule = "37 * * * *"
+timeout_secs = 600
+tx = "manual"
 
 [wasm]
 memory_mb = 64

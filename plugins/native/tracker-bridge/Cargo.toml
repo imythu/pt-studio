@@ -10,8 +10,12 @@ publish.workspace = true
 pt-plugin-api.workspace = true
 pt-plugin-identity = { path = "../identity" }
 async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
 hex.workspace = true
 redis.workspace = true
+regex = "1"
+serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tracing.workspace = true

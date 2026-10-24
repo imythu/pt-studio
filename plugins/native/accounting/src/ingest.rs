@@ -82,6 +82,8 @@ pub struct Entry {
     pub out_of_range: bool,
     /// peer 的 IP（只用于盒子网段比对，不落库）
     pub ip: Option<std::net::IpAddr>,
+    /// User-Agent（截断 128 字符；只用于客户端族判定，不落库、不进信号 details）
+    pub ua: Option<String>,
 }
 
 /// 字段解析（§1.1.2）。返回拒收原因代号。
@@ -151,6 +153,9 @@ pub fn parse(
         flags,
         client,
         ip: get("ip").and_then(|v| v.parse().ok()),
+        ua: get("ua")
+            .filter(|u| !u.is_empty())
+            .map(|u| u.chars().take(128).collect()),
         rep_up: num("up"),
         rep_down: num("down"),
         xup: num("xup").unwrap_or(0).min(MAX_DELTA),
@@ -282,6 +287,8 @@ struct PeerAgg {
     seed: u64,
     /// 来自已批准的盒子网段
     seedbox: bool,
+    /// UA 所属客户端族（仅开启指纹检查时）
+    ua_family: Option<String>,
 }
 
 fn ts_dt(secs: i64) -> DateTime<Utc> {
@@ -548,6 +555,7 @@ async fn store(
             last_ts: e.ts,
             seed: 0,
             seedbox: false,
+            ua_family: None,
         });
         if !boxes.is_empty()
             && let Some(ip) = &e.ip
@@ -559,12 +567,56 @@ async fn store(
         pe.active = e.ev != Ev::Stopped;
         pe.client.clone_from(&e.client);
         pe.last_ts = pe.last_ts.max(e.ts);
+        if cfg.signals.client_fingerprint_check
+            && let Some(ua) = &e.ua
+        {
+            pe.ua_family = Some(cfg.signals.ua_family(ua).to_owned());
+        }
+    }
+
+    // ---- 指纹检查：本批 peer 在库中的 UA 族（upsert 前读出，供 fingerprint_changed） ----
+    let mut prev_ua: HashMap<(u64, u64, [u8; 20]), String> = HashMap::new();
+    if cfg.signals.client_fingerprint_check && !peers.is_empty() {
+        let (us, ts, ps): (Vec<i64>, Vec<i64>, Vec<Vec<u8>>) = peers
+            .keys()
+            .map(|(u, t, p)| (i(*u), i(*t), p.to_vec()))
+            .fold((vec![], vec![], vec![]), |mut acc, (u, t, p)| {
+                acc.0.push(u);
+                acc.1.push(t);
+                acc.2.push(p);
+                acc
+            });
+        for r in sqlx::query(
+            "SELECT p.user_id, p.torrent_id, p.peer_id, p.ua_family FROM peers p
+               JOIN unnest($1::bigint[], $2::bigint[], $3::bytea[]) AS x(u, t, pid)
+                 ON p.user_id = x.u AND p.torrent_id = x.t AND p.peer_id = x.pid
+              WHERE p.ua_family IS NOT NULL",
+        )
+        .bind(&us)
+        .bind(&ts)
+        .bind(&ps)
+        .fetch_all(&mut *c)
+        .await?
+        {
+            let pid: Vec<u8> = r.get(2);
+            if let Ok(pid) = <[u8; 20]>::try_from(pid.as_slice()) {
+                prev_ua.insert(
+                    (
+                        u64::try_from(r.get::<i64, _>(0)).unwrap_or(0),
+                        u64::try_from(r.get::<i64, _>(1)).unwrap_or(0),
+                        pid,
+                    ),
+                    r.get(3),
+                );
+            }
+        }
     }
 
     // ---- peers ----
     if !peers.is_empty() {
         let (mut u, mut t, mut pid, mut seeder, mut active, mut client, mut at, mut secs, mut sbox) =
             (vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+        let mut uaf: Vec<Option<String>> = vec![];
         for ((uid, tid, p), a) in &peers {
             u.push(i(*uid));
             t.push(i(*tid));
@@ -575,21 +627,22 @@ async fn store(
             at.push(ts_dt(a.last_ts));
             secs.push(i32::try_from(a.seed.min(86_400)).unwrap_or(0));
             sbox.push(a.seedbox);
+            uaf.push(a.ua_family.clone());
         }
         // 小时 = 窗口所在小时（窗口整除 1 小时，微批不跨窗口）；按 hour % 2 选槽，槽内同小时累加、换小时覆盖
         let hour = i32::try_from(window_start.div_euclid(3600)).unwrap_or(0);
         sqlx::query(
             "INSERT INTO peers AS p (user_id, torrent_id, peer_id, part, is_seeder, is_active, client_prefix, first_seen_at, last_announce_at,
-                                    slot0_hour, slot0_secs, slot1_hour, slot1_secs, is_seedbox)
+                                    slot0_hour, slot0_secs, slot1_hour, slot1_secs, is_seedbox, ua_family)
              SELECT u, t, pid, $1, s, a, cl, at, at,
                     CASE WHEN $9 % 2 = 0 THEN $9 END, CASE WHEN $9 % 2 = 0 THEN sec ELSE 0 END,
-                    CASE WHEN $9 % 2 = 1 THEN $9 END, CASE WHEN $9 % 2 = 1 THEN sec ELSE 0 END, sb
-               FROM unnest($2::bigint[], $3::bigint[], $4::bytea[], $5::bool[], $6::bool[], $7::text[], $8::timestamptz[], $10::int[], $11::bool[])
-                  AS x(u, t, pid, s, a, cl, at, sec, sb)
+                    CASE WHEN $9 % 2 = 1 THEN $9 END, CASE WHEN $9 % 2 = 1 THEN sec ELSE 0 END, sb, uf
+               FROM unnest($2::bigint[], $3::bigint[], $4::bytea[], $5::bool[], $6::bool[], $7::text[], $8::timestamptz[], $10::int[], $11::bool[], $12::text[])
+                  AS x(u, t, pid, s, a, cl, at, sec, sb, uf)
              ORDER BY u, t, pid
              ON CONFLICT (user_id, torrent_id, peer_id) DO UPDATE SET
                 is_seeder = EXCLUDED.is_seeder, is_active = EXCLUDED.is_active, client_prefix = EXCLUDED.client_prefix,
-                is_seedbox = EXCLUDED.is_seedbox,
+                is_seedbox = EXCLUDED.is_seedbox, ua_family = coalesce(EXCLUDED.ua_family, p.ua_family),
                 last_announce_at = greatest(p.last_announce_at, EXCLUDED.last_announce_at),
                 slot0_secs = CASE WHEN EXCLUDED.slot0_hour IS NULL THEN p.slot0_secs
                                   WHEN p.slot0_hour = EXCLUDED.slot0_hour THEN p.slot0_secs + EXCLUDED.slot0_secs
@@ -611,6 +664,7 @@ async fn store(
         .bind(hour)
         .bind(&secs)
         .bind(&sbox)
+        .bind(&uaf)
         .execute(&mut *c)
         .await?;
     }
@@ -751,7 +805,7 @@ async fn store(
     }
 
     // ---- 基础信号（§1.4，与结算同一事务） ----
-    crate::signals::for_batch(ctx, c, &cfg.signals, entries).await?;
+    crate::signals::for_batch(ctx, c, &cfg.signals, entries, &boxes, &prev_ua).await?;
 
     // ---- torrent_counters 与首次完成事件 ----
     let mut completions: Vec<(i64, i64, i64)> = Vec::new();

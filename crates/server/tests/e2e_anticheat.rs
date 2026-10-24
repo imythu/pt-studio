@@ -21,7 +21,7 @@ const SECRET: &str = "e2e-anticheat-appeal-token-secret-0123456789";
 fn config(dir: &std::path::Path) -> SiteConfig {
     let mut t = common::config_text();
     t.push_str(&format!(
-        "\n[plugin.anticheat]\nappeal_token_secret = \"{SECRET}\"\n\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n",
+        "\n[plugin.anticheat]\nappeal_token_secret = \"{SECRET}\"\n\n[grants.anticheat]\nsensitive = [\"peer.ip\"]\n\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n",
         dir.display()
     ));
     SiteConfig::parse(&t).unwrap()
@@ -216,6 +216,27 @@ async fn anticheat_end_to_end() {
         12
     );
 
+    // ---- pt-tracker 的 swarm 会话（ctx.tracker 读取）：alice 与 carol 同在 203.0.113.0/24，admin 在别的网段 ----
+    let ih: Vec<u8> = sqlx::query_scalar("SELECT info_hash_v1 FROM torrent.torrents WHERE id = $1")
+        .bind(tid)
+        .fetch_one(&mut db().await)
+        .await
+        .unwrap();
+    let now_s = chrono::Utc::now().timestamp();
+    for (uid, b, ip) in [
+        (alice.id, "aa", "203.0.113.9"),
+        (carol.id, "cc", "203.0.113.50"),
+        (admin.id, "dd", "198.51.100.7"),
+    ] {
+        let _: () = redis::cmd("HSET")
+            .arg(format!("ps:{{{}}}", hex::encode(&ih)))
+            .arg(format!("{uid}:2d7142353132302d{}", b.repeat(12)))
+            .arg(json!({ "up": 0, "down": 0, "left": 0, "ts": now_s, "completed": true, "ip": ip, "port": 51413 }).to_string())
+            .query_async(&mut rc)
+            .await
+            .unwrap();
+    }
+
     // ---- pt-tracker 截断的超速段：20 GiB / 30 s → speed_extreme（结论性）→ 开案 + 自动冻结流量 + 锁定钱包 ----
     announce(
         &mut rc,
@@ -272,6 +293,39 @@ async fn anticheat_end_to_end() {
         1
     );
 
+    // 案件补全：swarm 快照来自 ctx.tracker（不含 IP）；获授 peer.ip → 同网段对端证据（影子规则，不计分）
+    wait_for("shared ip evidence", || async {
+        scalar("SELECT count(*) FROM anticheat.evidence WHERE user_id = $1 AND kind = 'anticheat.shared_ip_counterparty'", alice.id).await == 1
+    })
+    .await;
+    let (details,): (Value,) = sqlx::query_as(
+        "SELECT details FROM anticheat.evidence WHERE user_id = $1 AND kind = 'anticheat.shared_ip_counterparty'",
+    )
+    .bind(i64::try_from(alice.id).unwrap())
+    .fetch_one(&mut db().await)
+    .await
+    .unwrap();
+    assert_eq!(details["counterparty_user_ids"], json!([carol.id]), "{details:?}");
+    assert!(
+        !details.to_string().contains("203.0.113"),
+        "IP must not be stored"
+    );
+    let (snap,): (Value,) = sqlx::query_as(
+        "SELECT data FROM anticheat.case_events WHERE kind = 'swarm_snapshot' AND case_id = (SELECT id FROM anticheat.cases WHERE user_id = $1) LIMIT 1",
+    )
+    .bind(i64::try_from(alice.id).unwrap())
+    .fetch_one(&mut db().await)
+    .await
+    .unwrap();
+    assert_eq!(snap["peers"].as_array().map(Vec::len), Some(3), "{snap:?}");
+    assert!(
+        !snap.to_string().contains("203.0.113"),
+        "snapshot must not contain IPs"
+    );
+    assert!(
+        scalar("SELECT count(*) FROM kernel.audit_log WHERE action = 'tracker-bridge.peer_ip_read' AND $1::bigint >= 0", 0).await >= 1
+    );
+
     // ---- 后台：队列与详情 ----
     let r = get(&app, &admin, "/api/p/anticheat/v1/admin/cases").await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
@@ -287,8 +341,13 @@ async fn anticheat_end_to_end() {
     assert_eq!(case["band"], "critical");
     let d = get(&app, &admin, &format!("/api/p/anticheat/v1/admin/cases/{cid}")).await;
     assert_eq!(d.status, StatusCode::OK, "{:?}", d.body);
-    assert_eq!(d.body["evidence"][0]["kind"], "speed_exceeded");
-    assert_eq!(d.body["evidence"][0]["torrent"]["id"], json!(tid));
+    let ev = d.body["evidence"].as_array().unwrap();
+    let speed = ev.iter().find(|e| e["kind"] == "speed_exceeded").unwrap();
+    assert_eq!(speed["torrent"]["id"], json!(tid));
+    assert!(
+        ev.iter().any(|e| e["kind"] == "anticheat.shared_ip_counterparty"),
+        "{ev:?}"
+    );
     assert!(
         d.body["timeline"]
             .as_array()
@@ -318,7 +377,7 @@ async fn anticheat_end_to_end() {
     )
     .await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
-    let res = |note: &str| json!({ "decision": "sanction", "actions": [{ "kind": "ban", "days": 30 }, { "kind": "warn" }], "note": note });
+    let res = |note: &str| json!({ "decision": "sanction", "actions": [{ "kind": "ban", "days": 30 }, { "kind": "warn" }, { "kind": "reset_passkey" }], "note": note });
     let r = post(
         &app,
         &admin,
@@ -336,6 +395,29 @@ async fn anticheat_end_to_end() {
         &hv(&admin2.headers()),
     )
     .await;
+    // 近期重新验证：会话验证超过 15 分钟 → identity.reauth_required；重新输入密码后可操作
+    sqlx::query("UPDATE identity.sessions SET reauth_at = now() - interval '1 hour' WHERE user_id = $1")
+        .bind(i64::try_from(admin.id).unwrap())
+        .execute(&mut db().await)
+        .await
+        .unwrap();
+    let r = post(
+        &app,
+        &admin,
+        &format!("/api/p/anticheat/v1/admin/cases/{cid}/resolutions"),
+        res("单次 20 GiB / 30 s"),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+    assert_eq!(r.body["code"], "identity.reauth_required");
+    let r = post(
+        &app,
+        &admin,
+        "/api/p/identity/v1/sessions/current/reauth",
+        json!({ "password": "correct horse" }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     let r = post(
         &app,
         &admin,
@@ -387,6 +469,21 @@ async fn anticheat_end_to_end() {
             == "banned"
     })
     .await;
+    // reset_passkey：经 ctx.users.reset_passkey 换发（版本 +1），处置生效并通知
+    wait_for("passkey reset", || async {
+        scalar("SELECT version::bigint FROM identity.passkeys WHERE user_id = $1", alice.id).await == 2
+            && scalar("SELECT count(*) FROM anticheat.sanctions WHERE user_id = $1 AND kind = 'reset_passkey' AND state = 'active'", alice.id).await == 1
+            && scalar("SELECT count(*) FROM anticheat.effect_ops WHERE user_id = $1 AND op = 'sanction_notice' AND payload->>'kind' = 'reset_passkey' AND state = 'done'", alice.id).await == 1
+    })
+    .await;
+    assert_eq!(
+        scalar(
+            "SELECT count(*) FROM identity.passkey_reset_requests WHERE user_id = $1 AND source = 'anticheat'",
+            alice.id
+        )
+        .await,
+        1
+    );
     wait_for("ban notice op", || async {
         scalar("SELECT count(*) FROM anticheat.effect_ops WHERE user_id = $1 AND op = 'ban_notice' AND state = 'done'", alice.id).await == 1
     })
@@ -472,7 +569,8 @@ async fn anticheat_end_to_end() {
             alice.id
         )
         .await,
-        1
+        2,
+        "speed + shared ip evidence of the overturned case"
     );
     assert_eq!(
         scalar(
@@ -567,6 +665,74 @@ async fn anticheat_end_to_end() {
     let r = get(&app, &admin, "/api/p/anticheat/v1/admin/dashboard").await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     assert_eq!(r.body["open_cases"], 0);
+
+    // ---- 种子视角：交叉校验异常按种子汇总（超额按小时去重），确认基线后清零 ----
+    for (uid, hour, up, down, uu) in [
+        (carol.id, "2026-01-01T01:00:00.000Z", 10 * GIB, 2 * GIB, 6 * GIB),
+        (alice.id, "2026-01-01T01:00:00.000Z", 10 * GIB, 2 * GIB, 3 * GIB),
+        (carol.id, "2026-01-01T02:00:00.000Z", 5 * GIB, GIB, 4 * GIB),
+    ] {
+        sqlx::query(
+            "INSERT INTO anticheat.evidence (occurred_at, user_id, torrent_id, source, kind, severity, details, external_ref)
+             VALUES (now() - interval '1 hour', $1, $2, 'accounting', 'cross_check_mismatch', 'medium', $3, $4)",
+        )
+        .bind(i64::try_from(uid).unwrap())
+        .bind(tid)
+        .bind(json!({ "hour_start": hour, "swarm_uploaded": up, "swarm_downloaded": down, "user_uploaded": uu }))
+        .bind(format!("test:xc:{uid}:{hour}"))
+        .execute(&mut db().await)
+        .await
+        .unwrap();
+    }
+    let r = get(
+        &app,
+        &admin,
+        "/api/p/anticheat/v1/admin/torrents/suspicious?days=7",
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let item = r.body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["torrent"]["id"] == json!(tid))
+        .unwrap()
+        .clone();
+    assert_eq!(item["mismatch_hours"], 2, "{item:?}");
+    assert_eq!(item["excess_bytes"], json!(12 * GIB), "{item:?}");
+    assert_eq!(item["users"][0]["id"], json!(carol.id));
+    assert_eq!(item["users"][0]["hits"], 2);
+    assert_eq!(item["users"][0]["uploaded"], json!(10 * GIB));
+    assert_eq!(item["user_count"], 2);
+    let r = post(
+        &app,
+        &admin,
+        &format!("/api/p/anticheat/v1/admin/torrents/{tid}/baselines"),
+        json!({ "note": "已核实，正常热门种子" }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = get(
+        &app,
+        &admin,
+        "/api/p/anticheat/v1/admin/torrents/suspicious?days=7",
+    )
+    .await;
+    assert!(
+        !r.body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["torrent"]["id"] == json!(tid)),
+        "{:?}",
+        r.body
+    );
+    assert_eq!(
+        get(&app, &carol, "/api/p/anticheat/v1/admin/torrents/suspicious")
+            .await
+            .status,
+        StatusCode::FORBIDDEN
+    );
 
     // ---- 用户“我的案件” ----
     let r = get(&app, &carol, "/api/p/anticheat/v1/users/me/cases").await;

@@ -420,6 +420,22 @@ try {
   await a.getByRole('cell', { name: '网页违禁词' }).waitFor();
   await a.getByRole('tab', { name: '审核记录' }).click();
   await a.getByRole('button', { name: '筛选' }).waitFor();
+  // tracker 客户端规则：从预设添加 → 对草稿测试 → 保存；被拒客户端页
+  await a.goto(`${BASE}/admin/p/tracker-bridge/clients`);
+  await a.getByRole('heading', { name: '客户端规则' }).waitFor();
+  await a.locator('td b', { hasText: /^qBittorrent$/ }).waitFor();
+  await a.getByRole('button', { name: '从预设添加' }).click();
+  await sheet(a).locator('.row-sb', { hasText: '迅雷（SD）' }).getByRole('button', { name: '加入' }).click();
+  await sheet(a).locator('.row-sb', { hasText: '迅雷（SD）' }).getByRole('button', { name: '已加入' }).waitFor();
+  await a.keyboard.press('Escape');
+  await a.locator('td b', { hasText: '迅雷（SD）' }).waitFor();
+  await a.getByLabel('peer_id').fill('-SD0100-a1b2c3d4e5f6');
+  await a.getByRole('button', { name: '测试', exact: true }).click();
+  await a.getByTestId('rule-test-result').getByText('命中第 10 条：迅雷（SD）').waitFor();
+  await a.getByRole('button', { name: '保存', exact: true }).click();
+  await a.getByText('客户端规则已保存').waitFor();
+  await a.getByRole('tab', { name: '被拒客户端' }).click();
+  await a.getByRole('heading', { name: '被拒客户端' }).waitFor();
   await a.goto(`${BASE}/torrents/${TID}`);
   await a.getByRole('tab', { name: '管理', exact: true }).click();
   await a.getByRole('tab', { name: '促销', exact: true }).click();

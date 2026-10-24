@@ -1,0 +1,100 @@
+id = "metadata-musicbrainz"
+name = "元数据：MusicBrainz"
+version = "0.1.0"
+kind = "wasm"
+api = "pt:plugin@1"
+license = "MIT OR Apache-2.0"
+authors = ["PT Studio"]
+description = "MusicBrainz 音乐元数据（CC0）：发行组 / 发行 / 艺人查询、发行组搜索、Cover Art Archive 封面转存、归一化与缓存；公开 API，无需申请凭证"
+summary = "音乐资源按 MusicBrainz 发行组补全封面、流派、首发年份"
+category = "metadata"
+
+provides = ["ctx.metadata@0.1.0"]
+publishes = ["metadata.fetched"]
+
+[capabilities]
+sql = true
+blob = true
+redis = true
+# Cover Art Archive 的图片重定向到 archive.org 的存储节点（*.archive.org）
+http_outbound = [
+  "musicbrainz.org",
+  "coverartarchive.org",
+  "archive.org",
+  "*.archive.org",
+  { setting = "api_base_url" },
+  { setting = "caa_base_url" },
+  { config = "api_base_url", allow_private = true },
+  { config = "caa_base_url", allow_private = true },
+]
+
+[[http.routes]]
+id = "lookup"
+method = "GET"
+path = "/v1/lookup"
+auth = "user"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "search"
+method = "GET"
+path = "/v1/search"
+auth = "user"
+rate_limit = "user:30/m"
+
+# 刷新近 90 天用过的过期缓存（逐条提交，熔断打开时提前结束）
+[[cron]]
+name = "refresh_stale"
+schedule = "17 * * * *"
+timeout_secs = 600
+tx = "manual"
+
+[error_codes]
+"metadata-musicbrainz.id_invalid" = 422
+"metadata-musicbrainz.not_found" = 404
+"metadata-musicbrainz.upstream_error" = 502
+
+[wasm]
+memory_mb = 64
+default_timeout_ms = 20000
+
+[database]
+migrations = "migrations"
+
+[settings_schema]
+type = "object"
+x-pt-order = ["contact", "rate_per_sec", "cache_days", "api_base_url", "caa_base_url"]
+
+[settings_schema.properties.contact]
+type = "string"
+title = "User-Agent 中的联系方式（可选）"
+description = "MusicBrainz 要求请求带有能联系到使用者的 User-Agent（网址或邮箱）；默认是 PT Studio 项目地址，建议改成本站地址"
+
+[settings_schema.properties.rate_per_sec]
+type = "integer"
+title = "每秒请求上限"
+description = "官方服务器为每秒 1 次（全站合计）；使用自建镜像时可调高"
+minimum = 1
+maximum = 50
+default = 1
+
+[settings_schema.properties.cache_days]
+type = "integer"
+title = "缓存天数"
+description = "发行组至少缓存 90 天"
+minimum = 1
+maximum = 365
+default = 30
+
+[settings_schema.properties.api_base_url]
+type = "string"
+title = "API 地址（可选）"
+description = "默认 https://musicbrainz.org；可填自建镜像地址（须为公网 https）"
+
+[settings_schema.properties.caa_base_url]
+type = "string"
+title = "封面服务地址（可选）"
+description = "默认 https://coverartarchive.org"
+
+[terms]
+"metadata-musicbrainz.name" = { zh-CN = "MusicBrainz", en = "MusicBrainz" }

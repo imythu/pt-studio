@@ -1,7 +1,9 @@
 //! metadata-tmdb 插件（WASM，docs/plugins/metadata-tmdb/）：`ctx.metadata` 的 TMDB 提供方。
 //!
 //! 本版本实现：`lookup`（movie / tv / imdb 换算）、`search`、归一化、PG 结果缓存（含负缓存、过期降级）、海报转存（类型与大小校验、
-//! 内容寻址）、`metadata.fetched`（数据变化时）、HTTP `/v1/lookup` 与 `/v1/search`。速率限制、熔断、`refresh_stale` 在后续迭代实现。
+//! 内容寻址）、`metadata.fetched`（数据变化时）、HTTP `/v1/lookup` 与 `/v1/search`；API 限速（每秒 30 次）与熔断（连续 10 次失败
+//! 打开 5 分钟，期间有缓存就降级返回）、429 / 5xx 重试；翻译标题、背景图转存；近期上映或连载中的条目缓存 7 天；
+//! 每小时 `refresh_stale` 刷新近 90 天用过的过期条目。
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -9,17 +11,27 @@ pt_plugin_sdk::world!("metadata-tmdb");
 
 pub mod mapper;
 
-use exports::pt::plugin::{http_handler, service_provider};
+use std::time::Duration;
+
+use exports::pt::plugin::{http_handler, on_cron, service_provider};
 use mapper::Id;
 use pt_plugin_sdk::{
     blob, config, events, http_client,
     sql::{self, SqlValue},
+    time,
     types::PluginError,
+    upstream::{self, Upstream},
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 struct Tmdb;
+
+/// TMDB API（图片 CDN 不计入）
+const API: Upstream = Upstream::new("api", "metadata-tmdb.upstream_error");
+/// 单次 `refresh_stale` 最多刷新的条目数与时长
+const REFRESH_BATCH: i64 = 300;
+const REFRESH_BUDGET_MS: i64 = 8 * 60 * 1000;
 
 type R<T> = Result<T, PluginError>;
 
@@ -68,7 +80,7 @@ fn cfg() -> Cfg {
     }
 }
 
-fn get(c: &Cfg, path: &str, query: &[(&str, String)]) -> R<(u16, Vec<u8>, Option<String>)> {
+fn get(c: &Cfg, path: &str, query: &[(&str, String)]) -> R<http_client::OutboundResponse> {
     let mut q: Vec<String> = query.iter().map(|(k, v)| format!("{k}={}", enc(v))).collect();
     let mut headers = vec![http_client::Header {
         name: "accept".into(),
@@ -92,19 +104,20 @@ fn get(c: &Cfg, path: &str, query: &[(&str, String)]) -> R<(u16, Vec<u8>, Option
     } else {
         format!("{}{path}?{}", c.api, q.join("&"))
     };
-    let r = http_client::send(&http_client::OutboundRequest {
+    http_client::send(&http_client::OutboundRequest {
         method: "GET".into(),
         url,
         headers,
         body: None,
         timeout_ms: 8000,
-    })?;
-    let ct = r
-        .headers
+    })
+}
+
+fn header<'a>(r: &'a http_client::OutboundResponse, name: &str) -> Option<&'a str> {
+    r.headers
         .iter()
-        .find(|h| h.name.eq_ignore_ascii_case("content-type"))
-        .map(|h| h.value.clone());
-    Ok((r.status, r.body, ct))
+        .find(|h| h.name.eq_ignore_ascii_case(name))
+        .map(|h| h.value.as_str())
 }
 
 fn enc(s: &str) -> String {
@@ -119,8 +132,35 @@ fn enc(s: &str) -> String {
     o
 }
 
+/// API 请求：限速、熔断；429 按 `Retry-After`（≤ 2 秒）、5xx 退避 200 / 800 ms，各最多重试 2 次
 fn api_json(c: &Cfg, path: &str, query: &[(&str, String)]) -> R<Option<Value>> {
-    let (status, body, _) = get(c, path, query)?;
+    let mut attempt = 0;
+    let r = loop {
+        API.acquire()?;
+        let r = match get(c, path, query) {
+            Ok(r) => r,
+            Err(e) => {
+                // 未配置不算上游故障
+                API.record(e.code == "metadata-tmdb.not_configured");
+                return Err(e);
+            }
+        };
+        // 每次上游应答都计入熔断（重试中的失败也算）
+        API.record(r.status < 500 && r.status != 429);
+        let retry = match r.status {
+            429 => Some(upstream::retry_after(header(&r, "retry-after"), 2)),
+            s if s >= 500 => Some(Duration::from_millis(if attempt == 0 { 200 } else { 800 })),
+            _ => None,
+        };
+        match retry {
+            Some(wait) if attempt < 2 => {
+                attempt += 1;
+                std::thread::sleep(wait);
+            }
+            _ => break r,
+        }
+    };
+    let (status, body) = (r.status, r.body);
     match status {
         200 => serde_json::from_slice(&body)
             .map(Some)
@@ -134,9 +174,11 @@ fn api_json(c: &Cfg, path: &str, query: &[(&str, String)]) -> R<Option<Value>> {
     }
 }
 
-/// 海报转存：只接受 jpeg / png / webp 且 ≤ 2 MiB；内容寻址，返回公开路径
-fn rehost(c: &Cfg, path: &str) -> Option<String> {
-    let (status, body, ct) = get(c, &format!("{}/t/p/w500{path}", c.image), &[]).ok()?;
+/// 图片转存（海报 `w500`、背景图 `w1280`）：只接受 jpeg / png / webp 且 ≤ 2 MiB；内容寻址，返回公开路径
+fn rehost(c: &Cfg, size: &str, path: &str) -> Option<String> {
+    let r = get(c, &format!("{}/t/p/{size}{path}", c.image), &[]).ok()?;
+    let ct = header(&r, "content-type").map(str::to_owned);
+    let (status, body) = (r.status, r.body);
     let ext = match ct.as_deref().map(|t| t.split(';').next().unwrap_or("").trim()) {
         Some("image/jpeg") => "jpg",
         Some("image/png") => "png",
@@ -184,8 +226,8 @@ fn resolve(c: &Cfg, id: Id) -> R<Option<Id>> {
     Ok(r["tv_results"][0]["id"].as_u64().map(|t| Id::Tv(t, None)))
 }
 
-/// 返回 (规范 ID, 数据, 是否过期降级)
-fn lookup(external_id: &str, locale: &str) -> R<Option<(String, Value, bool)>> {
+/// 返回 (规范 ID, 数据, 是否过期降级)；`refresh` 为后台刷新：忽略缓存新鲜度，不更新 `last_used_at`
+fn lookup(external_id: &str, locale: &str, refresh: bool) -> R<Option<(String, Value, bool)>> {
     let c = cfg();
     let id = mapper::parse_id(external_id).ok_or_else(|| {
         err(
@@ -195,7 +237,9 @@ fn lookup(external_id: &str, locale: &str) -> R<Option<(String, Value, bool)>> {
     })?;
     let raw_key = id.key();
     let cached = sql::query(
-        "SELECT data::text, not_found, fetched_at > now() - make_interval(days => CASE WHEN not_found THEN 1 ELSE $3::int END) FROM cache
+        "SELECT data::text, not_found,
+                fetched_at > now() - make_interval(days => CASE WHEN not_found THEN 1 WHEN volatile THEN least(7, $3::int) ELSE $3::int END)
+           FROM cache
           WHERE external_id = $1 AND locale = $2",
         &[SqlValue::Text(raw_key.clone()), SqlValue::Text(locale.into()), SqlValue::Int(c.cache_days)],
     )?;
@@ -208,6 +252,7 @@ fn lookup(external_id: &str, locale: &str) -> R<Option<(String, Value, bool)>> {
     });
     if let Some((data, not_found, fresh)) = &hit
         && *fresh
+        && !refresh
     {
         sql::execute(
             "UPDATE cache SET last_used_at = now() WHERE external_id = $1 AND locale = $2",
@@ -238,15 +283,18 @@ fn lookup(external_id: &str, locale: &str) -> R<Option<(String, Value, bool)>> {
             &path,
             &[
                 ("language", locale.into()),
-                ("append_to_response", "credits,external_ids".into()),
+                ("append_to_response", "credits,external_ids,translations".into()),
             ],
         )?
         else {
             return Ok(None);
         };
         let mut data = mapper::map(kind, &r, locale);
-        if let Some(p) = r["poster_path"].as_str().and_then(|p| rehost(&c, p)) {
+        if let Some(p) = r["poster_path"].as_str().and_then(|p| rehost(&c, "w500", p)) {
             data["images"]["poster"] = json!(p);
+        }
+        if let Some(p) = r["backdrop_path"].as_str().and_then(|p| rehost(&c, "w1280", p)) {
+            data["images"]["backdrop"] = json!(p);
         }
         Ok(Some((id.key(), data)))
     })();
@@ -282,11 +330,20 @@ fn lookup(external_id: &str, locale: &str) -> R<Option<(String, Value, bool)>> {
                 &[SqlValue::Text(raw_key.clone()), SqlValue::Text(locale.into())],
             )?;
             let changed = old.rows.first().is_none_or(|r| text(&r[0]) != hash);
+            let volatile = mapper::volatile(&data, mapper::day_of(time::now()));
             sql::execute(
-                "INSERT INTO cache (external_id, locale, data, not_found, content_hash, fetched_at) VALUES ($1, $2, $3, false, $4, now())
+                "INSERT INTO cache (external_id, locale, data, not_found, content_hash, volatile, fetched_at) VALUES ($1, $2, $3, false, $4, $5, now())
                  ON CONFLICT (external_id, locale) DO UPDATE SET data = EXCLUDED.data, not_found = false, content_hash = EXCLUDED.content_hash,
-                        fetched_at = now(), last_used_at = now()",
-                &[SqlValue::Text(raw_key), SqlValue::Text(locale.into()), SqlValue::Json(stored.to_string()), SqlValue::Text(hash)],
+                        volatile = EXCLUDED.volatile, fetched_at = now(),
+                        last_used_at = CASE WHEN $6 THEN cache.last_used_at ELSE now() END",
+                &[
+                    SqlValue::Text(raw_key),
+                    SqlValue::Text(locale.into()),
+                    SqlValue::Json(stored.to_string()),
+                    SqlValue::Text(hash),
+                    SqlValue::Boolean(volatile),
+                    SqlValue::Boolean(refresh),
+                ],
             )?;
             // 首次或内容变化时通知
             if changed {
@@ -349,7 +406,7 @@ impl service_provider::Guest for Tmdb {
                               "id_pattern": "^(movie|tv):\\d+(:s\\d+)?$|^imdb:tt\\d{7,9}$" }),
             "lookup" => {
                 let locale = a["locale"].as_str().unwrap_or("en-US");
-                match lookup(a["external_id"].as_str().unwrap_or(""), locale)? {
+                match lookup(a["external_id"].as_str().unwrap_or(""), locale, false)? {
                     Some((id, data, stale)) => {
                         json!({ "source": "tmdb", "external_id": id, "data": data, "stale": stale })
                     }
@@ -389,7 +446,7 @@ impl http_handler::Guest for Tmdb {
         match req.route_id.as_str() {
             "lookup" => {
                 let id = q(&req, "id").unwrap_or("");
-                match lookup(id, q(&req, "locale").unwrap_or("zh-CN"))? {
+                match lookup(id, q(&req, "locale").unwrap_or("zh-CN"), false)? {
                     Some((id, data, stale)) => Ok(resp(
                         200,
                         &json!({ "source": "tmdb", "external_id": id, "stale": stale, "data": data }),
@@ -408,6 +465,50 @@ impl http_handler::Guest for Tmdb {
                 )? }),
             )),
             _ => Err(err("kernel.not_found", "no such route")),
+        }
+    }
+}
+
+/// 过期且近 90 天用过的条目逐个重新获取（LLD §1.4）；熔断打开或超出时长时停在当前位置，下次运行继续
+fn refresh_stale() -> R<()> {
+    let c = cfg();
+    let started = time::now();
+    let rows = sql::query(
+        "SELECT external_id, locale FROM cache
+          WHERE NOT not_found AND last_used_at > now() - interval '90 days'
+            AND fetched_at < now() - make_interval(days => CASE WHEN volatile THEN least(7, $1::int) ELSE $1::int END)
+          ORDER BY last_used_at DESC LIMIT $2",
+        &[SqlValue::Int(c.cache_days), SqlValue::Int(REFRESH_BATCH)],
+    )?;
+    let (mut ok, mut failed) = (0u32, 0u32);
+    for r in &rows.rows {
+        if time::now() - started > REFRESH_BUDGET_MS || API.is_open() {
+            break;
+        }
+        match lookup(&text(&r[0]), &text(&r[1]), true) {
+            Ok(_) => ok += 1,
+            Err(e) if e.code == "metadata-tmdb.not_configured" => return Ok(()),
+            Err(_) => failed += 1,
+        }
+        // 每条单独提交：中途超时也保留已刷新的结果
+        sql::commit()?;
+    }
+    pt_plugin_sdk::logging::info(
+        "refresh_stale finished",
+        &[
+            ("refreshed", &ok.to_string()),
+            ("failed", &failed.to_string()),
+            ("stale", &rows.rows.len().to_string()),
+        ],
+    );
+    Ok(())
+}
+
+impl on_cron::Guest for Tmdb {
+    fn run(job: on_cron::JobInvocation) -> R<()> {
+        match job.name.as_str() {
+            "refresh_stale" => refresh_stale(),
+            _ => Err(err("kernel.not_found", "unknown job")),
         }
     }
 }

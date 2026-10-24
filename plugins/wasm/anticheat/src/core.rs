@@ -192,9 +192,26 @@ pub fn load_evidence(user: i64, window_days: f64, max: i64, at: i64) -> R<(Vec<E
     Ok((ev, truncated))
 }
 
+/// 盒子种子（§1.3 `ctx.is_seedbox`）：证据产生时 peer IP 命中已批准盒子网段（accounting 在信号 details 记
+/// `seedbox: true`），或该用户当前在该种子上有盒子 peer（`accounting.v_swarm_peers.is_seedbox`）。
+/// seedbox 插件未安装时两者都为空。
+pub fn seedbox_torrents(user: i64, ev: &[Evidence]) -> R<BTreeSet<i64>> {
+    let mut out = rules::seedbox_from_evidence(ev);
+    let tids: BTreeSet<i64> = ev.iter().filter_map(|e| e.torrent_id).collect();
+    if !tids.is_empty() {
+        let rows = q(
+            "SELECT DISTINCT torrent_id FROM accounting.v_swarm_peers WHERE user_id = $1 AND is_seedbox AND torrent_id = ANY($2)",
+            &[i(user), db::ints(tids.into_iter().collect())],
+        )?;
+        out.extend(rows.iter().map(|r| r.n(0)));
+    }
+    Ok(out)
+}
+
 pub fn score_user(user: i64, rs: &Ruleset, at: i64) -> R<(Score, Vec<Evidence>, Ctx)> {
     let (ev, truncated) = load_evidence(user, rs.max_window_days(), rs.defaults.max_evidence, at)?;
-    let ctx = context(user)?;
+    let mut ctx = context(user)?;
+    ctx.seedbox = seedbox_torrents(user, &ev)?;
     let s = rules::compute(rs, &ev, &ctx, at, truncated);
     Ok((s, ev, ctx))
 }

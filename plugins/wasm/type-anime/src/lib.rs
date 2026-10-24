@@ -181,8 +181,21 @@ impl on_cron::Guest for TypeAnime {
         let gid = p["group_id"].as_i64().unwrap_or(0);
         let g = svc("ctx.torrents", "get_group", &json!({ "id": gid }))?;
         let f = &g["fields"];
-        // 目前只有 TMDB 元数据源；剧场版暂不补全
-        // 没填 media 时按 TV 动画处理
+        // Bangumi 优先（条目即季，剧场版也可补全）；没有 Bangumi 编号或查无结果时用 TMDB（剧场版暂不补全，没填 media 时按 TV 动画处理）
+        if let Some(id) = f["bangumi_id"].as_u64()
+            && let Some(data) = lookup("bangumi", &id.to_string(), "zh-CN")?
+        {
+            let mut patch = pt_type_kit::metadata::show_patch(&data, None, "zh-CN");
+            if let Some(o) = patch.as_object_mut() {
+                o.remove("countries");
+            }
+            svc(
+                "ctx.torrents",
+                "update_group",
+                &json!({ "id": gid, "fields": patch }),
+            )?;
+            return Ok(());
+        }
         match (f["tmdb_tv_id"].as_u64(), f["media"].as_str()) {
             (Some(id), m) if m != Some("movie") => enrich(gid, &format!("tv:{id}"), f["season"].as_i64()),
             _ => Ok(()),
@@ -196,11 +209,11 @@ fn locale() -> String {
 }
 
 /// `Ok(None)`：元数据源未安装 / 未配置或无结果（不重试）
-fn lookup(external: &str, locale: &str) -> Result<Option<Value>, PluginError> {
+fn lookup(source: &str, external: &str, locale: &str) -> Result<Option<Value>, PluginError> {
     match svc(
         "ctx.metadata",
         "lookup",
-        &json!({ "source": "tmdb", "external_id": external, "locale": locale }),
+        &json!({ "source": source, "external_id": external, "locale": locale }),
     ) {
         Ok(r) if r.is_null() => Ok(None),
         Ok(r) => Ok(Some(r["data"].clone())),
@@ -211,14 +224,14 @@ fn lookup(external: &str, locale: &str) -> Result<Option<Value>, PluginError> {
 
 fn enrich(gid: i64, external: &str, season: Option<i64>) -> Result<(), PluginError> {
     let locale = locale();
-    let Some(show) = lookup(external, &locale)? else {
+    let Some(show) = lookup("tmdb", external, &locale)? else {
         return Ok(());
     };
     if show["kind"] != "tv" {
         return Ok(());
     }
     let season_data = match (show["ids"]["tmdb"].as_u64(), season.filter(|s| *s > 0)) {
-        (Some(id), Some(n)) => lookup(&format!("tv:{id}:s{n}"), &locale)?,
+        (Some(id), Some(n)) => lookup("tmdb", &format!("tv:{id}:s{n}"), &locale)?,
         _ => None,
     };
     let mut patch = pt_type_kit::metadata::show_patch(&show, season_data.as_ref(), &locale);

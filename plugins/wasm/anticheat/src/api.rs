@@ -42,6 +42,111 @@ fn titles(ids: &[i64]) -> std::collections::HashMap<i64, String> {
     .unwrap_or_default()
 }
 
+/// 种子视角（FR-ACH-042）：最近 `days` 天（基线确认之后）交叉校验异常的种子，按异常小时数、超额排序。
+/// 同一小时可能归因多名上传者，超额（swarm 上传 − 下载）按种子 + 小时去重后累加。
+fn suspicious_torrents(days: i64, limit: i64) -> R<Value> {
+    if !(1..=90).contains(&days) {
+        return Err(db::validation("days must be 1..=90"));
+    }
+    let rows = q(
+        &format!(
+            "SELECT e.torrent_id, e.user_id, e.details, {}, {} FROM evidence e
+               LEFT JOIN torrent_baselines b ON b.torrent_id = e.torrent_id
+              WHERE e.kind = 'cross_check_mismatch' AND e.torrent_id IS NOT NULL
+                AND e.verdict IS DISTINCT FROM 'false_positive'
+                AND e.occurred_at > now() - make_interval(days => $1::int)
+                AND (b.confirmed_at IS NULL OR e.occurred_at > b.confirmed_at)
+              ORDER BY e.occurred_at DESC LIMIT 20000",
+            ms("e.occurred_at"),
+            ms("b.confirmed_at")
+        ),
+        &[i(days)],
+    )?;
+    #[derive(Default)]
+    struct Agg {
+        hours: std::collections::BTreeMap<String, i64>,
+        users: std::collections::HashMap<i64, (i64, i64)>,
+        last_at: i64,
+        baseline_at: Option<i64>,
+    }
+    let mut by: std::collections::HashMap<i64, Agg> = Default::default();
+    for r in &rows {
+        let d = r.v(2);
+        let a = by.entry(r.n(0)).or_default();
+        let hour = d["hour_start"]
+            .as_str()
+            .map_or_else(|| r.n(3).to_string(), str::to_owned);
+        let excess =
+            (d["swarm_uploaded"].as_i64().unwrap_or(0) - d["swarm_downloaded"].as_i64().unwrap_or(0)).max(0);
+        a.hours.insert(hour, excess);
+        let u = a.users.entry(r.n(1)).or_default();
+        u.0 += 1;
+        u.1 += d["user_uploaded"].as_i64().unwrap_or(0);
+        a.last_at = a.last_at.max(r.n(3));
+        a.baseline_at = r.on(4);
+    }
+    let mut list: Vec<(i64, Agg)> = by.into_iter().collect();
+    list.sort_by_key(|(tid, a)| {
+        (
+            std::cmp::Reverse(a.hours.len()),
+            std::cmp::Reverse(a.hours.values().sum::<i64>()),
+            *tid,
+        )
+    });
+    list.truncate(usize::try_from(limit.clamp(1, 200)).unwrap_or(50));
+    let tids: Vec<i64> = list.iter().map(|(t, _)| *t).collect();
+    let uids: Vec<i64> = list
+        .iter()
+        .flat_map(|(_, a)| a.users.keys().copied())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let (names, tt) = (usernames(&uids)?, titles(&tids));
+    let items: Vec<Value> = list
+        .iter()
+        .map(|(tid, a)| {
+            let mut users: Vec<(&i64, &(i64, i64))> = a.users.iter().collect();
+            users.sort_by_key(|(id, (hits, up))| (std::cmp::Reverse(*hits), std::cmp::Reverse(*up), **id));
+            json!({
+                "torrent": { "id": tid, "title": tt.get(tid) },
+                "mismatch_hours": a.hours.len(),
+                "excess_bytes": a.hours.values().sum::<i64>(),
+                "last_at": db::iso(a.last_at),
+                "baseline_at": db::iso_opt(a.baseline_at),
+                "user_count": users.len(),
+                "users": users.iter().take(20).map(|(id, (hits, up))| json!({
+                    "id": id, "username": names.get(id), "hits": hits, "uploaded": up,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Ok(json!({ "days": days, "items": items, "truncated": rows.len() >= 20000 }))
+}
+
+/// 确认种子基线：复核员看过后，之前的异常不再计入种子视角
+fn confirm_baseline(tid: i64, note: Option<&str>, actor: i64) -> R<Value> {
+    let note = note
+        .map(|n| db::clean_text(n, 500, true))
+        .transpose()?
+        .filter(|n| !n.is_empty());
+    let r = q1(
+        &format!(
+            "INSERT INTO torrent_baselines (torrent_id, confirmed_at, confirmed_by, note) VALUES ($1, now(), $2, $3)
+             ON CONFLICT (torrent_id) DO UPDATE SET confirmed_at = now(), confirmed_by = $2, note = $3
+             RETURNING {}",
+            ms("confirmed_at")
+        ),
+        &[i(tid), i(actor), db::ot(note.as_deref())],
+    )?
+    .ok_or_else(|| err("kernel.internal", "baseline upsert"))?;
+    db::audit(
+        "anticheat.torrent_baseline_confirmed",
+        &format!("torrent:{tid}"),
+        &json!({ "note": note }),
+    )?;
+    Ok(json!({ "torrent_id": tid, "confirmed_at": db::iso(r.n(0)) }))
+}
+
 fn qi(req: &Request, k: &str) -> Option<i64> {
     req.query(k).and_then(|v| v.parse().ok())
 }
@@ -670,6 +775,14 @@ pub fn http(req: &Request) -> R<Reply> {
             Reply::ok(
                 &json!({ "items": rows.iter().map(|r| json!({ "user": { "id": r.n(0), "username": names.get(&r.n(0)) }, "score": r.n(1), "band": r.s(2) })).collect::<Vec<_>>() }),
             )
+        }
+        // 后台：种子视角
+        "admin_list_suspicious_torrents" => Reply::ok(&suspicious_torrents(
+            qi(req, "days").unwrap_or(30),
+            qi(req, "limit").unwrap_or(50),
+        )?),
+        "admin_confirm_torrent_baseline" => {
+            Reply::ok(&confirm_baseline(pid("id")?, b["note"].as_str(), me()?)?)
         }
         // 后台：申诉
         "admin_list_appeals" => {

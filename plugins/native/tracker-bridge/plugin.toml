@@ -5,16 +5,19 @@ kind = "native"
 api = "pt:plugin@1"
 license = "MIT OR Apache-2.0"
 authors = ["PT Studio"]
-description = "把 passkey、种子、客户端白名单与 tracker 参数写入 Redis（trk:*），供 pt-tracker 鉴权与准入；启动与定时全量同步，用户与种子变更实时同步"
+description = "把 passkey、种子、客户端规则与 tracker 参数写入 Redis（trk:*），供 pt-tracker 鉴权与准入；启动与定时全量同步，用户与种子变更实时同步；客户端规则管理与 tracker 节点健康检查"
 summary = "把种子和用户数据同步给 Tracker，保证客户端能正常汇报"
 category = "system"
 
 requires = ["ctx.users@^0.1"]
+provides = ["ctx.tracker@0.1.0"]
+publishes = ["tracker.client_rules_changed", "tracker.inconsistency_detected"]
 
 [capabilities]
+kv = true
 sql = true
 views = ["torrent.v_torrent_tracker", "identity.v_user_public"]
-redis_global = [{ role = "tracker_sync", prefix = "trk:", mode = "rw" }]
+redis_global = [{ role = "tracker_sync", prefix = "trk:", mode = "rw" }, { role = "tracker_state", prefix = "ps:", mode = "r" }]
 
 [capabilities.scopes]
 "ctx.users" = ["read:passkey"]
@@ -47,15 +50,87 @@ event = "torrent.status_changed"
 name = "torrent_deleted"
 event = "torrent.deleted"
 
+[[http.routes]]
+id = "admin_status"
+method = "GET"
+path = "/v1/admin/status"
+auth = "admin"
+permission = "tracker-bridge.peers.read"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_client_rules"
+method = "GET"
+path = "/v1/admin/client-rules"
+auth = "admin"
+permission = "tracker-bridge.clients.manage"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_client_rules_set"
+method = "PUT"
+path = "/v1/admin/client-rules"
+auth = "admin"
+permission = "tracker-bridge.clients.manage"
+rate_limit = "user:30/m"
+
+[[http.routes]]
+id = "admin_client_rules_test"
+method = "POST"
+path = "/v1/admin/client-rules:test"
+auth = "admin"
+permission = "tracker-bridge.clients.manage"
+rate_limit = "user:120/m"
+
+[[http.routes]]
+id = "admin_client_rule_presets"
+method = "GET"
+path = "/v1/admin/client-rule-presets"
+auth = "admin"
+permission = "tracker-bridge.clients.manage"
+rate_limit = "user:60/m"
+
+[[http.routes]]
+id = "admin_denied_clients"
+method = "GET"
+path = "/v1/admin/denied-clients"
+auth = "admin"
+permission = "tracker-bridge.clients.manage"
+rate_limit = "user:60/m"
+
+[[permissions]]
+name = "tracker-bridge.clients.manage"
+description_term = "tracker-bridge.perm.clients_manage"
+default_roles = ["admin"]
+
+[[permissions]]
+name = "tracker-bridge.peers.read"
+description_term = "tracker-bridge.perm.peers_read"
+default_roles = ["moderator"]
+
+[frontend]
+entry = "index.js"
+routes = ["/admin/p/tracker-bridge/*"]
+settings_ui = "schema"
+
 # 限制（H&R 等）不发布事件，由定时全量同步兜底
 [[cron]]
 name = "resync"
 schedule = "*/10 * * * *"
 timeout_secs = 600
 
+# 节点延迟 / 失联告警（读 pt-tracker 每 10 秒写的 trk:stats:node:*）
+[[cron]]
+name = "node_health"
+schedule = "* * * * *"
+timeout_secs = 30
+
+[database]
+migrations = "migrations"
+
 [settings_schema]
 type = "object"
-x-pt-order = ["interval", "min_interval", "max_peers", "allow_unknown_clients", "clients"]
+x-pt-order = ["interval", "min_interval", "max_peers"]
 
 [settings_schema.properties.interval]
 type = "integer"
@@ -78,15 +153,7 @@ maximum = 200
 title = "每次返回的最多 peer 数"
 default = 50
 
-[settings_schema.properties.allow_unknown_clients]
-type = "boolean"
-title = "允许白名单之外的客户端"
-default = false
-
-[settings_schema.properties.clients]
-type = "array"
-title = "客户端白名单（peer_id 前缀）"
-items = { type = "object", required = ["name", "peer_id_prefix"], properties = { name = { type = "string" }, peer_id_prefix = { type = "string" } } }
-
 [terms]
 "tracker-bridge.name" = { zh-CN = "Tracker 同步", en = "Tracker bridge" }
+"tracker-bridge.perm.clients_manage" = { zh-CN = "管理 tracker 客户端规则", en = "Manage tracker client rules" }
+"tracker-bridge.perm.peers_read" = { zh-CN = "查看 peer 列表与 tracker 节点状态", en = "View peer lists and tracker node status" }

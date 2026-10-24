@@ -19,13 +19,13 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `kind` | string | `movie` / `tv` / `tv_season` / `anime` / `music_release_group` / `game` / `book` |
+| `kind` | string | `movie` / `tv` / `tv_season` / `anime` / `music_release_group` / `music_release` / `artist` / `game` / `book` |
 | `titles` | `{original, localized{<locale>: string}, aliases[]}` | |
 | `year`、`release_date` | integer / YYYY-MM-DD | |
-| `ids` | `{tmdb?, imdb?, douban?, mbid?, bangumi?, igdb?, tvdb?, anidb?}` | 交叉 ID（来源提供时） |
+| `ids` | `{tmdb?, imdb?, douban?, mbid?, bangumi?, igdb?, tvdb?, anidb?, isbn?}` | 交叉 ID（来源提供时） |
 | `genres` | string[] | 统一键（映射表在各插件） |
 | `countries`、`languages` | string[] | ISO 代码 |
-| `people` | `[{name, role(director/cast/writer/composer/artist/developer/publisher), mbid?}]` | ≤ 50 |
+| `people` | `[{name, role(director/cast/writer/translator/composer/artist/developer/publisher), mbid?}]` | ≤ 50 |
 | `runtime_min`、`episode_count`、`season` | integer? | |
 | `ratings` | `{<source>: {value, votes}}` | 0～10 |
 | `images` | `{poster?, backdrop?, cover?}` | **已转存**的 blob 相对路径（§4） |

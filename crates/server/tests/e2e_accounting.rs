@@ -151,7 +151,7 @@ fn promo() -> NativePlugin {
 fn config() -> SiteConfig {
     let mut text = common::config_text();
     text.push_str(&format!(
-        "\n[redis.acct]\nurl = \"{}\"\n\n[plugin.accounting]\nwindow_secs = 2\nsettle_grace_secs = 0\ndefault_partitions = 2\nidle_sleep_ms = 50\n",
+        "\n[redis.acct]\nurl = \"{}\"\n\n[plugin.accounting]\nwindow_secs = 2\nsettle_grace_secs = 0\ndefault_partitions = 2\nidle_sleep_ms = 50\n\n[plugin.accounting.signals]\nclient_fingerprint_check = true\n",
         env("PT_TEST_REDIS_URL", "redis://127.0.0.1:56379/15")
     ));
     SiteConfig::parse(&text).unwrap()
@@ -199,6 +199,42 @@ async fn xadd(
             ("dleech", "10".into()),
             ("flags", flags.to_string()),
             ("ua", "qBittorrent/4.6.3".into()),
+        ])
+        .query_async(r)
+        .await
+        .unwrap();
+}
+
+/// 指定 peer_id 与 User-Agent 的一条 none 记账（客户端指纹）
+async fn xadd_client(
+    r: &mut redis::aio::MultiplexedConnection,
+    uid: u64,
+    tid: u64,
+    eid: &str,
+    pid_hex: &str,
+    ua: &str,
+) {
+    let _: String = redis::cmd("XADD")
+        .arg(format!("acct:{}", uid % 2))
+        .arg("*")
+        .arg(&[
+            ("v", "1".to_owned()),
+            ("eid", eid.to_owned()),
+            ("ts", chrono::Utc::now().timestamp().to_string()),
+            ("uid", uid.to_string()),
+            ("tid", tid.to_string()),
+            ("ih", "ab".repeat(20)),
+            ("pid", pid_hex.to_owned()),
+            ("ip", "203.0.113.9".into()),
+            ("port", "51413".into()),
+            ("ev", "none".into()),
+            ("left", "0".into()),
+            ("dup", "0".into()),
+            ("ddown", "0".into()),
+            ("dseed", "30".into()),
+            ("dleech", "0".into()),
+            ("flags", "0".into()),
+            ("ua", ua.to_owned()),
         ])
         .query_async(r)
         .await
@@ -508,6 +544,64 @@ async fn accounting_end_to_end() {
     assert!(
         other.body.get("uploaded_raw").is_none(),
         "others only see public fields"
+    );
+
+    // ---- 客户端指纹（FR-ACC-019）：peer_id 为 qBittorrent、UA 为 Transmission → fingerprint_mismatch；
+    //      同一 peer 先报 Transmission 再报 qBittorrent → fingerprint_changed ----
+    let qb = format!("2d7142353132302d{}", "21".repeat(12));
+    // 不认识的 peer_id 前缀：只看 UA 族是否变化（同批同时命中 mismatch 时按信号合并，details 取前者）
+    let tr = format!("2d5858303130302d{}", "22".repeat(12));
+    xadd_client(&mut r, 31, 40, "fp:1", &qb, "Transmission/4.0.6").await;
+    xadd_client(&mut r, 32, 41, "fp:2", &tr, "Transmission/4.0.6").await;
+    let fp = |uid: i64| async move {
+        let mut c = PgConnection::connect(&env(
+            "PT_TEST_SUPERUSER_URL",
+            "postgres://postgres@127.0.0.1:55432/pt_test",
+        ))
+        .await
+        .unwrap();
+        sqlx::query_as::<_, (Value,)>(
+            "SELECT details FROM accounting.signals WHERE user_id = $1 AND signal = 'client_not_allowed'",
+        )
+        .bind(uid)
+        .fetch_all(&mut c)
+        .await
+        .unwrap()
+    };
+    let mut got = Vec::new();
+    for _ in 0..100 {
+        got = fp(31).await;
+        if !got.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].0["kind"], "fingerprint_mismatch");
+    assert_eq!(got[0].0["ua_family"], "transmission");
+    assert!(
+        !got[0].0.to_string().contains("4.0.6"),
+        "UA text must not be stored"
+    );
+    // 同族不报；同一 peer 换 UA 族才报
+    assert!(fp(32).await.is_empty());
+    xadd_client(&mut r, 32, 41, "fp:3", &tr, "qBittorrent/5.1.2").await;
+    for _ in 0..100 {
+        got = fp(32).await;
+        if !got.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let kinds: Vec<&str> = got.iter().filter_map(|(d,)| d["kind"].as_str()).collect();
+    assert!(kinds.contains(&"fingerprint_changed"), "{got:?}");
+    let changed = got
+        .iter()
+        .find(|(d,)| d["kind"] == "fingerprint_changed")
+        .unwrap();
+    assert_eq!(
+        (&changed.0["previous_ua_family"], &changed.0["ua_family"]),
+        (&json!("transmission"), &json!("qbittorrent"))
     );
 
     kernel.shutdown().await;

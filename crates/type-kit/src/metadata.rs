@@ -57,7 +57,12 @@ pub fn show_patch(show: &Value, season: Option<&Value>, locale: &str) -> Value {
     if let Some(st) = show["extra"]["status"].as_str() {
         p.insert("status".into(), json!(st));
     }
-    if let Some(v) = show["ratings"]["tmdb"]["value"].as_f64() {
+    // TMDB 评分优先，豆瓣 / Bangumi 条目补全时用其评分
+    if let Some(v) = show["ratings"]["tmdb"]["value"]
+        .as_f64()
+        .or_else(|| show["ratings"]["douban"]["value"].as_f64())
+        .or_else(|| show["ratings"]["bangumi"]["value"].as_f64())
+    {
         p.insert("rating".into(), json!(v));
     }
     if let Some(v) = show["ids"]["tmdb"].as_u64() {

@@ -3,10 +3,12 @@
 
 use std::collections::HashMap;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use redis::AsyncCommands;
-use serde::Deserialize;
+
+use crate::clients::{Action, Rules};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UserCtx {
@@ -23,39 +25,6 @@ pub struct TorrentCtx {
     /// 是否计账（hybrid 种子的 v2 hash 为 false）
     pub acct: bool,
     pub size: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ClientRules {
-    #[serde(default)]
-    pub default: String,
-    #[serde(default)]
-    pub rules: Vec<ClientRule>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ClientRule {
-    pub peer_id_prefix: String,
-    #[serde(default = "allow")]
-    pub action: String,
-}
-
-fn allow() -> String {
-    "allow".into()
-}
-
-impl ClientRules {
-    /// 第一条匹配 peer_id 前缀的规则决定；都不匹配时按 default（缺省拒绝）
-    pub fn allows(&self, peer_id: &[u8]) -> bool {
-        match self
-            .rules
-            .iter()
-            .find(|r| !r.peer_id_prefix.is_empty() && peer_id.starts_with(r.peer_id_prefix.as_bytes()))
-        {
-            Some(r) => r.action == "allow",
-            None => self.default == "allow",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,7 +48,7 @@ impl Default for Params {
 struct Inner {
     users: HashMap<String, UserCtx>,
     torrents: HashMap<[u8; 20], TorrentCtx>,
-    clients: ClientRules,
+    clients: Rules,
     params: Params,
     /// 回源未命中的负缓存
     misses: HashMap<String, Instant>,
@@ -87,6 +56,10 @@ struct Inner {
 
 pub struct Admission {
     inner: RwLock<Inner>,
+    /// 已应用的 `trk:sync` 最新条目 ID（节点状态 `sid`）
+    sync_id: RwLock<String>,
+    /// 心跳周期内应用变更的最大延迟（毫秒，条目 ID 的时间部分到应用时刻）；心跳读出后清零
+    lag_ms: AtomicU64,
 }
 
 /// 回源未命中的负缓存时长：足够挡住穷举，又让刚注册 / 刚发布（同步尚未到达）的情况很快恢复
@@ -137,6 +110,30 @@ impl Admission {
     pub fn new() -> Self {
         Self {
             inner: RwLock::new(Inner::default()),
+            sync_id: RwLock::new("0-0".into()),
+            lag_ms: AtomicU64::new(0),
+        }
+    }
+
+    /// 节点状态用：已应用的变更流 ID 与本周期最大同步延迟（读后清零）
+    pub fn sync_state(&self) -> (String, u64) {
+        let sid = self
+            .sync_id
+            .read()
+            .map_or_else(|e| e.into_inner().clone(), |g| g.clone());
+        (sid, self.lag_ms.swap(0, Ordering::Relaxed))
+    }
+
+    fn applied(&self, id: &str) {
+        if let Some(ms) = id.split('-').next().and_then(|m| m.parse::<u64>().ok()) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+            self.lag_ms.fetch_max(now.saturating_sub(ms), Ordering::Relaxed);
+        }
+        match self.sync_id.write() {
+            Ok(mut g) => id.clone_into(&mut g),
+            Err(e) => id.clone_into(&mut e.into_inner()),
         }
     }
 
@@ -156,8 +153,9 @@ impl Admission {
         self.read().params
     }
 
-    pub fn client_allowed(&self, peer_id: &[u8]) -> bool {
-        self.read().clients.allows(peer_id)
+    /// 客户端规则判定（tracker-bridge LLD §1.5）
+    pub fn client_decide(&self, peer_id: &[u8], ua: &[u8]) -> (Action, Option<u64>) {
+        self.read().clients.decide(peer_id, ua)
     }
 
     pub fn counts(&self) -> (usize, usize) {
@@ -271,20 +269,35 @@ impl Admission {
                 cursor = next;
             }
         }
-        let clients = self.fetch_clients(conn).await;
+        let clients = Self::fetch_clients(conn).await;
         let cfg: HashMap<String, String> = conn.hgetall("trk:cfg").await.unwrap_or_default();
         let mut g = self.write();
         g.users = users;
         g.torrents = torrents;
-        g.clients = clients;
+        if let Some(c) = clients {
+            g.clients = c;
+        }
         g.params = params_of(&cfg);
         g.misses.clear();
         Ok(last.unwrap_or_else(|| "0-0".into()))
     }
 
-    async fn fetch_clients(&self, conn: &mut redis::aio::ConnectionManager) -> ClientRules {
-        let s: Option<String> = conn.get("trk:clients").await.unwrap_or(None);
-        s.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    /// 读取并编译 `trk:clients`；键不存在、读取失败或规则无效时返回 None（保留当前规则集）
+    async fn fetch_clients(conn: &mut redis::aio::ConnectionManager) -> Option<Rules> {
+        let s: Option<String> = match conn.get("trk:clients").await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "reading client rules failed");
+                return None;
+            }
+        };
+        match Rules::compile(&s?) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                tracing::error!(error = %e, "client rules rejected, keeping the previous rule set");
+                None
+            }
+        }
     }
 
     /// 应用一条变更：重新读取对应的快照键（删除则移除）
@@ -322,8 +335,9 @@ impl Admission {
                 };
             }
             "clients" => {
-                let c = self.fetch_clients(conn).await;
-                self.write().clients = c;
+                if let Some(c) = Self::fetch_clients(conn).await {
+                    self.write().clients = c;
+                }
             }
             "cfg" => {
                 let cfg: HashMap<String, String> = conn.hgetall("trk:cfg").await.unwrap_or_default();
@@ -335,6 +349,10 @@ impl Admission {
 
     /// 消费变更流（阻塞读）；游标落后于流的最早条目（被修剪）时重新全量加载
     pub async fn follow(&self, mut conn: redis::aio::ConnectionManager, mut last: String) {
+        match self.sync_id.write() {
+            Ok(mut g) => last.clone_into(&mut g),
+            Err(e) => last.clone_into(&mut e.into_inner()),
+        }
         loop {
             let reply: redis::RedisResult<Option<Vec<StreamReply>>> = redis::cmd("XREAD")
                 .arg("COUNT")
@@ -358,6 +376,7 @@ impl Admission {
                                 f.get("op").map_or("upsert", String::as_str),
                             )
                             .await;
+                            self.applied(&id);
                             last = id;
                         }
                     }
@@ -405,18 +424,6 @@ pub fn stream_id_less(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn client_rules() {
-        let r: ClientRules = serde_json::from_str(
-            r#"{"default":"deny","rules":[{"peer_id_prefix":"-qB"},{"peer_id_prefix":"-XX","action":"deny"}]}"#,
-        )
-        .unwrap();
-        assert!(r.allows(b"-qB4650-abcdefghijkl"));
-        assert!(!r.allows(b"-XX0001-abcdefghijkl"));
-        assert!(!r.allows(b"-ZZ0001-abcdefghijkl"));
-        assert!(!ClientRules::default().allows(b"-qB"));
-    }
 
     #[test]
     fn parsing() {

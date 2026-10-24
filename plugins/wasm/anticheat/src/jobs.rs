@@ -38,8 +38,10 @@ const DETAIL_KEYS: &[&str] = &[
     "uploaders",
     "peer_id_prefix",
     "ua_family",
+    "previous_ua_family",
     "left",
     "size",
+    "seedbox",
 ];
 
 fn whitelist(d: &Value) -> Value {
@@ -374,38 +376,160 @@ pub fn enrich_case(case_id: i64) -> R<()> {
     db::commit()?;
     let top = db::settings().enrich_top_torrents;
     let tids = q(
-        "SELECT (snapshot->>'torrent_id')::bigint AS t,
-                max(coalesce((snapshot->'details'->>'bytes')::numeric, (snapshot->'details'->>'user_uploaded')::numeric, 0)) AS w
+        "SELECT (snapshot->>'torrent_id')::bigint AS t
            FROM case_evidence WHERE case_id = $1 AND snapshot->>'torrent_id' IS NOT NULL
-          GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $2",
+          GROUP BY 1
+          ORDER BY max(coalesce((snapshot->'details'->>'bytes')::numeric, (snapshot->'details'->>'user_uploaded')::numeric, 0)) DESC, 1
+          LIMIT $2",
         &[i(case_id), i(top)],
     )?;
     for tr in &tids {
         let tid = tr.n(0);
-        let peers = q(
-            &format!(
-                "SELECT user_id, client_prefix, is_seeder, uploaded_raw, downloaded_raw, {} FROM accounting.v_swarm_peers
-                  WHERE torrent_id = $1 ORDER BY is_seeder DESC, user_id LIMIT 201",
-                ms("last_announce_at")
-            ),
-            &[i(tid)],
-        );
-        let Ok(peers) = peers else { break };
-        let list: Vec<Value> = peers
-            .iter()
-            .take(200)
-            .map(|p| json!({ "user_id": p.n(0), "client": p.os(1), "seeder": p.b(2), "uploaded": p.n(3), "downloaded": p.n(4),
-                             "last_announce_at": db::iso_opt(p.on(5)) }))
-            .collect();
+        let (list, truncated) = match tracker_peers(tid) {
+            Some((peers, truncated, with_ip)) => {
+                if with_ip {
+                    shared_ip(case_id, user, tid, &peers)?;
+                }
+                // 快照不含 IP、端口、完整 peer_id
+                let list: Vec<Value> = peers
+                    .iter()
+                    .take(200)
+                    .map(|p| json!({ "user_id": p["user_id"], "client": p["peer_id_prefix"], "seeder": p["seeder"],
+                                     "uploaded": p["uploaded"], "downloaded": p["downloaded"], "left": p["left"],
+                                     "last_announce_at": p["last_announce_at"].as_i64().map(|s| db::iso(s * 1000)) }))
+                    .collect();
+                (list, truncated || peers.len() > 200)
+            }
+            None => {
+                let peers = q(
+                    &format!(
+                        "SELECT user_id, client_prefix, is_seeder, uploaded_raw, downloaded_raw, {} FROM accounting.v_swarm_peers
+                          WHERE torrent_id = $1 ORDER BY is_seeder DESC, user_id LIMIT 201",
+                        ms("last_announce_at")
+                    ),
+                    &[i(tid)],
+                );
+                let Ok(peers) = peers else { break };
+                let list: Vec<Value> = peers
+                    .iter()
+                    .take(200)
+                    .map(|p| json!({ "user_id": p.n(0), "client": p.os(1), "seeder": p.b(2), "uploaded": p.n(3), "downloaded": p.n(4),
+                                     "last_announce_at": db::iso_opt(p.on(5)) }))
+                    .collect();
+                (list, peers.len() > 200)
+            }
+        };
         core::timeline(
             case_id,
             "swarm_snapshot",
             None,
-            &json!({ "torrent_id": tid, "taken_at": db::iso(now()), "peers": list, "truncated": peers.len() > 200 }),
+            &json!({ "torrent_id": tid, "taken_at": db::iso(now()), "peers": list, "truncated": truncated }),
         )?;
     }
     core::rescore_user(user, Trigger::Manual, false)?;
     Ok(())
+}
+
+/// `ctx.tracker.peers`（optional）：获授 `peer.ip` 时带 IP；返回 (peers, truncated, 是否带 IP)；服务不可用时 None
+fn tracker_peers(tid: i64) -> Option<(Vec<Value>, bool, bool)> {
+    let call = |ip: bool| {
+        db::call(
+            "ctx.tracker",
+            "peers",
+            &json!({ "torrent_id": tid, "include_ip": ip }),
+        )
+    };
+    let (v, with_ip) = match call(true) {
+        Ok(v) => (v, true),
+        Err(e) if e.code == "kernel.capability_denied" => (call(false).ok()?, false),
+        Err(_) => return None,
+    };
+    let peers = v["peers"].as_array()?.clone();
+    Some((peers, v["truncated"].as_bool().unwrap_or(false), with_ip))
+}
+
+/// 同网段对端（FR-ACH-041，LLD §1.11 `shared_ip`）：该用户任一 peer 地址与其他用户的 peer 地址同在 IPv4 /24 或 IPv6 /48 时，
+/// 写证据 `anticheat.shared_ip_counterparty`（每案件每种子一次）。IP 只在本次调用的内存中使用，不写日志、不进 details。
+fn shared_ip(case_id: i64, user: i64, tid: i64, peers: &[Value]) -> R<()> {
+    let others = shared_prefix_counterparties(user, peers);
+    if others.is_empty() {
+        return Ok(());
+    }
+    let ext = format!("sip:{case_id}:{tid}");
+    if q1(
+        "SELECT 1 FROM evidence WHERE source = 'anticheat' AND external_ref = $1 LIMIT 1",
+        &[t(&ext)],
+    )?
+    .is_some()
+    {
+        return Ok(());
+    }
+    let ids: Vec<i64> = others.iter().take(20).copied().collect();
+    x(
+        "INSERT INTO evidence (occurred_at, user_id, torrent_id, source, kind, severity, details, external_ref)
+         VALUES (now(), $1, $2, 'anticheat', 'anticheat.shared_ip_counterparty', 'medium', $3, $4) ON CONFLICT DO NOTHING",
+        &[
+            i(user),
+            i(tid),
+            j(&json!({ "torrent_id": tid, "counterparty_user_ids": ids, "counterparties": others.len(), "prefix_len": { "v4": 24, "v6": 48 } })),
+            t(&ext),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 网段键：IPv4 前 3 字节、IPv6 前 3 段；`alt` 为 BEP 7 另一族地址（`v4:port` / `[v6]:port`）
+fn net_prefix(addr: &str) -> Option<String> {
+    let ip: std::net::IpAddr = addr
+        .parse()
+        .or_else(|_| addr.parse::<std::net::SocketAddr>().map(|s| s.ip()))
+        .ok()?;
+    let ip = match ip {
+        std::net::IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map_or(std::net::IpAddr::V6(v6), std::net::IpAddr::V4),
+        v4 => v4,
+    };
+    match ip {
+        std::net::IpAddr::V4(v4) if !(v4.is_private() || v4.is_loopback() || v4.is_unspecified()) => {
+            let o = v4.octets();
+            Some(format!("4:{}.{}.{}", o[0], o[1], o[2]))
+        }
+        std::net::IpAddr::V6(v6) if !(v6.is_loopback() || v6.is_unspecified()) => {
+            let s = v6.segments();
+            Some(format!("6:{:x}:{:x}:{:x}", s[0], s[1], s[2]))
+        }
+        _ => None,
+    }
+}
+
+/// 与 `user` 的任一 peer 同网段的其他用户（升序、去重）
+pub fn shared_prefix_counterparties(user: i64, peers: &[Value]) -> Vec<i64> {
+    let prefixes = |p: &Value| -> Vec<String> {
+        ["ip", "alt"]
+            .iter()
+            .filter_map(|k| p[*k].as_str().and_then(net_prefix))
+            .collect()
+    };
+    let mine: HashSet<String> = peers
+        .iter()
+        .filter(|p| p["user_id"].as_i64() == Some(user))
+        .flat_map(prefixes)
+        .collect();
+    if mine.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<i64> = peers
+        .iter()
+        .filter_map(|p| {
+            let u = p["user_id"].as_i64().filter(|u| *u != user)?;
+            prefixes(p).iter().any(|x| mine.contains(x)).then_some(u)
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    out.truncate(1000);
+    out
 }
 
 // ---------------- 模拟 ----------------
@@ -496,7 +620,8 @@ pub fn simulate_batch(p: &Value) -> R<()> {
             draft.defaults.max_evidence.max(base.defaults.max_evidence),
             as_of,
         )?;
-        let ctx = core::context(uid)?;
+        let mut ctx = core::context(uid)?;
+        ctx.seedbox = core::seedbox_torrents(uid, &ev)?;
         let a = rules::compute(&draft, &ev, &ctx, as_of, tr);
         let b = rules::compute(&base, &ev, &ctx, as_of, tr);
         bump(&mut tot, &["users"]);
@@ -603,7 +728,6 @@ pub fn rule_stats(scheduled_at: i64) -> R<()> {
             &[i(hour * 3_600_000), i((hour + 1) * 3_600_000)],
         )?;
         let mut hits: BTreeMap<String, i64> = BTreeMap::new();
-        let ctx = rules::Ctx::default();
         for r in &rows {
             let e = rules::Evidence {
                 id: r.n(0),
@@ -614,7 +738,12 @@ pub fn rule_stats(scheduled_at: i64) -> R<()> {
                 details: r.v(5),
                 occurred_at: r.n(6),
             };
-            let s = rules::compute(&a.rs, std::slice::from_ref(&e), &ctx, e.occurred_at, false);
+            let ev = std::slice::from_ref(&e);
+            let ctx = rules::Ctx {
+                seedbox: rules::seedbox_from_evidence(ev),
+                ..rules::Ctx::default()
+            };
+            let s = rules::compute(&a.rs, ev, &ctx, e.occurred_at, false);
             for id in s.matched.keys() {
                 *hits.entry(id.clone()).or_default() += 1;
             }
@@ -970,6 +1099,25 @@ pub fn false_positive_ids(case_id: i64) -> R<HashSet<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_prefixes() {
+        let peers = vec![
+            json!({ "user_id": 1, "ip": "203.0.113.9", "alt": "[2001:db8:7:1::9]:6881" }),
+            json!({ "user_id": 2, "ip": "203.0.113.200" }),
+            json!({ "user_id": 3, "ip": "2001:db8:7:ffff::1" }),
+            json!({ "user_id": 4, "ip": "198.51.100.1" }),
+            json!({ "user_id": 5, "ip": "::ffff:203.0.113.77" }),
+            json!({ "user_id": 1, "ip": "10.0.0.2" }),
+            json!({ "user_id": 6, "ip": "10.0.0.3" }),
+        ];
+        // 私网地址不参与；IPv4 映射地址按 IPv4 处理
+        assert_eq!(shared_prefix_counterparties(1, &peers), vec![2, 3, 5]);
+        assert_eq!(shared_prefix_counterparties(4, &peers), Vec::<i64>::new());
+        // 没有 IP（未获授 peer.ip）时什么都不做
+        let no_ip: Vec<Value> = (1..4).map(|u| json!({ "user_id": u })).collect();
+        assert!(shared_prefix_counterparties(1, &no_ip).is_empty());
+    }
 
     #[test]
     fn iso_roundtrip_and_whitelist() {

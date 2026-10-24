@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { api, ApiError } from '@pt-studio/sdk';
+import { api } from '@pt-studio/sdk';
 import { SlotEntryView, useSlotEntries, useSlotEntryTitle } from '@pt-studio/slots';
 import { useT } from '@pt-studio/terms';
 import { Avatar, Button, CodeBox, CopyButton, Field, Input, Note, PageHead, Panel, Segmented, Select, SkeletonRows, Status, Table, Tag, Textarea, useToast } from '@pt-studio/ui-kit';
@@ -271,54 +271,6 @@ interface TwoFactorStatus {
   webauthn: SecurityKey[];
 }
 
-/** 需要近期重新验证的操作：服务端返回 identity.reauth_required 时显示密码框，验证后重试原操作 */
-function useReauth(): [(f: () => Promise<void>) => Promise<void>, ReactNode] {
-  const t = useT();
-  const [pending, setPending] = useState<(() => Promise<void>) | null>(null);
-  const [pw, setPw] = useState('');
-  const [error, setError] = useState<unknown>(null);
-  const run = async (f: () => Promise<void>) => {
-    try {
-      await f();
-    } catch (e) {
-      if (e instanceof ApiError && e.code === 'identity.reauth_required') {
-        setPending(() => f);
-        return;
-      }
-      throw e;
-    }
-  };
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api('/api/p/identity/v1/sessions/current/reauth', { json: { password: pw } });
-      const f = pending;
-      setPending(null);
-      setPw('');
-      if (f) await f();
-    } catch (err) {
-      setError(err);
-    }
-  };
-  const form = pending ? (
-    <form onSubmit={submit} className="form reauth">
-      <Note tone="warn">{t('ui.reauth.hint')}</Note>
-      <Field label={t('ui.settings.current_password')}>
-        <Input name="reauth_password" type="password" autoComplete="current-password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} required />
-      </Field>
-      <ErrorText error={error} />
-      <div className="form-acts">
-        <Button type="submit" variant="primary">
-          {t('ui.reauth.confirm')}
-        </Button>
-        <Button onClick={() => setPending(null)}>{t('ui.common.cancel')}</Button>
-      </div>
-    </form>
-  ) : null;
-  return [run, form];
-}
-
 function TwoFactor() {
   const t = useT();
   const toast = useToast();
@@ -330,21 +282,18 @@ function TwoFactor() {
   const [codes, setCodes] = useState<string[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [confirmOff, setConfirmOff] = useState(false);
-  const [withReauth, reauthForm] = useReauth();
   const reload = () => qc.invalidateQueries({ queryKey: ['my-2fa'] });
-  const act = (f: () => Promise<void>) => withReauth(f).catch((e: unknown) => toast(errText(e), 'error'));
+  const act = (f: () => Promise<void>) => f().catch((e: unknown) => toast(errText(e), 'error'));
   const begin = () => act(async () => setSetup(await api<{ secret: string; qr_svg: string }>('/api/p/identity/v1/users/me/totp', { json: {} })));
   const confirm = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     try {
-      await withReauth(async () => {
-        const r = await api<{ recovery_codes: string[] }>('/api/p/identity/v1/users/me/totp/confirm', { json: { code } });
-        setCodes(r.recovery_codes);
-        setSetup(null);
-        setCode('');
-        await reload();
-      });
+      const r = await api<{ recovery_codes: string[] }>('/api/p/identity/v1/users/me/totp/confirm', { json: { code } });
+      setCodes(r.recovery_codes);
+      setSetup(null);
+      setCode('');
+      await reload();
     } catch (err) {
       setError(err);
     }
@@ -383,7 +332,6 @@ function TwoFactor() {
   return (
     <>
       <Sec title={<>{t('ui.two_factor.title')} {st?.totp && <Status tone="ok">{t('ui.two_factor.on')}</Status>}</>} desc={st && !st.totp ? (st.required ? t('ui.two_factor.required_hint') : t('ui.two_factor.off_hint')) : undefined}>
-        {reauthForm}
         {codes && (
           <div className="stack-s">
             <Note tone="warn">{t('ui.two_factor.codes_hint')}</Note>

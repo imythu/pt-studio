@@ -50,7 +50,7 @@ pub struct Apply<'a> {
 }
 
 /// 插件来源不能限制 moderator 及以上（03 §1.6 `identity.target_protected`）
-async fn check_protected(ctx: &Ctx, uid: i64, source: &str) -> PResult<()> {
+pub(crate) async fn check_protected(ctx: &Ctx, uid: i64, source: &str) -> PResult<()> {
     if source == "admin" {
         return Ok(());
     }
