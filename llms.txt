@@ -8,7 +8,15 @@
 - 插件之间只经声明的业务服务（JSON 分派，`ctx.<name>`）、事件、钩子与只读视图交互；每个插件有自己的 PostgreSQL schema 与 Redis 前缀。
 - 名字由 `docs/platform/catalog/` 统一分配；第三方插件使用 `<插件 ID>.` 命名空间（权限、术语、错误码、事件、钩子点）。
 - 写插件：优先 WASM（Rust + `pt-plugin-sdk`，目标 `wasm32-wasip2`），从 `templates/wasm-plugin` 开始；用 `pt-server plugin package` 打包、`pt-server plugin check` 检查。
-- 文档以中文为主；代码标识符、错误信息、提交信息为英文。
+- 文档以中文为主；代码标识符、错误信息为英文。
+
+## 概览
+
+- [功能清单](docs/features.md): 已完成与未完成的功能，按领域对照
+- [文档中心](docs/README.md): 全部文档的索引与阅读路线
+- [官方插件](docs/plugins/README.md): 每个插件的类型、实现状态与设计文档
+- [更新日志](CHANGELOG.md): 版本与开发里程碑
+- [贡献指南](CONTRIBUTING.md)
 
 ## 运行与部署
 
@@ -58,6 +66,8 @@
 
 ## Optional
 
-- [开发进度与环境](docs/dev/README.md): 各插件实现状态、与设计文档的差异、本地 PostgreSQL / Redis / Meilisearch、测试方法
+- [开发指南](docs/dev/README.md): 本地 PostgreSQL / Redis / Meilisearch、运行、测试方法
+- [实现明细](docs/dev/implementation-status.md): 每个模块已实现与未实现的细项
+- [与设计文档的差异](docs/dev/design-deviations.md): 实现时的取舍，与设计文档冲突时以此为准
 - [插件设计文档](docs/plugins/): 每个官方插件的需求、概要设计、详细设计、测试计划
 - [经验教训](docs/design/08-lessons-learned.md): 参考既有 PT 站点得到的取舍
