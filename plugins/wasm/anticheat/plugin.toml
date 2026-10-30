@@ -701,3 +701,4 @@ title = "AI 解释使用的模型 profile"
 "anticheat.category.client_anomaly" = { zh-CN = "客户端异常", en = "Client anomaly" }
 "anticheat.category.client_spoof" = { zh-CN = "伪造客户端", en = "Spoofed client" }
 "anticheat.category.collusion" = { zh-CN = "关联账号刷流量", en = "Collusion" }
+"anticheat.category.multi_account" = { zh-CN = "一人多号", en = "Multiple accounts" }

@@ -1546,6 +1546,28 @@ mod tests {
         );
         assert_eq!((sip.score, sip.shadow_score), (0, 20));
         assert_eq!(sip.shadow_hits, vec!["shared_ip".to_owned()]);
+        // 复核确认同一人：30 分（不按严重度放大），半衰期 90 天，类别 multi_account
+        let same = |age| {
+            compute(
+                &rs,
+                &[ev(
+                    10,
+                    "anticheat.same_person_confirmed",
+                    Sev::High,
+                    0,
+                    json!({}),
+                    age,
+                )],
+                &ctx,
+                NOW,
+                false,
+            )
+        };
+        let fresh = same(0.0);
+        assert_eq!(fresh.score, 30);
+        assert_eq!(fresh.band, Band::Watch);
+        assert_eq!(fresh.tags, vec!["multi_account".to_owned()]);
+        assert_eq!(same(90.0).score, 15);
         // 佐证：14 天内 3 种不同信号 → 1.3
         let mixed = vec![
             ev(1, "speed_exceeded", Sev::Medium, 1, json!({}), 0.0),

@@ -809,6 +809,12 @@ pub fn stats_rows(days: i64, version: Option<i64>) -> R<Vec<Value>> {
 
 /// cron `queue_maintenance`
 pub fn queue_maintenance() -> R<()> {
+    if let Some(v) = core::upgrade_default()? {
+        pt_plugin_sdk::logging::info(
+            "built-in default ruleset upgraded",
+            &[("version", &v.to_string())],
+        );
+    }
     x(
         "UPDATE cases SET assigned_to = NULL, claim_expires_at = NULL WHERE state = 'open' AND claim_expires_at < now()",
         &[],

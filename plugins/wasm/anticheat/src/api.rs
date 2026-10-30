@@ -629,13 +629,7 @@ fn activate(version: i64, actor: i64, note: &str) -> R<Value> {
         "plugin:anticheat",
         &json!({ "from": old, "to": target, "note": note, "checksum": core::ruleset(target)?.2 }),
     )?;
-    kv::set("rescoring", target.to_string().as_bytes(), Some(now() + db::DAY))?;
-    pctx::schedule(
-        "rescore_batch",
-        now(),
-        &json!({ "ruleset_version": target, "cursor": 0 }),
-        Some(&format!("rs:{target}:0")),
-    )?;
+    core::start_rescore(target)?;
     Ok(json!({ "active_version": target, "rescore": "scheduled" }))
 }
 

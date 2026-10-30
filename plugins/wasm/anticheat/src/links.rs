@@ -1,5 +1,6 @@
 //! 多账号关联：同网段对端证据（`anticheat.shared_ip_counterparty`）汇总成账号图（无向边 = 同一种子 swarm 中同网段），
 //! 连通分量即疑似同一人的账号簇；复核员把账号对标记为“同一人”或“无关”，“无关”的对之后不再产生同网段证据。
+//! “同一人”结论给两个账号各写一条证据 `anticheat.same_person_confirmed`（默认规则 `same_person` 计分），改判 / 撤销时标为误判。
 //! 只用证据里的用户 ID 与种子 ID，不涉及 IP。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -10,9 +11,11 @@ use pt_plugin_sdk::{
 };
 
 use crate::api::usernames;
-use crate::db::{self, RowGet, i, ints, ms, q, q1, t, x};
+use crate::core::{self, Trigger};
+use crate::db::{self, RowGet, i, ints, j, ms, q, q1, t, x};
 
 const VERDICTS: &[&str] = &["same_person", "unrelated"];
+pub const SAME_PERSON_KIND: &str = "anticheat.same_person_confirmed";
 const MAX_MEMBERS: usize = 50;
 const MAX_EDGES: usize = 200;
 
@@ -260,6 +263,7 @@ pub fn review(a: i64, b: i64, verdict: &str, note: Option<&str>, actor: i64) -> 
         &format!("user:{ua}"),
         &json!({ "other_user_id": ub, "verdict": verdict, "note": note }),
     )?;
+    sync_evidence(ua, ub, verdict == "same_person", actor)?;
     Ok(json!({ "a": ua, "b": ub, "verdict": verdict, "note": note, "reviewed_at": db::iso(r.n(0)) }))
 }
 
@@ -276,6 +280,35 @@ pub fn clear(a: i64, b: i64) -> R<()> {
             &format!("user:{ua}"),
             &json!({ "other_user_id": ub }),
         )?;
+        sync_evidence(ua, ub, false, 0)?;
+    }
+    Ok(())
+}
+
+/// “同一人”→ 两人各一条有效证据（已有则不重复写）；否则把这对的证据标为误判。之后重算两人
+fn sync_evidence(a: i64, b: i64, same: bool, actor: i64) -> R<()> {
+    for (u, o) in [(a, b), (b, a)] {
+        let ext = format!("same:{a}:{b}:{u}");
+        if same {
+            if q1(
+                "SELECT 1 FROM evidence WHERE source = 'anticheat' AND external_ref = $1 AND verdict IS DISTINCT FROM 'false_positive' LIMIT 1",
+                &[t(&ext)],
+            )?
+            .is_none()
+            {
+                x(
+                    "INSERT INTO evidence (occurred_at, user_id, source, kind, severity, details, external_ref, created_by)
+                     VALUES (now(), $1, 'anticheat', $2, 'high', $3, $4, $5) ON CONFLICT DO NOTHING",
+                    &[i(u), t(SAME_PERSON_KIND), j(&json!({ "counterparty_user_ids": [o] })), t(&ext), i(actor)],
+                )?;
+            }
+        } else {
+            x(
+                "UPDATE evidence SET verdict = 'false_positive' WHERE source = 'anticheat' AND external_ref = $1 AND verdict IS DISTINCT FROM 'false_positive'",
+                &[t(&ext)],
+            )?;
+        }
+        core::rescore_user(u, Trigger::Manual, false)?;
     }
     Ok(())
 }

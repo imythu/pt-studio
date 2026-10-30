@@ -45,6 +45,9 @@
       "match": { "kinds": ["anticheat.daily_upload_spike"] }, "weight": 12, "cap": 30, "half_life_days": 30, "tags": ["upload_fraud"] },
     { "type": "evidence", "id": "shared_ip", "mode": "shadow",
       "match": { "kinds": ["anticheat.shared_ip_counterparty"] }, "weight": 20, "cap": 40, "tags": ["collusion"] },
+    { "type": "evidence", "id": "same_person", "mode": "enforce",
+      "match": { "kinds": ["anticheat.same_person_confirmed"] }, "weight": 30, "severity_mult": { "high": 1 }, "hits_fn": "none",
+      "cap": 30, "half_life_days": 90, "tags": ["multi_account"] },
     { "type": "multiplier", "id": "corroboration", "mode": "enforce",
       "when": [{ "measure": { "fn": "distinct_kinds", "window_days": 14, "match": { "kinds": [
         "speed_exceeded", "cross_check_mismatch", "peer_not_in_swarm", "counter_jump", "client_not_allowed", "anticheat.daily_upload_spike"] } },

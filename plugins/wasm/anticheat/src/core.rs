@@ -55,6 +55,60 @@ pub fn active() -> R<Active> {
     })
 }
 
+/// 内置默认规则集升级：生效版本仍是未改动过的内置默认（`note = 'default'`、无创建人）且与当前内置定义不同时，
+/// 写入新版本并激活、旧版本退役、全量重算。管理员建过的版本（有创建人）不受影响。`queue_maintenance` 调用。
+pub fn upgrade_default() -> R<Option<i64>> {
+    let def = rules::default_ruleset();
+    let sum = checksum(&def);
+    let Some(r) = q1(
+        "SELECT version, checksum FROM rulesets WHERE status = 'active' AND note = 'default' AND created_by IS NULL",
+        &[],
+    )?
+    else {
+        return Ok(None);
+    };
+    if r.s(1) == sum {
+        return Ok(None);
+    }
+    let old = r.n(0);
+    let Some(v) = q1(
+        "INSERT INTO rulesets (version, status, definition, checksum, based_on, note)
+         SELECT max(version) + 1, 'draft', $1, $2, $3, 'default' FROM rulesets ON CONFLICT DO NOTHING RETURNING version",
+        &[j(&def), t(&sum), i(old)],
+    )?
+    else {
+        return Ok(None);
+    };
+    let v = v.n(0);
+    x(
+        "UPDATE rulesets SET status = 'retired', updated_at = now() WHERE version = $1 AND status = 'active'",
+        &[i(old)],
+    )?;
+    x(
+        "UPDATE rulesets SET status = 'active', activated_at = now(), updated_at = now() WHERE version = $1",
+        &[i(v)],
+    )?;
+    db::audit(
+        "anticheat.ruleset_activate",
+        "plugin:anticheat",
+        &json!({ "from": old, "to": v, "note": "built-in default upgraded", "checksum": sum }),
+    )?;
+    start_rescore(v)?;
+    Ok(Some(v))
+}
+
+/// 激活后全量重算（分批任务）
+pub fn start_rescore(version: i64) -> R<()> {
+    kv::set("rescoring", version.to_string().as_bytes(), Some(now() + DAY))?;
+    pctx::schedule(
+        "rescore_batch",
+        now(),
+        &json!({ "ruleset_version": version, "cursor": 0 }),
+        Some(&format!("rs:{version}:0")),
+    )?;
+    Ok(())
+}
+
 pub fn ruleset(version: i64) -> R<(Ruleset, String, String)> {
     let r = q1(
         "SELECT definition, status, checksum FROM rulesets WHERE version = $1",

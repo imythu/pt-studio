@@ -404,6 +404,51 @@ async fn anticheat_end_to_end() {
         scalar("SELECT count(*) FROM kernel.audit_log WHERE action LIKE 'anticheat.account_link_%' AND $1::bigint >= 0", 0).await,
         2
     );
+    // “同一人”→ 两人各一条证据并按规则 same_person 计分；撤销后证据标为误判、不再计分
+    let same_rule = |u: u64| {
+        let app = app.clone();
+        let admin = &admin;
+        async move {
+            let r = get(&app, admin, &format!("/api/p/anticheat/v1/admin/users/{u}/risk")).await;
+            r.body["breakdown"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|b| b["rule"] == "same_person")
+        }
+    };
+    let r = call(
+        &app,
+        "PUT",
+        &pair,
+        Some(json!({ "verdict": "same_person" })),
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let same_ev = "SELECT count(*) FROM anticheat.evidence WHERE kind = 'anticheat.same_person_confirmed' AND verdict IS NULL AND user_id = $1";
+    assert_eq!(scalar(same_ev, alice.id).await, 1);
+    assert_eq!(scalar(same_ev, carol.id).await, 1);
+    assert!(same_rule(carol.id).await);
+    assert!(same_rule(alice.id).await);
+    // 重复确认不重复写证据
+    call(
+        &app,
+        "PUT",
+        &pair,
+        Some(json!({ "verdict": "same_person" })),
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(scalar(same_ev, carol.id).await, 1);
+    let r = call(&app, "DELETE", &pair, None, &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    assert_eq!(scalar(same_ev, carol.id).await, 0);
+    assert_eq!(
+        scalar("SELECT count(*) FROM anticheat.evidence WHERE kind = 'anticheat.same_person_confirmed' AND verdict = 'false_positive' AND $1::bigint >= 0", 0).await,
+        2
+    );
+    assert!(!same_rule(carol.id).await);
 
     // ---- 后台：队列与详情 ----
     let r = get(&app, &admin, "/api/p/anticheat/v1/admin/cases").await;
@@ -644,7 +689,7 @@ async fn anticheat_end_to_end() {
     .await;
     assert_eq!(
         scalar(
-            "SELECT count(*) FROM anticheat.evidence WHERE user_id = $1 AND verdict = 'false_positive'",
+            "SELECT count(*) FROM anticheat.evidence WHERE user_id = $1 AND verdict = 'false_positive' AND kind <> 'anticheat.same_person_confirmed'",
             alice.id
         )
         .await,
@@ -666,6 +711,26 @@ async fn anticheat_end_to_end() {
         )
         .await,
         0
+    );
+
+    // ---- 内置默认规则集升级：生效的仍是未改动的内置默认、但内置定义已变 → queue_maintenance 写入新版本并激活 ----
+    sqlx::query("UPDATE anticheat.rulesets SET checksum = 'sha256:old' WHERE status = 'active'")
+        .execute(&mut db().await)
+        .await
+        .unwrap();
+    kernel
+        .run_job_now("anticheat", "queue_maintenance", json!({}))
+        .await
+        .unwrap();
+    let active = "SELECT version::bigint FROM anticheat.rulesets WHERE status = 'active' AND note = 'default' AND based_on = 1 AND $1::bigint >= 0";
+    assert_eq!(scalar(active, 0).await, 2);
+    kernel
+        .run_job_now("anticheat", "queue_maintenance", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(
+        scalar("SELECT count(*) FROM anticheat.rulesets WHERE $1::bigint >= 0", 0).await,
+        2
     );
 
     // ---- 规则集：校验、草案、未模拟不能激活、模拟、激活 ----
