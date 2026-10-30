@@ -343,6 +343,36 @@ auth = "admin"
 permission = "anticheat.cases.moderate"
 idempotent = true
 
+# ---------- 后台：多账号关联 ----------
+
+[[http.routes]]
+id = "admin_list_account_clusters"
+method = "GET"
+path = "/v1/admin/account-links"
+auth = "admin"
+permission = "anticheat.cases.read"
+
+[[http.routes]]
+id = "admin_list_user_links"
+method = "GET"
+path = "/v1/admin/users/{id}/account-links"
+auth = "admin"
+permission = "anticheat.cases.read"
+
+[[http.routes]]
+id = "admin_review_account_link"
+method = "PUT"
+path = "/v1/admin/account-links/{a}/{b}"
+auth = "admin"
+permission = "anticheat.cases.moderate"
+
+[[http.routes]]
+id = "admin_clear_account_link"
+method = "DELETE"
+path = "/v1/admin/account-links/{a}/{b}"
+auth = "admin"
+permission = "anticheat.cases.moderate"
+
 # ---------- 后台：申诉 ----------
 
 [[http.routes]]

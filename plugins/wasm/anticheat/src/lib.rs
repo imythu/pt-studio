@@ -4,8 +4,8 @@
 //! 与自动处置（仅结论性规则 + 可逆措施，带熔断）→ 处置以期望状态落地到 identity / accounting / ledger → 申诉与回滚、
 //! 规则统计与回测模拟、AI 解释。
 //!
-//! 与设计的差异：swarm 快照读 `accounting.v_swarm_peers`（无 `ctx.tracker`）；盒子识别（`ctx.seedbox`）、同 IP 对端关联、
-//! 种子视角与 passkey 重置尚未提供；后台设置为扁平键；申诉令牌密钥未配置时使用插件 kv 中生成的随机密钥。
+//! 与设计的差异：后台设置为扁平键；申诉令牌密钥未配置时使用插件 kv 中生成的随机密钥。
+//! 设计之外：多账号关联（`links`，同网段证据汇总的账号图与复核结论）。
 
 pt_plugin_sdk::world!("anticheat", http);
 
@@ -16,6 +16,7 @@ pub mod db;
 pub mod decisions;
 pub mod effects;
 pub mod jobs;
+pub mod links;
 pub mod rules;
 
 use exports::pt::plugin::{hooks, http_handler, mcp_tool, on_cron, on_event, service_provider};

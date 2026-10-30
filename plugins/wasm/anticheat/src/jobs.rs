@@ -450,8 +450,11 @@ fn tracker_peers(tid: i64) -> Option<(Vec<Value>, bool, bool)> {
 
 /// 同网段对端（FR-ACH-041，LLD §1.11 `shared_ip`）：该用户任一 peer 地址与其他用户的 peer 地址同在 IPv4 /24 或 IPv6 /48 时，
 /// 写证据 `anticheat.shared_ip_counterparty`（每案件每种子一次）。IP 只在本次调用的内存中使用，不写日志、不进 details。
+/// 复核为“无关”的账号对（`account_links.verdict = unrelated`）不计入。
 fn shared_ip(case_id: i64, user: i64, tid: i64, peers: &[Value]) -> R<()> {
-    let others = shared_prefix_counterparties(user, peers);
+    let skip = crate::links::unrelated_to(user)?;
+    let mut others = shared_prefix_counterparties(user, peers);
+    others.retain(|u| !skip.contains(u));
     if others.is_empty() {
         return Ok(());
     }
@@ -1015,6 +1018,10 @@ pub fn purge_user_step(p: &Value) -> R<()> {
         let _ = db::call("ctx.accounting", "remove_rate_rule", &json!({ "rule_id": id }));
     }
     x("DELETE FROM effects WHERE user_id = $1", &[i(user)])?;
+    x(
+        "DELETE FROM account_links WHERE user_a = $1 OR user_b = $1",
+        &[i(user)],
+    )?;
     db::commit()
 }
 

@@ -1,4 +1,4 @@
-// anticheat 前端：后台复核队列 / 案件工作台 / 申诉 / 观察名单 / 规则集（编辑、校验、回测、激活）/ 规则统计、
+// anticheat 前端：后台复核队列 / 案件工作台 / 申诉 / 观察名单 / 种子视角 / 关联账号 / 规则集（编辑、校验、回测、激活）/ 规则统计、
 // 仪表板小部件、用户详情的风险标签页、员工菜单；用户“我的案件”与申诉、被封禁用户的令牌申诉页。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiError, type Path } from '@pt-studio/sdk';
@@ -19,6 +19,19 @@ const zh: Record<string, string> = {
   'anticheat.ui.baseline': '确认基线',
   'anticheat.ui.baseline_hint': '确认已复核此种子：之前的异常不再计入种子视角，之后的异常重新计数。不影响用户证据与评分。',
   'anticheat.ui.baseline_note': '备注（可选）',
+  'anticheat.ui.links': '关联账号',
+  'anticheat.ui.links_hint': '同网段对端证据连成的账号簇：两个账号在同一种子的 swarm 中处于同一网段（IPv4 /24、IPv6 /48）即连一条边。标记“无关”的账号对不再连边，之后也不再产生同网段证据。',
+  'anticheat.ui.link.members': '成员',
+  'anticheat.ui.link.size': '账号数',
+  'anticheat.ui.link.pairs': '账号对',
+  'anticheat.ui.link.pair': '账号对',
+  'anticheat.ui.link.shared_torrents': '共同种子',
+  'anticheat.ui.link.min_torrents': '共同种子',
+  'anticheat.ui.link.same_person': '同一人',
+  'anticheat.ui.link.unrelated': '无关',
+  'anticheat.ui.link.unreviewed': '未复核',
+  'anticheat.ui.link.clear': '撤销结论',
+  'anticheat.ui.link.truncated': '账号簇过大，只显示前 50 个账号与 200 个账号对。',
   'anticheat.ui.rulesets': '规则集',
   'anticheat.ui.stats': '规则统计',
   'anticheat.ui.user': '用户',
@@ -155,6 +168,19 @@ registerMessages('en', {
   'anticheat.ui.baseline': 'Confirm baseline',
   'anticheat.ui.baseline_hint': 'Mark this torrent as reviewed: earlier mismatches stop counting here and later ones are counted afresh. User evidence and scores are not affected.',
   'anticheat.ui.baseline_note': 'Note (optional)',
+  'anticheat.ui.links': 'Linked accounts',
+  'anticheat.ui.links_hint': 'Account clusters built from shared-subnet evidence: two accounts are linked when they were in the same subnet (IPv4 /24, IPv6 /48) in one torrent swarm. Pairs marked unrelated are not linked and produce no further shared-subnet evidence.',
+  'anticheat.ui.link.members': 'Members',
+  'anticheat.ui.link.size': 'Accounts',
+  'anticheat.ui.link.pairs': 'Pairs',
+  'anticheat.ui.link.pair': 'Pair',
+  'anticheat.ui.link.shared_torrents': 'Shared torrents',
+  'anticheat.ui.link.min_torrents': 'Shared torrents',
+  'anticheat.ui.link.same_person': 'Same person',
+  'anticheat.ui.link.unrelated': 'Unrelated',
+  'anticheat.ui.link.unreviewed': 'Unreviewed',
+  'anticheat.ui.link.clear': 'Clear verdict',
+  'anticheat.ui.link.truncated': 'Cluster too large: showing the first 50 accounts and 200 pairs.',
   'anticheat.ui.rulesets': 'Rulesets',
   'anticheat.ui.stats': 'Rule stats',
   'anticheat.ui.my_cases': 'My cases',
@@ -824,6 +850,7 @@ function Workbench({ api, id }: { api: PluginApi; id: number }) {
             ]}
           />
         </Panel>
+        <LinkedAccounts api={api} uid={c.user.id} />
         {c.swarm_snapshots.map((s) => (
           <Panel key={`${s.torrent_id}-${s.taken_at}`} title={`${api.t('anticheat.ui.swarm')} #${s.torrent_id}`} sub={when(s.taken_at)} flush>
             <Table
@@ -1029,7 +1056,7 @@ function Torrents({ api }: { api: PluginApi }) {
   }
   return (
     <div className="stack-s">
-      <div className="row">
+      <div className="fbar">
         <span className="small muted">{api.t('anticheat.ui.torrents_hint')}</span>
         <Segmented label={api.t('anticheat.ui.days')} value={days} onChange={setDays} options={['7', '30', '90'].map((v) => ({ value: v, label: `${v}d` }))} />
       </div>
@@ -1110,6 +1137,216 @@ function Torrents({ api }: { api: PluginApi }) {
         </div>
       </Sheet>
     </div>
+  );
+}
+
+// ---------------- 后台：多账号关联 ----------------
+
+type LinkVerdict = 'same_person' | 'unrelated';
+interface LinkMember {
+  id: number;
+  username: string | null;
+  score: number;
+  band: string;
+  open_case_id: number | null;
+}
+interface LinkEdge {
+  a: number;
+  b: number;
+  torrent_count: number;
+  torrent_ids: number[];
+  hits: number;
+  last_at: string | null;
+  verdict: LinkVerdict | null;
+  note: string | null;
+  reviewed_at: string | null;
+}
+interface Cluster {
+  size: number;
+  members: LinkMember[];
+  edges: LinkEdge[];
+  confirmed: number;
+  max_score: number | null;
+  truncated: boolean;
+}
+
+const verdictTone = (v: LinkVerdict | null): Tone => (v === 'same_person' ? 'bad' : v === 'unrelated' ? 'ok' : 'mute');
+
+/** 账号对的复核按钮：同一人 / 无关 / 撤销结论 */
+function LinkActions({ api, e, note, done }: { api: PluginApi; e: LinkEdge; note?: string; done(): void }) {
+  async function act(verdict: LinkVerdict | null) {
+    try {
+      const path: Path = `${BASE}/admin/account-links/${e.a}/${e.b}`;
+      if (verdict) await api.fetch(path, { method: 'PUT', json: note?.trim() ? { verdict, note: note.trim() } : { verdict } });
+      else await api.fetch(path, { method: 'DELETE' });
+      done();
+    } catch (x) {
+      api.toast(errText(api, x), 'error');
+    }
+  }
+  return (
+    <div className="row nowrap">
+      {e.verdict !== 'same_person' && (
+        <Button size="sm" variant="danger" onClick={() => void act('same_person')}>
+          {api.t('anticheat.ui.link.same_person')}
+        </Button>
+      )}
+      {e.verdict !== 'unrelated' && (
+        <Button size="sm" onClick={() => void act('unrelated')}>
+          {api.t('anticheat.ui.link.unrelated')}
+        </Button>
+      )}
+      {e.verdict && (
+        <Button size="sm" variant="ghost" onClick={() => void act(null)}>
+          {api.t('anticheat.ui.link.clear')}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function VerdictTag({ api, e }: { api: PluginApi; e: LinkEdge }) {
+  return (
+    <span className="small" title={e.note ?? undefined}>
+      <Status tone={verdictTone(e.verdict)}>{api.t(`anticheat.ui.link.${e.verdict ?? 'unreviewed'}`)}</Status>
+    </span>
+  );
+}
+
+function UserLink({ api, m }: { api: PluginApi; m: Pick<LinkMember, 'id' | 'username'> | undefined }) {
+  if (!m) return null;
+  return (
+    <Link api={api} to={`/admin/users/${m.id}`}>
+      {m.username ?? `#${m.id}`}
+    </Link>
+  );
+}
+
+/** 账号簇：同网段证据连成的连通分量，按成员数、边上种子数排序 */
+function Links({ api }: { api: PluginApi }) {
+  const [days, setDays] = useState('90');
+  const [min, setMin] = useState('1');
+  const [d, , reload] = useLoad<{ items: Cluster[] }>(api, `${BASE}/admin/account-links?days=${days}&min_torrents=${min}`);
+  const [open, setOpen] = useState<number | null>(null);
+  const [note, setNote] = useState('');
+  const c = open !== null ? d?.items[open] : undefined;
+  const byId = new Map((c?.members ?? []).map((m) => [m.id, m]));
+  return (
+    <div className="stack-s">
+      <div className="fbar">
+        <span className="small muted">{api.t('anticheat.ui.links_hint')}</span>
+        <Segmented label={api.t('anticheat.ui.days')} value={days} onChange={setDays} options={['30', '90', '365'].map((v) => ({ value: v, label: `${v}d` }))} />
+        <Segmented label={api.t('anticheat.ui.link.min_torrents')} value={min} onChange={setMin} options={['1', '2', '3'].map((v) => ({ value: v, label: `≥${v}` }))} />
+      </div>
+      {!d ? (
+        <SkeletonRows n={4} />
+      ) : (
+        <Table
+          rows={d.items}
+          rowKey={(r) => r.members[0]?.id ?? 0}
+          empty={api.t('anticheat.ui.none')}
+          minWidth={820}
+          onRowClick={(r) => setOpen(d.items.indexOf(r))}
+          columns={[
+            {
+              key: 'm',
+              header: api.t('anticheat.ui.link.members'),
+              render: (r) => (
+                <span className="small">
+                  {r.members.slice(0, 8).map((m, i) => (
+                    <Fragment key={m.id}>
+                      {i > 0 && '、'}
+                      <UserLink api={api} m={m} />
+                      {m.score > 0 && <span className={`num ${m.band === 'none' ? 'muted' : ''}`}> {m.score}</span>}
+                    </Fragment>
+                  ))}
+                  {r.size > 8 && <span className="muted"> +{r.size - 8}</span>}
+                </span>
+              ),
+            },
+            { key: 'n', header: api.t('anticheat.ui.link.size'), right: true, render: (r) => <b className="num">{r.size}</b> },
+            { key: 'e', header: api.t('anticheat.ui.link.pairs'), right: true, render: (r) => <span className="num">{r.edges.length}</span> },
+            { key: 't', header: api.t('anticheat.ui.link.shared_torrents'), right: true, render: (r) => <span className="num">{Math.max(0, ...r.edges.map((e) => e.torrent_count))}</span> },
+            { key: 'c', header: api.t('anticheat.ui.link.same_person'), right: true, render: (r) => (r.confirmed ? <Status tone="bad">{r.confirmed}</Status> : '') },
+            { key: 's', header: api.t('anticheat.ui.score'), right: true, render: (r) => <span className="num">{r.max_score ?? 0}</span> },
+          ]}
+        />
+      )}
+      <Sheet open={!!c} onClose={() => setOpen(null)} title={api.t('anticheat.ui.links')} width={720}>
+        {c && (
+          <div className="form">
+            {c.truncated && <Note tone="warn">{api.t('anticheat.ui.link.truncated')}</Note>}
+            <Field label={api.t('anticheat.ui.baseline_note')}>
+              <Textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+            </Field>
+            <Table
+              rows={c.edges}
+              rowKey={(e) => `${e.a}-${e.b}`}
+              empty="—"
+              minWidth={640}
+              columns={[
+                {
+                  key: 'p',
+                  header: api.t('anticheat.ui.link.pair'),
+                  render: (e) => (
+                    <span className="small">
+                      <UserLink api={api} m={byId.get(e.a) ?? { id: e.a, username: null }} /> — <UserLink api={api} m={byId.get(e.b) ?? { id: e.b, username: null }} />
+                    </span>
+                  ),
+                },
+                { key: 't', header: api.t('anticheat.ui.link.shared_torrents'), right: true, render: (e) => <span className="num">{e.torrent_count}</span> },
+                { key: 'l', header: api.t('anticheat.ui.last_at'), render: (e) => <When at={e.last_at} /> },
+                { key: 'v', header: api.t('anticheat.ui.verdict'), render: (e) => <VerdictTag api={api} e={e} /> },
+                { key: 'x', header: '', right: true, render: (e) => <LinkActions api={api} e={e} note={note} done={reload} /> },
+              ]}
+            />
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+}
+
+/** 用户详情 / 案件工作台：与该用户同网段出现过的账号 */
+function LinkedAccounts({ api, uid }: { api: PluginApi; uid: number }) {
+  const [d, , reload] = useLoad<{ cluster_size: number; items: (LinkEdge & { user: LinkMember })[] }>(api, `${BASE}/admin/users/${uid}/account-links?days=365`);
+  if (!d || d.items.length === 0) return null;
+  return (
+    <Panel title={api.t('anticheat.ui.links')} sub={d.cluster_size > 1 ? `${api.t('anticheat.ui.link.size')} ${d.cluster_size}` : undefined} flush>
+      <Table
+        rows={d.items}
+        rowKey={(r) => r.user.id}
+        minWidth={640}
+        columns={[
+          {
+            key: 'u',
+            header: api.t('anticheat.ui.user'),
+            render: (r) => (
+              <span className="small">
+                <UserLink api={api} m={r.user} />{' '}
+                {r.user.band !== 'none' && <Status tone={bandTone(r.user.band)}>{r.user.score}</Status>}
+              </span>
+            ),
+          },
+          {
+            key: 't',
+            header: api.t('anticheat.ui.link.shared_torrents'),
+            render: (r) => (
+              <div className="row">
+                {r.torrent_ids.slice(0, 5).map((t) => (
+                  <Link key={t} api={api} to={`/torrents/${t}`} className="small">
+                    {`#${t}`}
+                  </Link>
+                ))}
+                {r.torrent_count > 5 && <span className="small muted">+{r.torrent_count - 5}</span>}
+              </div>
+            ),
+          },
+          { key: 'v', header: api.t('anticheat.ui.verdict'), render: (r) => <VerdictTag api={api} e={r} /> },
+          { key: 'x', header: '', right: true, render: (r) => <LinkActions api={api} e={r} done={reload} /> },
+        ]}
+      />
+    </Panel>
   );
 }
 
@@ -1319,7 +1556,7 @@ function RulesetEditor({ api, version }: { api: PluginApi; version: number }) {
   );
 }
 
-const ADMIN_TABS = ['queue', 'appeals', 'watchlist', 'torrent_view', 'rulesets', 'stats'];
+const ADMIN_TABS = ['queue', 'appeals', 'watchlist', 'torrent_view', 'links', 'rulesets', 'stats'];
 
 function AdminHome({ api }: { api: PluginApi }) {
   const initial = new URLSearchParams(window.location.search).get('tab') ?? 'queue';
@@ -1350,6 +1587,7 @@ function AdminHome({ api }: { api: PluginApi }) {
         {tab === 'appeals' && <Appeals api={api} />}
         {tab === 'watchlist' && <Watchlist api={api} />}
         {tab === 'torrent_view' && <Torrents api={api} />}
+        {tab === 'links' && <Links api={api} />}
         {tab === 'rulesets' && <Rulesets api={api} />}
         {tab === 'stats' && <Stats api={api} />}
       </Panel>
@@ -1498,6 +1736,7 @@ function UserTab({ api, ctx }: SlotProps<{ profile: { id: number } }>) {
           </div>
         </Panel>
       )}
+      {uid ? <LinkedAccounts api={api} uid={uid} /> : null}
       <Panel title={api.t('anticheat.ui.evidence')} flush>
         <Table
           rows={ev?.items ?? []}

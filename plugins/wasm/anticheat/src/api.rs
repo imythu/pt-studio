@@ -11,13 +11,13 @@ use crate::core;
 use crate::db::{self, RowGet, i, ints, j, ms, now, q, q1, t, x};
 use crate::decisions::{self, Decision};
 use crate::exports::pt::plugin::http_handler::Request;
-use crate::{appeals, jobs, rules};
+use crate::{appeals, jobs, links, rules};
 
 fn me() -> R<i64> {
     pctx::current_user()
 }
 
-fn usernames(ids: &[i64]) -> R<std::collections::HashMap<i64, String>> {
+pub fn usernames(ids: &[i64]) -> R<std::collections::HashMap<i64, String>> {
     if ids.is_empty() {
         return Ok(Default::default());
     }
@@ -783,6 +783,24 @@ pub fn http(req: &Request) -> R<Reply> {
         )?),
         "admin_confirm_torrent_baseline" => {
             Reply::ok(&confirm_baseline(pid("id")?, b["note"].as_str(), me()?)?)
+        }
+        // 后台：多账号关联
+        "admin_list_account_clusters" => Reply::ok(&links::list(
+            qi(req, "days").unwrap_or(90),
+            qi(req, "min_torrents").unwrap_or(1),
+            qi(req, "limit").unwrap_or(50),
+        )?),
+        "admin_list_user_links" => Reply::ok(&links::of_user(pid("id")?, qi(req, "days").unwrap_or(90))?),
+        "admin_review_account_link" => Reply::ok(&links::review(
+            pid("a")?,
+            pid("b")?,
+            b["verdict"].as_str().unwrap_or(""),
+            b["note"].as_str(),
+            me()?,
+        )?),
+        "admin_clear_account_link" => {
+            links::clear(pid("a")?, pid("b")?)?;
+            Reply::no_content()
         }
         // 后台：申诉
         "admin_list_appeals" => {

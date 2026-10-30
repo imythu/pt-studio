@@ -18,7 +18,7 @@
 | 元数据 | 🟡 | `metadata-tmdb`、`metadata-douban`、`metadata-bangumi`、`metadata-musicbrainz` ✅；IMDb、IGDB 📐 |
 | 记账与经济 | ✅ | `accounting`、`ledger`、`bonus`、`seeding-bonus`、`promotion`、`shop`、`lottery`、`medals`、`donations`、`checkin` |
 | 规则与考核 | ✅ | `levels`、`hnr`、`ratio-policy`、`newbie-exam`、`seedbox`、`claims` |
-| 反作弊 | 🟡 | `anticheat` |
+| 反作弊 | ✅ | `anticheat` |
 | 社区 | ✅ | `comments`、`forum`、`messages`、`requests`、`reports`、`moderation`、`tickets`、`bookmarks`、`top10`、`attachments` |
 | 搜索与订阅 | ✅ | `search-meilisearch`、`rss`（含 Torznab）、`recommend` |
 | 通知 | 🟡 | `notify`：站内与邮件 ✅；Telegram / Discord、Webhook 📐 |
@@ -87,7 +87,7 @@
 ### 反作弊
 
 - 记账信号（速度、负增量、计数异常、无对端、客户端指纹，盒子来源标记）与每小时交叉校验。
-- 规则集 DSL、评分与衰减、案件工作台、复核与四眼封禁、自动处置与熔断、申诉、回测、种子视角、同 IP 对端关联（需授权 `peer.ip`）。
+- 规则集 DSL、评分与衰减、案件工作台、复核与四眼封禁、自动处置与熔断、申诉、回测、种子视角、同 IP 对端关联（需授权 `peer.ip`）、多账号关联（同网段账号簇、复核同一人 / 无关）。
 - 处置：警告、冻结流量、锁钱包、回收流量、重置 passkey、禁止下载、封禁。
 
 ### 社区
@@ -163,7 +163,7 @@
 - **搜索**：语义 / 混合搜索、多实例、同义词管理、一致性巡检。
 - **记账与经济**：日对账、月结余快照、归档、重算；魔力规则的编辑与回放；改名卡、个人促销、竞猜。
 - **规则**：等级 / H&R / 邀请规则的编辑接口与模拟评估、批量操作、盒子 ASN 自动识别、盒子接入魔力规则。
-- **反作弊**：多账号关联，详见 [anticheat 后续工作](plugins/anticheat/05-后续工作.md)。
+- **反作弊**：登录 IP 共用、邀请链、转账往来并入多账号关联的账号图，详见 [anticheat 后续工作](plugins/anticheat/05-后续工作.md)。
 - **社区**：表情、@提醒通知、合并 / 拆分主题、批量审核、通配符敏感词。
 - **通知**：Telegram / Discord 渠道、合并通知、服务端模板渲染、mailgun / SES。
 - **AI**：上传预审接入 MediaInfo 比对与疑似重复、助手的检索增强与流式输出、MCP 工具目录缓存与按 token 限流。

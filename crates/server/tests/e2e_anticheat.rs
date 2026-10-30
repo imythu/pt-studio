@@ -326,6 +326,85 @@ async fn anticheat_end_to_end() {
         scalar("SELECT count(*) FROM kernel.audit_log WHERE action = 'tracker-bridge.peer_ip_read' AND $1::bigint >= 0", 0).await >= 1
     );
 
+    // ---- 多账号关联：同网段证据 → 账号簇；复核为“无关”后不再成簇 ----
+    let r = get(&app, &admin, "/api/p/anticheat/v1/admin/account-links?days=7").await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let cluster = r.body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| {
+            c["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["id"] == json!(alice.id))
+        })
+        .unwrap()
+        .clone();
+    assert_eq!(cluster["size"], 2, "{cluster:?}");
+    assert_eq!(cluster["edges"][0]["torrent_count"], 1, "{cluster:?}");
+    assert_eq!(cluster["edges"][0]["torrent_ids"], json!([tid]));
+    let links_of = |u: u64| format!("/api/p/anticheat/v1/admin/users/{u}/account-links?days=7");
+    let r = get(&app, &admin, &links_of(carol.id)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["items"][0]["user"]["id"], json!(alice.id), "{:?}", r.body);
+    assert_eq!(r.body["cluster_size"], 2);
+    let pair = format!(
+        "/api/p/anticheat/v1/admin/account-links/{}/{}",
+        carol.id, alice.id
+    );
+    let r = call(
+        &app,
+        "PUT",
+        &pair,
+        Some(json!({ "verdict": "unrelated", "note": "同一校园网" })),
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["a"], json!(alice.id.min(carol.id)));
+    let r = call(
+        &app,
+        "PUT",
+        &pair,
+        Some(json!({ "verdict": "maybe" })),
+        &hv(&admin.headers()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{:?}", r.body);
+    let r = get(&app, &admin, "/api/p/anticheat/v1/admin/account-links?days=7").await;
+    assert!(
+        !r.body["items"].as_array().unwrap().iter().any(|c| c["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"] == json!(alice.id))),
+        "{:?}",
+        r.body
+    );
+    let r = get(&app, &admin, &links_of(alice.id)).await;
+    assert_eq!(r.body["items"][0]["verdict"], "unrelated", "{:?}", r.body);
+    assert_eq!(r.body["cluster_size"], 1);
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            &pair,
+            Some(json!({ "verdict": "same_person" })),
+            &hv(&carol.headers())
+        )
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+    let r = call(&app, "DELETE", &pair, None, &hv(&admin.headers())).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    assert_eq!(
+        scalar("SELECT count(*) FROM kernel.audit_log WHERE action LIKE 'anticheat.account_link_%' AND $1::bigint >= 0", 0).await,
+        2
+    );
+
     // ---- 后台：队列与详情 ----
     let r = get(&app, &admin, "/api/p/anticheat/v1/admin/cases").await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
