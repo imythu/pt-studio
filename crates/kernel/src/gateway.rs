@@ -60,7 +60,15 @@ pub fn router(shared: Arc<Shared>) -> Router {
             prefix: format!("/api/p/{id}"),
             routes: Arc::new(routes),
         };
-        let max_kb = usize::try_from(shared.cfg.http.max_body_kb).unwrap_or(1024);
+        // 外层上限取本插件所有路由声明的最大值；按路由的精确上限在 run_prepared 里校验
+        let max_kb = rt
+            .manifest
+            .http
+            .iter()
+            .flat_map(|h| h.routes.iter().chain(&h.root_routes))
+            .filter_map(|r| r.max_body_kb)
+            .fold(shared.cfg.http.max_body_kb, u32::max);
+        let max_kb = usize::try_from(max_kb).unwrap_or(1024);
         let r = http
             .router()
             .route_layer(middleware::from_fn_with_state(state, plugin_mw))
@@ -347,19 +355,15 @@ async fn run_prepared(st: &PluginState, p: Prepared, req: Request, next: Next) -
         _ => None,
     };
     let redis = st.shared.redis.get("main").cloned();
+    // 按路由声明的请求体上限（外层 DefaultBodyLimit 只是本插件的最大值）
+    let limit =
+        usize::try_from(route.max_body_kb.unwrap_or(st.shared.cfg.http.max_body_kb)).unwrap_or(1024) * 1024;
+    let (parts, body) = req.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, limit).await else {
+        return PluginError::new("kernel.payload_too_large", "request body too large").into_response();
+    };
     let (req, idem) = match (idem, redis) {
         (Some(key), Some(redis)) => {
-            let limit = usize::try_from(route.max_body_kb.unwrap_or(st.shared.cfg.http.max_body_kb))
-                .unwrap_or(1024)
-                * 1024;
-            let (parts, body) = req.into_parts();
-            let bytes = match axum::body::to_bytes(body, limit).await {
-                Ok(b) => b,
-                Err(_) => {
-                    return PluginError::new("kernel.payload_too_large", "request body too large")
-                        .into_response();
-                }
-            };
             let mut h = <sha2::Sha256 as sha2::Digest>::new();
             sha2::Digest::update(&mut h, parts.method.as_str().as_bytes());
             sha2::Digest::update(&mut h, parts.uri.path().as_bytes());
@@ -388,7 +392,7 @@ async fn run_prepared(st: &PluginState, p: Prepared, req: Request, next: Next) -
                 Some((redis, key)),
             )
         }
-        (_, _) => (req, None),
+        (_, _) => (Request::from_parts(parts, axum::body::Body::from(bytes)), None),
     };
     let mut req = req;
     req.extensions_mut().insert(RequestCtx(Arc::new(ctx)));
