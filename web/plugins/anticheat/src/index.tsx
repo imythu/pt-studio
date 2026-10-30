@@ -20,7 +20,7 @@ const zh: Record<string, string> = {
   'anticheat.ui.baseline_hint': '确认已复核此种子：之前的异常不再计入种子视角，之后的异常重新计数。不影响用户证据与评分。',
   'anticheat.ui.baseline_note': '备注（可选）',
   'anticheat.ui.links': '关联账号',
-  'anticheat.ui.links_hint': '同网段对端证据连成的账号簇：两个账号在同一种子的 swarm 中处于同一网段（IPv4 /24、IPv6 /48）即连一条边。标记“同一人”会给两个账号各记一条证据并计分（默认 30 分）；标记“无关”的账号对不再连边，之后也不再产生同网段证据。',
+  'anticheat.ui.links_hint': '账号簇：两个账号在同一种子的 swarm 中处于同一网段（IPv4 /24、IPv6 /48），或用同一 IP 登录 / 访问过站点（该 IP 被超过 8 个账号用过时不算），即连一条边。标记“同一人”会给两个账号各记一条证据并计分（默认 30 分）；标记“无关”的账号对不再连边，之后也不再产生同网段证据。',
   'anticheat.ui.link.members': '成员',
   'anticheat.ui.link.size': '账号数',
   'anticheat.ui.link.pairs': '账号对',
@@ -32,6 +32,12 @@ const zh: Record<string, string> = {
   'anticheat.ui.link.unreviewed': '未复核',
   'anticheat.ui.link.clear': '撤销结论',
   'anticheat.ui.link.truncated': '账号簇过大，只显示前 50 个账号与 200 个账号对。',
+  'anticheat.ui.link.login_ips': '共用登录 IP',
+  'anticheat.ui.link.source': '来源',
+  'anticheat.ui.link.source_all': '全部',
+  'anticheat.ui.link.source_swarm': '同网段做种',
+  'anticheat.ui.link.source_login': '登录 IP',
+  'anticheat.ui.link.login_ip_off': '站点未授权 user.ip，账号图暂不含共用登录 IP。在 site.toml 的 [grants.anticheat] sensitive 中加入 "user.ip" 后启用。',
   'anticheat.ui.rulesets': '规则集',
   'anticheat.ui.stats': '规则统计',
   'anticheat.ui.user': '用户',
@@ -169,7 +175,7 @@ registerMessages('en', {
   'anticheat.ui.baseline_hint': 'Mark this torrent as reviewed: earlier mismatches stop counting here and later ones are counted afresh. User evidence and scores are not affected.',
   'anticheat.ui.baseline_note': 'Note (optional)',
   'anticheat.ui.links': 'Linked accounts',
-  'anticheat.ui.links_hint': 'Account clusters built from shared-subnet evidence: two accounts are linked when they were in the same subnet (IPv4 /24, IPv6 /48) in one torrent swarm. Marking a pair as the same person adds scored evidence to both accounts (30 points by default); pairs marked unrelated are not linked and produce no further shared-subnet evidence.',
+  'anticheat.ui.links_hint': 'Account clusters: two accounts are linked when they were in the same subnet (IPv4 /24, IPv6 /48) in one torrent swarm, or used the same IP to sign in to or browse the site (IPs used by more than 8 accounts are ignored). Marking a pair as the same person adds scored evidence to both accounts (30 points by default); pairs marked unrelated are not linked and produce no further shared-subnet evidence.',
   'anticheat.ui.link.members': 'Members',
   'anticheat.ui.link.size': 'Accounts',
   'anticheat.ui.link.pairs': 'Pairs',
@@ -181,6 +187,12 @@ registerMessages('en', {
   'anticheat.ui.link.unreviewed': 'Unreviewed',
   'anticheat.ui.link.clear': 'Clear verdict',
   'anticheat.ui.link.truncated': 'Cluster too large: showing the first 50 accounts and 200 pairs.',
+  'anticheat.ui.link.login_ips': 'Shared login IPs',
+  'anticheat.ui.link.source': 'Source',
+  'anticheat.ui.link.source_all': 'All',
+  'anticheat.ui.link.source_swarm': 'Shared subnet',
+  'anticheat.ui.link.source_login': 'Login IP',
+  'anticheat.ui.link.login_ip_off': 'The site has not granted user.ip, so shared login IPs are not in the account graph. Add "user.ip" to [grants.anticheat] sensitive in site.toml to enable it.',
   'anticheat.ui.rulesets': 'Rulesets',
   'anticheat.ui.stats': 'Rule stats',
   'anticheat.ui.my_cases': 'My cases',
@@ -1156,6 +1168,7 @@ interface LinkEdge {
   torrent_count: number;
   torrent_ids: number[];
   hits: number;
+  login_ips: number;
   last_at: string | null;
   verdict: LinkVerdict | null;
   note: string | null;
@@ -1222,11 +1235,12 @@ function UserLink({ api, m }: { api: PluginApi; m: Pick<LinkMember, 'id' | 'user
   );
 }
 
-/** 账号簇：同网段证据连成的连通分量，按成员数、边上种子数排序 */
+/** 账号簇：同网段证据与共用登录 IP 连成的连通分量，按成员数、边上种子数 + 共用 IP 数排序 */
 function Links({ api }: { api: PluginApi }) {
   const [days, setDays] = useState('90');
   const [min, setMin] = useState('1');
-  const [d, , reload] = useLoad<{ items: Cluster[] }>(api, `${BASE}/admin/account-links?days=${days}&min_torrents=${min}`);
+  const [source, setSource] = useState('all');
+  const [d, , reload] = useLoad<{ items: Cluster[]; login_ip: boolean }>(api, `${BASE}/admin/account-links?days=${days}&min_torrents=${min}&source=${source}`);
   const [open, setOpen] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const c = open !== null ? d?.items[open] : undefined;
@@ -1236,8 +1250,15 @@ function Links({ api }: { api: PluginApi }) {
       <div className="fbar">
         <span className="small muted">{api.t('anticheat.ui.links_hint')}</span>
         <Segmented label={api.t('anticheat.ui.days')} value={days} onChange={setDays} options={['30', '90', '365'].map((v) => ({ value: v, label: `${v}d` }))} />
+        <Segmented
+          label={api.t('anticheat.ui.link.source')}
+          value={source}
+          onChange={setSource}
+          options={['all', 'swarm', 'login'].map((v) => ({ value: v, label: api.t(`anticheat.ui.link.source_${v}`) }))}
+        />
         <Segmented label={api.t('anticheat.ui.link.min_torrents')} value={min} onChange={setMin} options={['1', '2', '3'].map((v) => ({ value: v, label: `≥${v}` }))} />
       </div>
+      {d && !d.login_ip && source !== 'swarm' && <Note tone="warn">{api.t('anticheat.ui.link.login_ip_off')}</Note>}
       {!d ? (
         <SkeletonRows n={4} />
       ) : (
@@ -1267,6 +1288,7 @@ function Links({ api }: { api: PluginApi }) {
             { key: 'n', header: api.t('anticheat.ui.link.size'), right: true, render: (r) => <b className="num">{r.size}</b> },
             { key: 'e', header: api.t('anticheat.ui.link.pairs'), right: true, render: (r) => <span className="num">{r.edges.length}</span> },
             { key: 't', header: api.t('anticheat.ui.link.shared_torrents'), right: true, render: (r) => <span className="num">{Math.max(0, ...r.edges.map((e) => e.torrent_count))}</span> },
+            { key: 'i', header: api.t('anticheat.ui.link.login_ips'), right: true, render: (r) => <span className="num">{Math.max(0, ...r.edges.map((e) => e.login_ips))}</span> },
             { key: 'c', header: api.t('anticheat.ui.link.same_person'), right: true, render: (r) => (r.confirmed ? <Status tone="bad">{r.confirmed}</Status> : '') },
             { key: 's', header: api.t('anticheat.ui.score'), right: true, render: (r) => <span className="num">{r.max_score ?? 0}</span> },
           ]}
@@ -1295,6 +1317,7 @@ function Links({ api }: { api: PluginApi }) {
                   ),
                 },
                 { key: 't', header: api.t('anticheat.ui.link.shared_torrents'), right: true, render: (e) => <span className="num">{e.torrent_count}</span> },
+                { key: 'i', header: api.t('anticheat.ui.link.login_ips'), right: true, render: (e) => <span className="num">{e.login_ips}</span> },
                 { key: 'l', header: api.t('anticheat.ui.last_at'), render: (e) => <When at={e.last_at} /> },
                 { key: 'v', header: api.t('anticheat.ui.verdict'), render: (e) => <VerdictTag api={api} e={e} /> },
                 { key: 'x', header: '', right: true, render: (e) => <LinkActions api={api} e={e} note={note} done={reload} /> },
@@ -1307,7 +1330,7 @@ function Links({ api }: { api: PluginApi }) {
   );
 }
 
-/** 用户详情 / 案件工作台：与该用户同网段出现过的账号 */
+/** 用户详情 / 案件工作台：与该用户同网段出现过或共用过登录 IP 的账号 */
 function LinkedAccounts({ api, uid }: { api: PluginApi; uid: number }) {
   const [d, , reload] = useLoad<{ cluster_size: number; items: (LinkEdge & { user: LinkMember })[] }>(api, `${BASE}/admin/users/${uid}/account-links?days=365`);
   if (!d || d.items.length === 0) return null;
@@ -1342,6 +1365,7 @@ function LinkedAccounts({ api, uid }: { api: PluginApi; uid: number }) {
               </div>
             ),
           },
+          { key: 'i', header: api.t('anticheat.ui.link.login_ips'), right: true, render: (r) => (r.login_ips ? <span className="num">{r.login_ips}</span> : '') },
           { key: 'v', header: api.t('anticheat.ui.verdict'), render: (r) => <VerdictTag api={api} e={r} /> },
           { key: 'x', header: '', right: true, render: (r) => <LinkActions api={api} e={r} done={reload} /> },
         ]}

@@ -782,6 +782,7 @@ pub fn http(req: &Request) -> R<Reply> {
         "admin_list_account_clusters" => Reply::ok(&links::list(
             qi(req, "days").unwrap_or(90),
             qi(req, "min_torrents").unwrap_or(1),
+            req.query("source").unwrap_or("all"),
             qi(req, "limit").unwrap_or(50),
         )?),
         "admin_list_user_links" => Reply::ok(&links::of_user(pid("id")?, qi(req, "days").unwrap_or(90))?),

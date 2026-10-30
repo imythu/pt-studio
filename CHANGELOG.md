@@ -18,6 +18,7 @@
 - 客户端指纹信号（默认关闭，`[plugin.accounting.signals] client_fingerprint_check = true` 开启）：peer_id 与 User-Agent 不属同一客户端、同一 peer 中途换客户端时产生信号，反作弊按 `client_spoof` / `client_changed` 规则计分；建议先把这两条规则设为影子模式观察误判
 - 反作弊新增“种子”标签页（种子视角）：列出交叉校验发现上传明显多于下载的种子与被归因用户，复核后可确认基线重新计数
 - 反作弊多账号关联：同网段对端证据连成账号簇，后台新增“关联账号”标签页，用户详情与案件工作台显示关联账号；复核员可把账号对标记为“同一人”或“无关”（如校园网 / 公司 NAT），无关的账号对之后不再产生同网段证据；确认“同一人”会给两个账号各记一条证据并计分（默认规则 `same_person`，30 分，类别“一人多号”），撤销后作废
+- 反作弊多账号关联并入共用登录 IP：站点再授权 `[grants.anticheat] sensitive` 中的 `"user.ip"` 后，用同一 IP 登录 / 访问过站点的账号也连成账号簇（被超过 8 个账号用过的 IP 不算）；“关联账号”页可按来源筛选，并显示共用登录 IP 数；anticheat 只拿到账号对与个数，IP 不出 identity。identity 新增服务方法 `ctx.users.shared_ip_pairs`（需 `user.ip`）
 - 反作弊默认规则集自动升级：站点仍在用未改动过的内置默认规则集时，内置规则更新后会自动生成新版本并激活、重算分数；管理员自建过版本则不受影响
 - 反作弊同 IP 对端关联：tracker-bridge 新增 `ctx.tracker.peers`（读取 tracker 的在线 peer）；站点在 `[grants.anticheat] sensitive = ["peer.ip"]` 授权后，案件补全时发现与其他用户同网段（IPv4 /24、IPv6 /48）会写入证据并计分（默认规则 `shared_ip`，每条 20 分、上限 40）；IP 不落库
 - Tracker 节点状态：pt-tracker 每 10 秒上报版本、同步位置与延迟、缓存规模、announce 速率；后台新增「Tracker」页（tracker-bridge），节点落后、announce 间隔不小于节点 peer 超时或没有在线节点时提示

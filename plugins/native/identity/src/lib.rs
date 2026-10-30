@@ -308,6 +308,18 @@ impl pt_plugin_api::JsonService for Svc {
                     _ => Err(PluginError::validation("field must be email")),
                 }
             }
+            // ctx.users.shared_ip_pairs：共用登录 IP 的账号对（不含 IP）；需要 user.ip
+            "shared_ip_pairs" => {
+                if !ctx.invocation.has_scope("sensitive:user.ip") {
+                    return Err(PluginError::capability_denied("sensitive capability user.ip required"));
+                }
+                let n = |k: &str, d: i64| a.get(k).and_then(serde_json::Value::as_i64).unwrap_or(d);
+                let user = a.get("user").and_then(serde_json::Value::as_i64);
+                let pairs = risk::shared_ip_pairs(ctx, n("days", 90), n("max_users", 8), user, n("limit", 5000)).await?;
+                Ok(serde_json::json!({
+                    "items": pairs.iter().map(|(ua, ub, ips, last)| serde_json::json!({ "a": ua, "b": ub, "shared_ips": ips, "last_seen_at": last })).collect::<Vec<_>>()
+                }))
+            }
             "get" => Ok(serde_json::to_value(
                 UsersService::get(self, ctx, id("id")?).await?,
             )?),

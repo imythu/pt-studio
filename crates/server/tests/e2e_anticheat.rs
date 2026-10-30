@@ -21,7 +21,7 @@ const SECRET: &str = "e2e-anticheat-appeal-token-secret-0123456789";
 fn config(dir: &std::path::Path) -> SiteConfig {
     let mut t = common::config_text();
     t.push_str(&format!(
-        "\n[plugin.anticheat]\nappeal_token_secret = \"{SECRET}\"\n\n[grants.anticheat]\nsensitive = [\"peer.ip\"]\n\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n",
+        "\n[plugin.anticheat]\nappeal_token_secret = \"{SECRET}\"\n\n[grants.anticheat]\nsensitive = [\"peer.ip\", \"user.ip\"]\n\n[plugins]\ndir = \"{}\"\nallow_unsigned = true\n",
         dir.display()
     ));
     SiteConfig::parse(&t).unwrap()
@@ -449,6 +449,67 @@ async fn anticheat_end_to_end() {
         2
     );
     assert!(!same_rule(carol.id).await);
+    // 账号图并入共用登录 IP（获授 user.ip）：anticheat 只拿到账号对与共用 IP 个数
+    let dave = register_login(&app, "ac_dave").await;
+    let erin = register_login(&app, "ac_erin").await;
+    for u in [dave.id, erin.id] {
+        sqlx::query(
+            "INSERT INTO identity.ip_log (user_id, ip, ip_mac, source, first_seen_month)
+             VALUES ($1, '198.51.100.7', decode(repeat('ab', 32), 'hex'), 'login', date_trunc('month', now())::date)",
+        )
+        .bind(i64::try_from(u).unwrap())
+        .execute(&mut db().await)
+        .await
+        .unwrap();
+    }
+    let with = |body: &Value, u: u64| {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| {
+                c["members"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m["id"] == json!(u))
+            })
+            .cloned()
+    };
+    let r = get(
+        &app,
+        &admin,
+        "/api/p/anticheat/v1/admin/account-links?days=7&source=login",
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["login_ip"], true);
+    assert!(!r.body.to_string().contains("198.51.100"), "IP must not leak");
+    let c = with(&r.body, dave.id).expect("login-ip cluster");
+    assert_eq!(c["size"], 2, "{c:?}");
+    assert_eq!(c["edges"][0]["login_ips"], 1, "{c:?}");
+    assert_eq!(c["edges"][0]["torrent_count"], 0, "{c:?}");
+    assert!(with(&r.body, alice.id).is_none(), "{:?}", r.body);
+    let r = get(
+        &app,
+        &admin,
+        "/api/p/anticheat/v1/admin/account-links?days=7&source=swarm",
+    )
+    .await;
+    assert!(with(&r.body, dave.id).is_none(), "{:?}", r.body);
+    assert!(with(&r.body, alice.id).is_some(), "{:?}", r.body);
+    let r = get(&app, &admin, "/api/p/anticheat/v1/admin/account-links?days=7").await;
+    assert!(
+        with(&r.body, dave.id).is_some() && with(&r.body, alice.id).is_some(),
+        "{:?}",
+        r.body
+    );
+    let r = get(&app, &admin, &links_of(erin.id)).await;
+    assert_eq!(r.body["items"][0]["user"]["id"], json!(dave.id), "{:?}", r.body);
+    assert_eq!(r.body["items"][0]["login_ips"], 1);
+    assert_eq!(r.body["login_ip"], true);
+    let r = get(&app, &admin, "/api/p/anticheat/v1/admin/account-links?source=dns").await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{:?}", r.body);
 
     // ---- 后台：队列与详情 ----
     let r = get(&app, &admin, "/api/p/anticheat/v1/admin/cases").await;

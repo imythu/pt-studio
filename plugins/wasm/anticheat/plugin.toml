@@ -18,8 +18,9 @@ publishes = ["anticheat.case_opened", "anticheat.case_resolved", "anticheat.sanc
 kv = true
 sql = true
 views = ["identity.v_user_public", "accounting.v_user_daily", "accounting.v_swarm_peers", "torrent.v_torrent_public"]
-# 同 IP 对端关联（FR-ACH-041）：站点在 site.toml [grants.anticheat] sensitive = ["peer.ip"] 授权后启用
-sensitive_optional = ["peer.ip"]
+# 同 IP 对端关联（FR-ACH-041）：站点在 site.toml [grants.anticheat] sensitive = ["peer.ip"] 授权后启用；
+# 账号图并入共用登录 IP（FR-ACH-045）：再授权 "user.ip"（anticheat 只拿到账号对与共用 IP 个数，不拿 IP）
+sensitive_optional = ["peer.ip", "user.ip"]
 
 [capabilities.scopes]
 "ctx.users" = ["write:status", "write:passkey"]

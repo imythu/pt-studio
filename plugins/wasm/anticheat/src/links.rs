@@ -1,7 +1,8 @@
-//! 多账号关联：同网段对端证据（`anticheat.shared_ip_counterparty`）汇总成账号图（无向边 = 同一种子 swarm 中同网段），
+//! 多账号关联：账号图的边有两种来源——同网段对端证据（`anticheat.shared_ip_counterparty`，同一种子 swarm 中同网段）
+//! 与 identity 记录的共用登录 IP（`ctx.users.shared_ip_pairs`，站点授权 `user.ip` 后启用）；
 //! 连通分量即疑似同一人的账号簇；复核员把账号对标记为“同一人”或“无关”，“无关”的对之后不再产生同网段证据。
 //! “同一人”结论给两个账号各写一条证据 `anticheat.same_person_confirmed`（默认规则 `same_person` 计分），改判 / 撤销时标为误判。
-//! 只用证据里的用户 ID 与种子 ID，不涉及 IP。
+//! 只用用户 ID、种子 ID 与共用 IP 的个数，本插件不接触 IP 本身。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -18,12 +19,21 @@ const VERDICTS: &[&str] = &["same_person", "unrelated"];
 pub const SAME_PERSON_KIND: &str = "anticheat.same_person_confirmed";
 const MAX_MEMBERS: usize = 50;
 const MAX_EDGES: usize = 200;
+const SOURCES: &[&str] = &["all", "swarm", "login"];
+/// 被超过这么多账号用过的登录 IP（公司 / 校园 NAT、代理）不连边
+const LOGIN_IP_MAX_USERS: i64 = 8;
+
+/// (user_a, user_b, 共用登录 IP 数, 最近共用时间 ms)
+type LoginPair = (i64, i64, i64, i64);
+type Graph = BTreeMap<(i64, i64), Edge>;
 
 #[derive(Debug, Default, Clone)]
 pub struct Edge {
     pub torrents: BTreeSet<i64>,
     pub hits: i64,
     pub last_at: i64,
+    /// 共用登录 IP 个数
+    pub login_ips: i64,
     pub verdict: Option<String>,
     pub note: Option<String>,
     pub reviewed_at: Option<i64>,
@@ -33,35 +43,69 @@ fn pair(a: i64, b: i64) -> (i64, i64) {
     if a < b { (a, b) } else { (b, a) }
 }
 
-/// 最近 `days` 天的边（排除误判证据）+ 复核过的账号对；`focus` 时只取与该用户相连的边
-fn edges(days: i64, focus: Option<i64>) -> R<BTreeMap<(i64, i64), Edge>> {
+/// 边是否连通（“无关”不连；确认同一人总连；否则同网段种子数达到门槛或共用过登录 IP）
+fn linked(e: &Edge, min_torrents: usize) -> bool {
+    match e.verdict.as_deref() {
+        Some("unrelated") => false,
+        Some("same_person") => true,
+        _ => e.torrents.len() >= min_torrents.max(1) || e.login_ips > 0,
+    }
+}
+
+/// `ctx.users.shared_ip_pairs`：未授权 `user.ip` 或 identity 不可用时 None
+fn login_pairs(days: i64, focus: Option<i64>) -> R<Option<Vec<LoginPair>>> {
+    let v = match db::call(
+        "ctx.users",
+        "shared_ip_pairs",
+        &json!({ "days": days, "user": focus, "max_users": LOGIN_IP_MAX_USERS, "limit": 20000 }),
+    ) {
+        Ok(v) => v,
+        Err(e)
+            if e.code == "kernel.capability_denied" || db::retryable(&e) || e.code == "kernel.not_found" =>
+        {
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    Ok(Some(
+        v["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                Some((
+                    p["a"].as_i64()?,
+                    p["b"].as_i64()?,
+                    p["shared_ips"].as_i64()?,
+                    p["last_seen_at"].as_i64().unwrap_or(0),
+                ))
+            })
+            .collect(),
+    ))
+}
+
+/// 最近 `days` 天的边（排除误判证据）+ 复核过的账号对；`focus` 时只取与该用户相连的边。
+/// `source`：all / swarm（只用同网段证据）/ login（只用共用登录 IP）。返回的布尔值表示登录 IP 来源是否可用
+fn edges(days: i64, focus: Option<i64>, source: &str) -> R<(Graph, bool)> {
     if !(1..=365).contains(&days) {
         return Err(db::validation("days must be 1..=365"));
     }
-    let rows = q(
-        &format!(
-            "SELECT e.user_id, e.torrent_id, e.details->'counterparty_user_ids', {} FROM evidence e
-              WHERE e.kind = 'anticheat.shared_ip_counterparty'
-                AND e.verdict IS DISTINCT FROM 'false_positive'
-                AND e.occurred_at > now() - make_interval(days => $1::int)
-                AND ($2::bigint IS NULL OR e.user_id = $2 OR e.details->'counterparty_user_ids' @> jsonb_build_array($2::bigint))
-              ORDER BY e.occurred_at DESC LIMIT 20000",
-            ms("e.occurred_at")
-        ),
-        &[i(days), db::oi(focus)],
-    )?;
-    let mut out: BTreeMap<(i64, i64), Edge> = BTreeMap::new();
-    for r in &rows {
-        let (u, tid, at) = (r.n(0), r.on(1), r.n(3));
-        for o in r.v(2).as_array().into_iter().flatten().filter_map(Value::as_i64) {
-            if o == u || focus.is_some_and(|f| f != u && f != o) {
-                continue;
-            }
-            let e = out.entry(pair(u, o)).or_default();
-            e.torrents.extend(tid);
-            e.hits += 1;
-            e.last_at = e.last_at.max(at);
-        }
+    if !SOURCES.contains(&source) {
+        return Err(db::validation("source must be all, swarm or login"));
+    }
+    let mut out = Graph::new();
+    if source != "login" {
+        swarm_edges(days, focus, &mut out)?;
+    }
+    let login = if source == "swarm" {
+        None
+    } else {
+        login_pairs(days, focus)?
+    };
+    for &(a, b, ips, at) in login.iter().flatten() {
+        let e = out.entry(pair(a, b)).or_default();
+        e.login_ips = ips;
+        e.last_at = e.last_at.max(at);
     }
     let reviewed = q(
         &format!(
@@ -76,10 +120,38 @@ fn edges(days: i64, focus: Option<i64>) -> R<BTreeMap<(i64, i64), Edge>> {
         e.note = r.os(3);
         e.reviewed_at = r.on(4);
     }
-    Ok(out)
+    Ok((out, login.is_some()))
 }
 
-/// 连通分量（“无关”的边不连通；`min_torrents` 以下且未确认同一人的边忽略）；簇内成员升序，簇按成员数、边上种子数降序
+fn swarm_edges(days: i64, focus: Option<i64>, out: &mut Graph) -> R<()> {
+    let rows = q(
+        &format!(
+            "SELECT e.user_id, e.torrent_id, e.details->'counterparty_user_ids', {} FROM evidence e
+              WHERE e.kind = 'anticheat.shared_ip_counterparty'
+                AND e.verdict IS DISTINCT FROM 'false_positive'
+                AND e.occurred_at > now() - make_interval(days => $1::int)
+                AND ($2::bigint IS NULL OR e.user_id = $2 OR e.details->'counterparty_user_ids' @> jsonb_build_array($2::bigint))
+              ORDER BY e.occurred_at DESC LIMIT 20000",
+            ms("e.occurred_at")
+        ),
+        &[i(days), db::oi(focus)],
+    )?;
+    for r in &rows {
+        let (u, tid, at) = (r.n(0), r.on(1), r.n(3));
+        for o in r.v(2).as_array().into_iter().flatten().filter_map(Value::as_i64) {
+            if o == u || focus.is_some_and(|f| f != u && f != o) {
+                continue;
+            }
+            let e = out.entry(pair(u, o)).or_default();
+            e.torrents.extend(tid);
+            e.hits += 1;
+            e.last_at = e.last_at.max(at);
+        }
+    }
+    Ok(())
+}
+
+/// 连通分量（见 `linked`）；簇内成员升序，簇按成员数、边上种子数 + 共用登录 IP 数降序
 pub fn clusters(edges: &BTreeMap<(i64, i64), Edge>, min_torrents: usize) -> Vec<Vec<i64>> {
     fn find(p: &mut HashMap<i64, i64>, x: i64) -> i64 {
         let up = *p.entry(x).or_insert(x);
@@ -93,17 +165,15 @@ pub fn clusters(edges: &BTreeMap<(i64, i64), Edge>, min_torrents: usize) -> Vec<
     let mut parent: HashMap<i64, i64> = HashMap::new();
     let mut weight: HashMap<(i64, i64), usize> = HashMap::new();
     for (&(a, b), e) in edges {
-        let linked = match e.verdict.as_deref() {
-            Some("unrelated") => false,
-            Some("same_person") => true,
-            _ => e.torrents.len() >= min_torrents.max(1),
-        };
-        if linked {
+        if linked(e, min_torrents) {
             let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
             if ra != rb {
                 parent.insert(ra.max(rb), ra.min(rb));
             }
-            weight.insert((a, b), e.torrents.len());
+            weight.insert(
+                (a, b),
+                e.torrents.len() + usize::try_from(e.login_ips).unwrap_or(0),
+            );
         }
     }
     let mut groups: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
@@ -152,6 +222,7 @@ fn edge_json(a: i64, b: i64, e: &Edge) -> Value {
         "torrent_count": e.torrents.len(),
         "torrent_ids": e.torrents.iter().take(20).collect::<Vec<_>>(),
         "hits": e.hits,
+        "login_ips": e.login_ips,
         "last_at": (e.last_at > 0).then(|| db::iso(e.last_at)),
         "verdict": e.verdict,
         "note": e.note,
@@ -160,8 +231,8 @@ fn edge_json(a: i64, b: i64, e: &Edge) -> Value {
 }
 
 /// 后台“关联账号”标签页：账号簇列表
-pub fn list(days: i64, min_torrents: i64, limit: i64) -> R<Value> {
-    let all = edges(days, None)?;
+pub fn list(days: i64, min_torrents: i64, source: &str, limit: i64) -> R<Value> {
+    let (all, login) = edges(days, None, source)?;
     let min = usize::try_from(min_torrents.clamp(1, 100)).unwrap_or(1);
     let mut groups = clusters(&all, min);
     groups.truncate(usize::try_from(limit.clamp(1, 100)).unwrap_or(50));
@@ -178,10 +249,7 @@ pub fn list(days: i64, min_torrents: i64, limit: i64) -> R<Value> {
             let es: Vec<Value> = all
                 .iter()
                 .filter(|((a, b), e)| {
-                    e.verdict.as_deref() != Some("unrelated")
-                        && (e.verdict.is_some() || e.torrents.len() >= min)
-                        && g.binary_search(a).is_ok()
-                        && g.binary_search(b).is_ok()
+                    linked(e, min) && g.binary_search(a).is_ok() && g.binary_search(b).is_ok()
                 })
                 .map(|((a, b), e)| edge_json(*a, *b, e))
                 .collect();
@@ -195,12 +263,12 @@ pub fn list(days: i64, min_torrents: i64, limit: i64) -> R<Value> {
             })
         })
         .collect();
-    Ok(json!({ "days": days, "min_torrents": min, "items": items }))
+    Ok(json!({ "days": days, "min_torrents": min, "source": source, "login_ip": login, "items": items }))
 }
 
 /// 用户详情 / 案件工作台：与该用户直接相连的账号（含复核为“无关”的，便于撤销）
 pub fn of_user(user: i64, days: i64) -> R<Value> {
-    let es = edges(days, Some(user))?;
+    let (es, login) = edges(days, Some(user), "all")?;
     let mut list: Vec<(i64, &Edge)> = es
         .iter()
         .map(|((a, b), e)| (if *a == user { *b } else { *a }, e))
@@ -209,14 +277,14 @@ pub fn of_user(user: i64, days: i64) -> R<Value> {
         (
             e.verdict.as_deref() == Some("unrelated"),
             e.verdict.as_deref() != Some("same_person"),
-            std::cmp::Reverse(e.torrents.len()),
+            std::cmp::Reverse(e.torrents.len() + usize::try_from(e.login_ips).unwrap_or(0)),
             *o,
         )
     });
     list.truncate(100);
     let ids: Vec<i64> = list.iter().map(|(o, _)| *o).collect();
     let m = members_json(&ids)?;
-    let cluster = clusters(&edges(days, None)?, 1)
+    let cluster = clusters(&edges(days, None, "all")?.0, 1)
         .into_iter()
         .find(|g| g.binary_search(&user).is_ok())
         .map_or(1, |g| g.len());
@@ -224,6 +292,7 @@ pub fn of_user(user: i64, days: i64) -> R<Value> {
         "user_id": user,
         "days": days,
         "cluster_size": cluster,
+        "login_ip": login,
         "items": list.iter().map(|(o, e)| {
             let mut v = edge_json(user.min(*o), user.max(*o), e);
             v["user"] = m[o].clone();
@@ -346,10 +415,21 @@ mod tests {
         g.insert((4, 5), e(&[12], Some("unrelated")));
         g.insert((6, 7), e(&[], Some("same_person")));
         g.insert((8, 9), e(&[13], None));
+        // 只共用过登录 IP：任何种子门槛下都连通
+        g.insert(
+            (10, 11),
+            Edge {
+                login_ips: 1,
+                ..Edge::default()
+            },
+        );
         // 同样两人的簇按边上种子数排序
-        assert_eq!(clusters(&g, 1), vec![vec![1, 2, 3], vec![8, 9], vec![6, 7]]);
-        // 门槛 2 个种子：只剩 1–2 与人工确认的 6–7
-        assert_eq!(clusters(&g, 2), vec![vec![1, 2], vec![6, 7]]);
+        assert_eq!(
+            clusters(&g, 1),
+            vec![vec![1, 2, 3], vec![8, 9], vec![10, 11], vec![6, 7]]
+        );
+        // 门槛 2 个种子：只剩 1–2、共用登录 IP 的 10–11 与人工确认的 6–7
+        assert_eq!(clusters(&g, 2), vec![vec![1, 2], vec![10, 11], vec![6, 7]]);
         assert!(clusters(&BTreeMap::new(), 1).is_empty());
     }
 }

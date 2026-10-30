@@ -441,6 +441,42 @@ pub async fn shared_ip_users(ctx: &Ctx, uid: i64) -> PResult<Vec<serde_json::Val
         .collect())
 }
 
+/// ctx.users.shared_ip_pairs（anticheat 账号图）：最近 `days` 天内登录 / 会话 IP 相同的账号对，只返回用户 ID 与计数，不含 IP。
+/// 同时被超过 `max_users` 个账号用过的 IP（公司 / 校园 NAT、代理）不算。返回 (a, b, 共用 IP 数, 最近共用时间 ms)，a < b
+pub async fn shared_ip_pairs(
+    ctx: &Ctx,
+    days: i64,
+    max_users: i64,
+    user: Option<i64>,
+    limit: i64,
+) -> PResult<Vec<(i64, i64, i64, i64)>> {
+    let mut conn = ctx.sql.conn().await?;
+    let rows = sqlx::query(
+        "WITH recent AS (
+              SELECT l.user_id, l.ip_mac, max(l.last_seen_at) AS seen
+                FROM ip_log l JOIN users u ON u.id = l.user_id AND u.deleted_at IS NULL
+               WHERE l.last_seen_at > now() - make_interval(days => $1::int)
+               GROUP BY l.user_id, l.ip_mac),
+              shared AS (SELECT ip_mac FROM recent GROUP BY ip_mac HAVING count(*) BETWEEN 2 AND $2)
+         SELECT a.user_id, b.user_id, count(*)::bigint, (extract(epoch FROM max(least(a.seen, b.seen))) * 1000)::bigint
+           FROM recent a JOIN recent b ON b.ip_mac = a.ip_mac AND b.user_id > a.user_id
+          WHERE a.ip_mac IN (SELECT ip_mac FROM shared)
+            AND ($3::bigint IS NULL OR a.user_id = $3 OR b.user_id = $3)
+          GROUP BY a.user_id, b.user_id
+          ORDER BY 3 DESC, 4 DESC LIMIT $4",
+    )
+    .bind(i32::try_from(days.clamp(1, 365)).unwrap_or(90))
+    .bind(max_users.clamp(2, 100))
+    .bind(user)
+    .bind(limit.clamp(1, 20_000))
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3)))
+        .collect())
+}
+
 /// cron `ip_retention`：截断旧 IP、删除过期记录（每批提交，可重入）
 pub async fn retention(ctx: &Ctx) -> PResult<()> {
     let p = Policy::load(ctx).await;
