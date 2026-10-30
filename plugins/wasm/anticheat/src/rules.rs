@@ -1529,21 +1529,26 @@ mod tests {
             false,
         );
         assert!(rec.score > s.score);
-        // shadow 规则只进影子分
-        let sip = compute(
-            &rs,
-            &[ev(
-                9,
-                "anticheat.shared_ip_counterparty",
-                Sev::Medium,
-                3,
-                json!({}),
-                0.0,
-            )],
-            &ctx,
-            NOW,
-            false,
-        );
+        // 同网段对端：默认计分（20 分，类别 collusion）；设为 shadow 时只进影子分
+        let sip_ev = [ev(
+            9,
+            "anticheat.shared_ip_counterparty",
+            Sev::Medium,
+            3,
+            json!({}),
+            0.0,
+        )];
+        let sip = compute(&rs, &sip_ev, &ctx, NOW, false);
+        assert_eq!(sip.score, 20);
+        assert_eq!(sip.tags, vec!["collusion".to_owned()]);
+        let mut d = default_ruleset();
+        for r in d["rules"].as_array_mut().unwrap() {
+            if r["id"] == "shared_ip" {
+                r["mode"] = json!("shadow");
+            }
+        }
+        let shadow = parse(&d, false).unwrap();
+        let sip = compute(&shadow, &sip_ev, &ctx, NOW, false);
         assert_eq!((sip.score, sip.shadow_score), (0, 20));
         assert_eq!(sip.shadow_hits, vec!["shared_ip".to_owned()]);
         // 复核确认同一人：30 分（不按严重度放大），半衰期 90 天，类别 multi_account

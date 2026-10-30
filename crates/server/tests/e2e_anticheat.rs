@@ -293,7 +293,7 @@ async fn anticheat_end_to_end() {
         1
     );
 
-    // 案件补全：swarm 快照来自 ctx.tracker（不含 IP）；获授 peer.ip → 同网段对端证据（影子规则，不计分）
+    // 案件补全：swarm 快照来自 ctx.tracker（不含 IP）；获授 peer.ip → 同网段对端证据（规则 shared_ip 计分）
     wait_for("shared ip evidence", || async {
         scalar("SELECT count(*) FROM anticheat.evidence WHERE user_id = $1 AND kind = 'anticheat.shared_ip_counterparty'", alice.id).await == 1
     })

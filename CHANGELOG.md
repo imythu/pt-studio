@@ -19,7 +19,7 @@
 - 反作弊新增“种子”标签页（种子视角）：列出交叉校验发现上传明显多于下载的种子与被归因用户，复核后可确认基线重新计数
 - 反作弊多账号关联：同网段对端证据连成账号簇，后台新增“关联账号”标签页，用户详情与案件工作台显示关联账号；复核员可把账号对标记为“同一人”或“无关”（如校园网 / 公司 NAT），无关的账号对之后不再产生同网段证据；确认“同一人”会给两个账号各记一条证据并计分（默认规则 `same_person`，30 分，类别“一人多号”），撤销后作废
 - 反作弊默认规则集自动升级：站点仍在用未改动过的内置默认规则集时，内置规则更新后会自动生成新版本并激活、重算分数；管理员自建过版本则不受影响
-- 反作弊同 IP 对端关联：tracker-bridge 新增 `ctx.tracker.peers`（读取 tracker 的在线 peer）；站点在 `[grants.anticheat] sensitive = ["peer.ip"]` 授权后，案件补全时发现与其他用户同网段（IPv4 /24、IPv6 /48）会写入证据（默认影子规则，不计分）；IP 不落库
+- 反作弊同 IP 对端关联：tracker-bridge 新增 `ctx.tracker.peers`（读取 tracker 的在线 peer）；站点在 `[grants.anticheat] sensitive = ["peer.ip"]` 授权后，案件补全时发现与其他用户同网段（IPv4 /24、IPv6 /48）会写入证据并计分（默认规则 `shared_ip`，每条 20 分、上限 40）；IP 不落库
 - Tracker 节点状态：pt-tracker 每 10 秒上报版本、同步位置与延迟、缓存规模、announce 速率；后台新增「Tracker」页（tracker-bridge），节点落后、announce 间隔不小于节点 peer 超时或没有在线节点时提示
 - Tracker 客户端规则：后台「Tracker → 客户端规则」按顺序编辑放行 / 拒绝规则（peer_id 前缀或正则，可限最低 / 最高版本；User-Agent 前缀或正则），默认动作可选，内置 qBittorrent、Transmission、Deluge、rTorrent、迅雷等预设，可对未保存的草稿测试任意 peer_id / UA；保存后 1 秒内各 tracker 节点生效。原设置里的客户端白名单在升级后自动迁移为规则
 - 被拒客户端统计：pt-tracker 记录因规则被拒的客户端（peer_id 前缀 + UA），后台按日排行（保留 8 天），可一键生成放行规则
