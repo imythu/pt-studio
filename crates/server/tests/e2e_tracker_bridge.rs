@@ -553,3 +553,80 @@ async fn tracker_bridge_end_to_end() {
     assert_eq!(res.status, 422);
     kernel.shutdown().await;
 }
+
+/// 同一 info hash 删除后重新发布：旧记录（已删除）不能动新记录的 `trk:t:<hash>`，否则全量对账每轮都向 tracker 广播
+/// 一次删除，乱序投递时该种子会一直 “torrent not registered” 到下一轮对账。
+#[tokio::test]
+async fn deleted_record_does_not_touch_republished_hash() {
+    let _guard = common::LOCK.lock().await;
+    reset().await;
+    let kernel = Kernel::start(common::config(), pt_server::native_plugins())
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let app = kernel.router();
+    let mut r = redis().await;
+    let alice = register_login(&app, "tb_repub").await;
+    let admin = register_login(&app, "tb_repub_admin").await;
+    common::grant_role(admin.id, "admin").await;
+    let delete = async |tid: i64| {
+        let path = format!("/api/p/torrent/v1/admin/torrents/{tid}?reason=dupe");
+        let res = call(&app, "DELETE", &path, None, &hv(&admin.headers())).await;
+        assert!(res.status.is_success(), "{:?}", res.body);
+    };
+
+    let old = upload(&app, &alice, "Bridge.Repub", &[("a.bin", 1 << 20)]).await;
+    let mut db = PgConnection::connect(&env(
+        "PT_TEST_SUPERUSER_URL",
+        "postgres://postgres@127.0.0.1:55432/pt_test",
+    ))
+    .await
+    .unwrap();
+    let ih: Vec<u8> = sqlx::query_scalar("SELECT info_hash_v1 FROM torrent.torrents WHERE id = $1")
+        .bind(old)
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    let hx = hex::encode(&ih);
+    let key = format!("trk:t:{hx}");
+    wait_hash(&mut r, &key, |h| h.get("tid") == Some(&old.to_string())).await;
+    delete(old).await;
+    wait_hash(&mut r, &key, HashMap::is_empty).await;
+
+    let new = upload(&app, &alice, "Bridge.Repub", &[("a.bin", 1 << 20)]).await;
+    assert_ne!(old, new);
+    wait_hash(&mut r, &key, |h| h.get("tid") == Some(&new.to_string())).await;
+
+    // 全量对账会先处理 id 更小的已删除记录：变更流中这个 hash 不能出现 delete，键一直属于新记录
+    let before: Vec<(String, Vec<(String, String)>)> = redis::cmd("XREVRANGE")
+        .arg("trk:sync")
+        .arg("+")
+        .arg("-")
+        .arg("COUNT")
+        .arg(1)
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    kernel
+        .run_job_now("tracker-bridge", "resync", json!({}))
+        .await
+        .unwrap();
+    let after: Vec<(String, Vec<(String, String)>)> = redis::cmd("XRANGE")
+        .arg("trk:sync")
+        .arg(format!("({}", before[0].0))
+        .arg("+")
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    let ops: Vec<&str> = after
+        .iter()
+        .filter(|(_, f)| f.contains(&("key".into(), hx.clone())))
+        .filter_map(|(_, f)| f.iter().find(|(k, _)| k == "op").map(|(_, v)| v.as_str()))
+        .collect();
+    assert_eq!(ops, ["upsert"], "resync must only upsert the live owner");
+    assert_eq!(hash(&mut r, &key).await["tid"], new.to_string());
+
+    // 删除键的所有者时才真正删除
+    delete(new).await;
+    wait_hash(&mut r, &key, HashMap::is_empty).await;
+    kernel.shutdown().await;
+}

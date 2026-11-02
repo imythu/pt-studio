@@ -74,6 +74,16 @@ redis.call('XADD', KEYS[2], 'MAXLEN', '~', '1000000', '*', 'kind', ARGV[1], 'key
 return ver
 ";
 
+/// 删除快照，但只在键仍属于这条记录时（ARGV[3] 字段等于 ARGV[4]）：同一 hash 删除后可以重新发布，
+/// 旧记录不能动新记录的键
+const DEL_OWNED: &str = r"
+if redis.call('HGET', KEYS[1], ARGV[3]) ~= ARGV[4] then return 0 end
+local ver = redis.call('INCR', KEYS[3])
+redis.call('DEL', KEYS[1])
+redis.call('XADD', KEYS[2], 'MAXLEN', '~', '1000000', '*', 'kind', ARGV[1], 'key', ARGV[2], 'op', 'delete', 'ver', ver)
+return ver
+";
+
 /// 写 JSON 快照（STRING）并追加变更流
 const PUT_JSON: &str = r"
 local ver = redis.call('INCR', KEYS[3])
@@ -199,7 +209,7 @@ async fn sync_torrent(ctx: &Ctx, tid: i64) -> PResult<()> {
     for (h, acct) in torrent_hashes(v1.as_deref(), v2.as_deref()) {
         let key = format!("trk:t:{h}");
         if deleted {
-            eval(ctx, DEL, &key, "t", &h, &[]).await?;
+            eval(ctx, DEL_OWNED, &key, "t", &h, &[("tid", tid.to_string())]).await?;
         } else {
             let st = u8::from(status != "approved");
             eval(
